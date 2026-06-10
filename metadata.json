@@ -1,0 +1,6 @@
+{
+  "name": "PanoRef",
+  "description": "A local-first web app for using 360/180 equirectangular panoramas as AI video set-reference sources.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
