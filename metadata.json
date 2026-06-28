@@ -1,6 +1,6 @@
 {
-  "name": "PanoRef",
-  "description": "A local-first web app for using 360/180 equirectangular panoramas as AI video set-reference sources.",
+  "name": "Continuity Stage",
+  "description": "A local-first AI-video location continuity tool for graybox sets, 360 panorama references, synced shots, and AI-ready exports.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

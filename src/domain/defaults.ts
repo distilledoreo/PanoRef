@@ -1,0 +1,256 @@
+import {
+  CameraData,
+  Landmark,
+  LocationProject,
+  PanoCropSettings,
+  PanoReference,
+  ProjectAsset,
+  SceneObject,
+  SceneObjectType,
+  Shot,
+  ShotExportSettings,
+  Transform,
+  Vec3,
+} from './types';
+import { createId } from '../utils/ids';
+
+const nowIso = () => new Date().toISOString();
+
+const primitiveDefaults: Record<SceneObjectType, { dimensions: Vec3; category: SceneObject['category'] }> = {
+  floor: { dimensions: [12, 0.08, 12], category: 'architecture' },
+  wall: { dimensions: [6, 3, 0.18], category: 'architecture' },
+  box: { dimensions: [1.4, 1.4, 1.4], category: 'architecture' },
+  arch: { dimensions: [3, 3.4, 0.35], category: 'architecture' },
+  doorway: { dimensions: [2, 2.8, 0.25], category: 'architecture' },
+  column: { dimensions: [0.6, 3, 0.6], category: 'architecture' },
+  stairs: { dimensions: [2.8, 1.2, 2.4], category: 'architecture' },
+  tree_blob: { dimensions: [1.8, 3.2, 1.8], category: 'environment' },
+  terrain_mass: { dimensions: [3.5, 0.8, 2.4], category: 'environment' },
+  background_card: { dimensions: [8, 4, 0.08], category: 'environment' },
+  human_dummy: { dimensions: [0.55, 1.75, 0.55], category: 'helper' },
+  sun_marker: { dimensions: [0.8, 0.8, 0.8], category: 'helper' },
+};
+
+export const defaultShotExportSettings: ShotExportSettings = {
+  width: 1920,
+  height: 1080,
+  includeViewport: true,
+  includeContinuityControlView: true,
+  includeAiResultFrame: true,
+  includePanoCrop: true,
+  includeFullPano: true,
+  includeGrayboxPano: true,
+  includeMetadata: true,
+  includePrompt: true,
+};
+
+export function createTransform(position: Vec3 = [0, 0, 0]): Transform {
+  return {
+    position,
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+  };
+}
+
+export function createSceneObject(type: SceneObjectType, index = 1, position?: Vec3): SceneObject {
+  const defaults = primitiveDefaults[type];
+  const object: SceneObject = {
+    id: createId('obj'),
+    name: `${objectDisplayName(type)} ${index}`,
+    type,
+    transform: createTransform(position ?? defaultPositionForType(type, index)),
+    dimensions: defaults.dimensions,
+    category: defaults.category,
+    locked: false,
+    visible: true,
+  };
+
+  if (type === 'wall') object.transform.position = [0, 1.5, 5];
+  if (type === 'background_card') object.transform.position = [0, 2, 6.5];
+  if (type === 'sun_marker') object.transform.position = [3.5, 5, -2.5];
+  if (type === 'human_dummy') object.transform.position = [-1.25, 0.875, 0.9];
+  return object;
+}
+
+export function objectDisplayName(type: SceneObjectType): string {
+  return type
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function defaultPositionForType(type: SceneObjectType, index: number): Vec3 {
+  if (type === 'floor') return [0, 0, 0];
+  const column = (index % 5) - 2;
+  const row = Math.floor(index / 5);
+  return [column * 1.6, 0.7, row * 1.4 - 1.4];
+}
+
+export function createLandmark(index: number, position: Vec3 = [0, 1.2, 0]): Landmark {
+  return {
+    id: createId('landmark'),
+    name: `landmark_${index}`,
+    displayName: `Landmark ${index}`,
+    position,
+    description: '',
+    tags: [],
+    promptCritical: true,
+    visible: true,
+  };
+}
+
+export function createCameraData(position: Vec3, target: Vec3, fovDegrees = 55): CameraData {
+  return {
+    position,
+    target,
+    fovDegrees,
+    aspectRatio: 16 / 9,
+    near: 0.1,
+    far: 100,
+  };
+}
+
+export function createShot(params: {
+  index: number;
+  camera: CameraData;
+  linkedPanoId?: string;
+  panoCrop?: PanoCropSettings;
+}): Shot {
+  const shotNumber = String(params.index).padStart(3, '0');
+  const now = nowIso();
+  return {
+    id: createId('shot'),
+    shotNumber,
+    name: `Shot ${shotNumber}`,
+    description: '',
+    camera: params.camera,
+    linkedPanoId: params.linkedPanoId,
+    panoCrop: params.panoCrop,
+    landmarkIds: [],
+    exportSettings: { ...defaultShotExportSettings },
+    promptOverrides: {},
+    status: 'planned',
+    assets: {},
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function createPanoAsset(params: {
+  name: string;
+  uri: string;
+  width: number;
+  height: number;
+  metadata?: Record<string, unknown>;
+}): ProjectAsset {
+  return {
+    id: createId('asset'),
+    type: 'image',
+    name: params.name,
+    uri: params.uri,
+    mimeType: 'image/png',
+    width: params.width,
+    height: params.height,
+    createdAt: nowIso(),
+    metadata: params.metadata,
+  };
+}
+
+export function createPanoReference(params: {
+  name: string;
+  assetId: string;
+  type: PanoReference['type'];
+  origin: Vec3;
+  rotation?: Vec3;
+  width: number;
+  height: number;
+  isCanonical?: boolean;
+  sourcePanoId?: string;
+  notes?: string;
+}): PanoReference {
+  return {
+    id: createId('pano'),
+    name: params.name,
+    imageAssetId: params.assetId,
+    type: params.type,
+    projection: 'equirectangular',
+    origin: params.origin,
+    rotation: params.rotation ?? [0, 0, 0],
+    width: params.width,
+    height: params.height,
+    isCanonical: params.isCanonical ?? false,
+    sourcePanoId: params.sourcePanoId,
+    notes: params.notes,
+    createdAt: nowIso(),
+  };
+}
+
+export function createDefaultProject(): LocationProject {
+  const now = nowIso();
+  const starterObjects = [
+    createSceneObject('floor', 1),
+    createSceneObject('wall', 1),
+    createSceneObject('arch', 1, [0, 1.7, 4.95]),
+    createSceneObject('column', 1, [-3.4, 1.5, 3.8]),
+    createSceneObject('column', 2, [3.4, 1.5, 3.8]),
+    createSceneObject('wall', 2),
+    createSceneObject('wall', 3),
+    createSceneObject('human_dummy', 1),
+    createSceneObject('sun_marker', 1),
+  ];
+
+  starterObjects[1].name = 'Main Temple Wall';
+  starterObjects[1].dimensions = [5.4, 2.8, 0.2];
+  starterObjects[2].name = 'Main Temple Gate';
+  starterObjects[2].dimensions = [3.2, 3.2, 0.38];
+  starterObjects[5].name = 'Left Courtyard Wall';
+  starterObjects[5].dimensions = [3.2, 2.3, 0.18];
+  starterObjects[5].transform.position = [-5.4, 1.15, 2.4];
+  starterObjects[5].transform.rotation = [0, 36, 0];
+  starterObjects[6].name = 'Right Courtyard Wall';
+  starterObjects[6].dimensions = [3.2, 2.3, 0.18];
+  starterObjects[6].transform.position = [5.4, 1.15, 2.4];
+  starterObjects[6].transform.rotation = [0, -36, 0];
+  starterObjects[7].name = 'Man Facing Camera';
+  starterObjects[7].transform.position = [-1.2, 0.875, 0.85];
+
+  return {
+    schemaVersion: '0.1',
+    id: createId('project'),
+    name: 'Untitled Location',
+    description: '',
+    units: 'meters',
+    createdAt: now,
+    updatedAt: now,
+    scene: {
+      worldUp: 'Y',
+      objects: starterObjects,
+      panoOrigin: [0, 1.6, 0],
+      panoRotation: [0, 0, 0],
+    },
+    panoRefs: [],
+    landmarks: [
+      {
+        ...createLandmark(1, [0, 1.8, 4.95]),
+        name: 'main_temple_gate',
+        displayName: 'Main Temple Gate',
+        description: 'Central architectural anchor visible straight ahead in the wide shot.',
+      },
+      {
+        ...createLandmark(2, [-1.2, 1.1, 0.85]),
+        name: 'man_facing_camera',
+        displayName: 'Man Facing Camera',
+        description: 'Foreground human scale figure that should face the camera.',
+      },
+    ],
+    shots: [],
+    assets: { assets: {} },
+    settings: {
+      defaultShotWidth: 1920,
+      defaultShotHeight: 1080,
+      defaultShotFovDegrees: 55,
+      panoGoodMatchMeters: 1.5,
+      panoModerateMatchMeters: 4,
+    },
+  };
+}

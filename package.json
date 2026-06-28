@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "continuity-stage",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "goal:smoke": "node scripts/goal-workflow-smoke.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -17,6 +19,7 @@
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
@@ -36,6 +39,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
+    "vitest": "^3.2.4",
     "vite": "^6.2.3"
   }
 }
