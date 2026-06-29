@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Move3D, Plus, Trash2 } from 'lucide-react';
 import { CameraData, ShotStatus } from '../../domain/types';
 import { downloadDataUrl } from '../../engine/projectIO';
@@ -33,6 +33,7 @@ export function ShotsWorkspace() {
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
   const linkedAsset = linkedPano ? project.assets.assets[linkedPano.imageAssetId] : undefined;
+  const draftCameraRef = useRef<CameraData | undefined>();
   const [framePreviewUrl, setFramePreviewUrl] = useState<string | undefined>();
   const [isRenderingFrame, setIsRenderingFrame] = useState(false);
   const [isExportingFrame, setIsExportingFrame] = useState(false);
@@ -55,6 +56,28 @@ export function ShotsWorkspace() {
   }, [exportFrameFileName, project, selectedShot, updateShot]);
 
   useEffect(() => {
+    if (!selectedShot || !shotCameraFlying) return;
+    draftCameraRef.current = selectedShot.camera;
+    setFramePreviewUrl(undefined);
+  }, [selectedShot?.id, selectedShot?.camera, shotCameraFlying]);
+
+  const framePreviewKey = useMemo(() => {
+    if (!selectedShot) return '';
+    return JSON.stringify({
+      scene: project.scene,
+      camera: selectedShot.camera,
+      width: selectedShot.exportSettings.width,
+      height: selectedShot.exportSettings.height,
+    });
+  }, [
+    project.scene,
+    selectedShot?.id,
+    selectedShot?.camera,
+    selectedShot?.exportSettings.width,
+    selectedShot?.exportSettings.height,
+  ]);
+
+  useEffect(() => {
     if (!selectedShot || shotCameraFlying) {
       if (shotCameraFlying) setFramePreviewUrl(undefined);
       return;
@@ -74,35 +97,57 @@ export function ShotsWorkspace() {
       cancelled = true;
     };
   }, [
-    project,
-    selectedShot,
-    selectedShot?.camera.position,
-    selectedShot?.camera.target,
-    selectedShot?.camera.fovDegrees,
-    selectedShot?.exportSettings.width,
-    selectedShot?.exportSettings.height,
+    framePreviewKey,
+    selectedShot?.id,
     shotCameraFlying,
   ]);
 
   const handleFramingCameraChange = useCallback((camera: CameraData) => {
     if (!selectedShot) return;
+    if (shotCameraFlying) {
+      draftCameraRef.current = camera;
+      return;
+    }
     updateShot(selectedShot.id, { camera });
-  }, [selectedShot, updateShot]);
+  }, [selectedShot?.id, shotCameraFlying, updateShot]);
+
+  const startFlyCamera = useCallback(() => {
+    if (selectedShot) draftCameraRef.current = selectedShot.camera;
+    setFramePreviewUrl(undefined);
+    setShotCameraFlying(true);
+  }, [selectedShot?.camera, setShotCameraFlying]);
+
+  const commitDraftCameraAndLock = useCallback(() => {
+    if (selectedShot && draftCameraRef.current) {
+      updateShot(selectedShot.id, { camera: draftCameraRef.current });
+    }
+    draftCameraRef.current = undefined;
+    lockShotCamera();
+  }, [lockShotCamera, selectedShot?.id, updateShot]);
 
   const panoMatch = selectedShot && linkedPano
     ? getPanoMatchQuality(selectedShot.camera, linkedPano, project.settings)
     : undefined;
 
-  const shotFraming = selectedShot
-    ? {
+  const shotFraming = useMemo(() => (
+    selectedShot
+      ? {
         camera: selectedShot.camera,
         frameAspectRatio: selectedShot.exportSettings.width / selectedShot.exportSettings.height,
         frameResolutionLabel: `${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height}`,
         flyActive: shotCameraFlying,
         onCameraChange: handleFramingCameraChange,
-        onLockCamera: lockShotCamera,
+        onLockCamera: commitDraftCameraAndLock,
       }
-    : undefined;
+      : undefined
+  ), [
+    commitDraftCameraAndLock,
+    handleFramingCameraChange,
+    selectedShot?.camera,
+    selectedShot?.exportSettings.height,
+    selectedShot?.exportSettings.width,
+    shotCameraFlying,
+  ]);
 
   return (
     <WorkspaceLayout
@@ -148,7 +193,7 @@ export function ShotsWorkspace() {
                 </p>
                 {!shotCameraFlying && (
                   <>
-                    <IconButton onClick={() => setShotCameraFlying(true)} className="w-full">
+                    <IconButton onClick={startFlyCamera} className="w-full">
                       <Move3D className="h-4 w-4" />
                       Fly Camera
                     </IconButton>
@@ -244,13 +289,14 @@ export function ShotsWorkspace() {
         </>
       )}
     >
-      <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(320px,42%)]">
+      <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(240px,38%)] lg:grid-rows-[minmax(0,1fr)_minmax(260px,40%)]">
         <SceneViewport
           project={project}
           selectedObjectId={selectedObjectId}
           selectedShotId={selectedShot?.id}
           shotFraming={shotFraming}
           onSelectObject={selectObject}
+          minHeightClassName="min-h-0"
         />
         <div className="grid min-h-0 grid-cols-1 border-t border-zinc-200 lg:grid-cols-2">
           <ShotPanoCropPreview
@@ -260,6 +306,7 @@ export function ShotsWorkspace() {
             label={linkedPano?.name ?? 'Linked Pano'}
             matchQuality={panoMatch?.quality}
             matchDistanceMeters={panoMatch?.distanceMeters}
+            disabledReason={shotCameraFlying ? 'Lock the camera to render the pano crop preview.' : undefined}
           />
           <div className="flex min-h-0 flex-col border-t border-zinc-200 bg-white p-5 lg:border-l lg:border-t-0">
             {selectedShot ? (
@@ -316,4 +363,3 @@ export function ShotsWorkspace() {
     </WorkspaceLayout>
   );
 }
-

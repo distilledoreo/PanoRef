@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Euler, PanoViewState } from '../../domain/types';
+import { panoYawToThreeJsYawDegrees } from '../../engine/sync';
 
 const EMPTY_COLOR = 0xe4e7e5;
 const BACKGROUND_COLOR = 0xf4f6f4;
@@ -222,7 +223,7 @@ function createSphere(material: THREE.Material) {
 
 function configureCamera(camera: THREE.PerspectiveCamera, view: PanoViewState, rotation: Euler) {
   camera.rotation.order = 'YXZ';
-  camera.rotation.y = THREE.MathUtils.degToRad(view.yawDegrees - rotation[1]);
+  camera.rotation.y = THREE.MathUtils.degToRad(panoYawToThreeJsYawDegrees(view.yawDegrees - rotation[1]));
   camera.rotation.x = THREE.MathUtils.degToRad(view.pitchDegrees);
   camera.rotation.z = 0;
   camera.fov = clampFovDegrees(view.fovDegrees);

@@ -45,6 +45,7 @@ export function SceneViewport({
   onPlaceObject,
   onMoveObject,
   onMovePanoOrigin,
+  minHeightClassName = 'min-h-[420px]',
 }: {
   project: LocationProject;
   selectedObjectId?: string;
@@ -65,6 +66,7 @@ export function SceneViewport({
   onPlaceObject?: (type: SceneObjectType, point: Vec3) => void;
   onMoveObject?: (id: string, point: Vec3) => void;
   onMovePanoOrigin?: (origin: Vec3) => void;
+  minHeightClassName?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -590,7 +592,7 @@ export function SceneViewport({
 
   return (
     <div
-      className={`relative h-full min-h-[420px] overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 shadow-sm ${cursorClass}`}
+      className={`relative h-full ${minHeightClassName} overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 shadow-sm ${cursorClass}`}
       data-testid="scene-viewport"
       ref={containerRef}
     >

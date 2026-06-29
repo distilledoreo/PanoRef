@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   cameraFromFlyState,
+  cameraForward,
   cameraFromOrbit,
   cameraOrbitFromCamera,
   computeExportFrameLayout,
@@ -12,6 +13,7 @@ import {
   yawPitchFromThreeJsDirection,
   getPanoCropSettingsForShot,
   getPanoMatchQuality,
+  panoYawToThreeJsYawDegrees,
   panoViewFromCamera,
   yawPitchToDirection,
 } from '../src/engine/sync';
@@ -120,6 +122,40 @@ describe('sync math', () => {
     expect(crop.width).toBe(1920);
   });
 
+  it('converts app pano yaw to the Three.js sphere viewer convention', () => {
+    const camera = {
+      position: [0, 1.6, 0] as [number, number, number],
+      target: [-2, 1.6, 10] as [number, number, number],
+      fovDegrees: 55,
+      aspectRatio: 16 / 9,
+      near: 0.1,
+      far: 100,
+    };
+    const project = createDefaultProject();
+    const pano = {
+      id: 'pano_1',
+      name: 'Graybox',
+      imageAssetId: 'asset_1',
+      type: 'graybox_render' as const,
+      projection: 'equirectangular' as const,
+      origin: project.scene.panoOrigin,
+      rotation: [0, 0, 0] as [number, number, number],
+      width: 2048,
+      height: 1024,
+      isCanonical: true,
+      createdAt: new Date().toISOString(),
+    };
+
+    const crop = getPanoCropSettingsForShot(camera, pano, 1920, 1080);
+    const renderDirection = sampledEquirectDirectionForThreeJsYaw(
+      panoYawToThreeJsYawDegrees(crop.yawDegrees),
+    );
+    const shotDirection = cameraForward(camera);
+
+    expect(renderDirection[0]).toBeCloseTo(shotDirection[0], 5);
+    expect(renderDirection[2]).toBeCloseTo(shotDirection[2], 5);
+  });
+
   it('round-trips shot camera through orbit state', () => {
     const original = {
       position: [1.2, 1.55, -4.1] as [number, number, number],
@@ -221,3 +257,10 @@ describe('sync math', () => {
     expect(match.quality).toBe('poor');
   });
 });
+
+function sampledEquirectDirectionForThreeJsYaw(threeJsYawDegrees: number) {
+  const cameraDirection = threeJsDirectionFromYawPitch(threeJsYawDegrees, 0);
+  const spherePhi = Math.atan2(cameraDirection[2], cameraDirection[0]);
+  const u = ((spherePhi / (Math.PI * 2)) % 1 + 1) % 1;
+  return equirectUvToDirection(u, 0.5);
+}

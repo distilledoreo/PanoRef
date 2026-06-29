@@ -197,6 +197,11 @@ export function panoYawPitchFromCamera(camera: CameraData): { yawDegrees: number
   return directionToYawPitch(cameraForward(camera));
 }
 
+export function panoYawToThreeJsYawDegrees(yawDegrees: number): number {
+  // Inward SphereGeometry UVs start from the +X seam; app pano yaw uses +Z as zero.
+  return 90 - yawDegrees;
+}
+
 export function getCanonicalPano(project: LocationProject): PanoReference | undefined {
   return project.panoRefs.find((pano) => pano.isCanonical) ?? project.panoRefs[0];
 }
@@ -292,4 +297,3 @@ export function degreesToRadians(value: number): number {
 export function radiansToDegrees(value: number): number {
   return value * (180 / Math.PI);
 }
-

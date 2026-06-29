@@ -12,6 +12,7 @@ export function ShotPanoCropPreview({
   label,
   matchQuality,
   matchDistanceMeters,
+  disabledReason,
 }: {
   imageUrl?: string;
   crop?: PanoCropSettings;
@@ -19,12 +20,13 @@ export function ShotPanoCropPreview({
   label?: string;
   matchQuality?: 'good' | 'moderate' | 'poor';
   matchDistanceMeters?: number;
+  disabledReason?: string;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | undefined>();
   const [isRendering, setIsRendering] = useState(false);
 
   useEffect(() => {
-    if (!imageUrl || !crop) {
+    if (!imageUrl || !crop || disabledReason) {
       setPreviewUrl(undefined);
       return;
     }
@@ -62,15 +64,16 @@ export function ShotPanoCropPreview({
     panoRotation[0],
     panoRotation[1],
     panoRotation[2],
+    disabledReason,
   ]);
 
-  const showParallaxWarning = matchQuality && matchQuality !== 'good';
+  const showParallaxWarning = !disabledReason && matchQuality && matchQuality !== 'good';
 
   return (
     <div className="flex min-h-0 flex-col bg-zinc-50 p-5">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h3 className="font-semibold text-zinc-800">Pano Crop Preview</h3>
-        {crop && (
+        {crop && !disabledReason && (
           <span className="font-mono text-xs text-zinc-500">
             {crop.fovDegrees.toFixed(0)}° · {crop.width}×{crop.height}
           </span>
@@ -81,6 +84,10 @@ export function ShotPanoCropPreview({
         {!imageUrl ? (
           <div className="flex h-full min-h-[180px] items-center justify-center px-6 text-center text-sm text-zinc-400">
             Link a panorama reference to preview the shot crop.
+          </div>
+        ) : disabledReason ? (
+          <div className="flex h-full min-h-[180px] items-center justify-center px-6 text-center text-sm text-zinc-400">
+            {disabledReason}
           </div>
         ) : !crop ? (
           <div className="flex h-full min-h-[180px] items-center justify-center text-sm text-zinc-400">

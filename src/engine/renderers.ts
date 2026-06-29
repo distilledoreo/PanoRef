@@ -137,27 +137,75 @@ export async function renderPanoPerspectiveCrop(
 ): Promise<ImageRenderResult> {
   const renderer = createRenderer(crop.width, crop.height);
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(crop.fovDegrees, crop.aspectRatio, 0.1, 1000);
-  camera.rotation.order = 'YXZ';
-  camera.rotation.y = degreesToRadians(crop.yawDegrees - panoRotation[1]);
-  camera.rotation.x = degreesToRadians(crop.pitchDegrees);
-  camera.rotation.z = degreesToRadians(crop.rollDegrees);
-  camera.updateProjectionMatrix();
-
-  const geometry = new THREE.SphereGeometry(500, 80, 48);
-  geometry.scale(-1, 1, 1);
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const texture = await loadTexture(imageUrl);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
-  const material = new THREE.MeshBasicMaterial({ map: texture });
-  const sphere = new THREE.Mesh(geometry, material);
-  scene.add(sphere);
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      panoMap: { value: texture },
+      yaw: { value: degreesToRadians(crop.yawDegrees - panoRotation[1]) },
+      pitch: { value: degreesToRadians(crop.pitchDegrees) },
+      roll: { value: degreesToRadians(crop.rollDegrees) },
+      fov: { value: degreesToRadians(crop.fovDegrees) },
+      aspect: { value: crop.aspectRatio },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D panoMap;
+      uniform float yaw;
+      uniform float pitch;
+      uniform float roll;
+      uniform float fov;
+      uniform float aspect;
+      varying vec2 vUv;
+      const float PI = 3.141592653589793;
+
+      mat3 rotateX(float angle) {
+        float s = sin(angle);
+        float c = cos(angle);
+        return mat3(1.0, 0.0, 0.0, 0.0, c, -s, 0.0, s, c);
+      }
+
+      mat3 rotateY(float angle) {
+        float s = sin(angle);
+        float c = cos(angle);
+        return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c);
+      }
+
+      mat3 rotateZ(float angle) {
+        float s = sin(angle);
+        float c = cos(angle);
+        return mat3(c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0);
+      }
+
+      void main() {
+        vec2 ndc = vUv * 2.0 - 1.0;
+        float tanHalfFov = tan(fov * 0.5);
+        vec3 dir = normalize(vec3(-ndc.x * aspect * tanHalfFov, ndc.y * tanHalfFov, 1.0));
+        dir = rotateY(yaw) * rotateX(pitch) * rotateZ(roll) * dir;
+        float u = atan(dir.x, dir.z) / (2.0 * PI) + 0.5;
+        float v = asin(clamp(dir.y, -1.0, 1.0)) / PI + 0.5;
+        gl_FragColor = texture2D(panoMap, vec2(fract(u), clamp(v, 0.0, 1.0)));
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  scene.add(plane);
 
   renderer.render(scene, camera);
   const dataUrl = renderer.domElement.toDataURL('image/png');
 
-  geometry.dispose();
+  plane.geometry.dispose();
   material.dispose();
   texture.dispose();
   renderer.dispose();

@@ -11,6 +11,11 @@ describe('rendered shot output', () => {
     expect(source).toContain('renderViewportClay');
     expect(source).toContain('renderShotFrame');
     expect(source).toContain('applyFlyCameraToPerspectiveCamera');
+    expect(source).toContain('panoMap');
+    expect(source).toContain('yaw: { value: degreesToRadians(crop.yawDegrees - panoRotation[1]) }');
+    expect(source).toContain('vec3 dir = normalize(vec3(-ndc.x * aspect * tanHalfFov');
+    expect(source).toContain('atan(dir.x, dir.z)');
+    expect(source).toContain('#include <colorspace_fragment>');
     expect(source).not.toContain('renderContinuityControlView');
     expect(source).toContain('renderPanoPerspectiveCrop');
   });
@@ -41,7 +46,7 @@ describe('rendered shot output', () => {
     expect(viewerSource).toContain('rendererRef.current.render(compareSceneRef.current, cameraRef.current)');
     expect(viewerSource).toContain('rendererRef.current.clearDepth()');
     expect(viewerSource).toContain('rendererRef.current.render(activeSceneRef.current, cameraRef.current)');
-    expect(viewerSource).toContain('view.yawDegrees - rotation[1]');
+    expect(viewerSource).toContain('panoYawToThreeJsYawDegrees(view.yawDegrees - rotation[1])');
     expect(referenceSource).not.toContain('label="Pano FOV"');
     expect(referenceSource).not.toContain('label="Graybox FOV"');
     expect(referenceSource).not.toContain('Object Stamps');
