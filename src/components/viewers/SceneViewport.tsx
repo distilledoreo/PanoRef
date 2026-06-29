@@ -7,11 +7,11 @@ import { buildScene, createPreviewMesh, disposePreviewMesh, disposeScene } from 
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
 import {
   cameraFromFlyState,
-  computeExportFrameLayout,
   flyCameraFromCamera,
   horizontalFlyDirections,
   type FlyCameraState,
 } from '../../engine/sync';
+import { computeCenteredFrameRendererRects, computeFullCssRendererRect, type CssRendererRect } from '../../engine/viewport';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 
@@ -233,7 +233,6 @@ export function SceneViewport({
       const container = containerRef.current;
       const cssWidth = Math.max(1, container?.clientWidth ?? 1);
       const cssHeight = Math.max(1, container?.clientHeight ?? 1);
-      const pixelRatio = activeRenderer.getPixelRatio();
 
       if (framing) {
         if (framing.flyActive) processFlyMovement(deltaSeconds);
@@ -245,30 +244,20 @@ export function SceneViewport({
           framing.frameAspectRatio,
         );
 
-        const frame = computeExportFrameLayout(cssWidth, cssHeight, framing.frameAspectRatio);
-        const bottom = cssHeight - frame.top - frame.height;
+        const { clear, frame } = computeCenteredFrameRendererRects(cssWidth, cssHeight, framing.frameAspectRatio);
         activeRenderer.setScissorTest(true);
         activeRenderer.setClearColor(0xf3f6f4, 1);
-        activeRenderer.setViewport(0, 0, Math.round(cssWidth * pixelRatio), Math.round(cssHeight * pixelRatio));
-        activeRenderer.setScissor(0, 0, Math.round(cssWidth * pixelRatio), Math.round(cssHeight * pixelRatio));
+        setRendererRect(activeRenderer, 'viewport', clear);
+        setRendererRect(activeRenderer, 'scissor', clear);
         activeRenderer.clear();
-        activeRenderer.setViewport(
-          Math.round(frame.left * pixelRatio),
-          Math.round(bottom * pixelRatio),
-          Math.round(frame.width * pixelRatio),
-          Math.round(frame.height * pixelRatio),
-        );
-        activeRenderer.setScissor(
-          Math.round(frame.left * pixelRatio),
-          Math.round(bottom * pixelRatio),
-          Math.round(frame.width * pixelRatio),
-          Math.round(frame.height * pixelRatio),
-        );
+        setRendererRect(activeRenderer, 'viewport', frame);
+        setRendererRect(activeRenderer, 'scissor', frame);
         activeRenderer.render(activeScene, activeCamera);
         activeRenderer.setScissorTest(false);
       } else {
-        activeRenderer.setViewport(0, 0, Math.round(cssWidth * pixelRatio), Math.round(cssHeight * pixelRatio));
-        activeRenderer.setScissor(0, 0, Math.round(cssWidth * pixelRatio), Math.round(cssHeight * pixelRatio));
+        const viewport = computeFullCssRendererRect(cssWidth, cssHeight);
+        setRendererRect(activeRenderer, 'viewport', viewport);
+        setRendererRect(activeRenderer, 'scissor', viewport);
         activeRenderer.setScissorTest(false);
         updateCamera(activeCamera, orbitRef.current);
         activeRenderer.render(activeScene, activeCamera);
@@ -637,6 +626,18 @@ function updateCamera(
   const z = Math.cos(yaw) * Math.cos(pitch) * orbit.distance;
   camera.position.set(orbit.target.x + x, orbit.target.y + y, orbit.target.z + z);
   camera.lookAt(orbit.target);
+}
+
+function setRendererRect(
+  renderer: THREE.WebGLRenderer,
+  kind: 'viewport' | 'scissor',
+  rect: CssRendererRect,
+) {
+  if (kind === 'viewport') {
+    renderer.setViewport(rect.left, rect.bottom, rect.width, rect.height);
+  } else {
+    renderer.setScissor(rect.left, rect.bottom, rect.width, rect.height);
+  }
 }
 
 function getPointerState(
