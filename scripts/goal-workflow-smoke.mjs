@@ -46,12 +46,25 @@ try {
   await waitFor(client, 'document.body.textContent.includes("graybox_render")', 'graybox pano');
 
   await clickButton(client, 'Shots');
-  await clickButton(client, 'Main Structure Wide Shot');
-  await waitFor(client, 'document.body.textContent.includes("Main Structure Wide")', 'wide shot');
+  await waitFor(client, 'document.body.textContent.includes("Camera 001")', 'origin camera');
 
   await clickButton(client, 'Review');
   await clickButton(client, 'Export AI Brief ZIP');
   const zipPath = await waitForDownloadedZip(downloadDir);
+  await importAiResultFrame(client);
+  await waitForValue(
+    client,
+    `(() => {
+      const button = [...document.querySelectorAll('button')]
+        .find((candidate) => candidate.textContent?.includes('Download AI Result'));
+      return button && !button.disabled ? 'ok' : '';
+    })()`,
+    'imported AI result frame',
+  );
+
+  await clickButton(client, 'Export');
+  await clickButton(client, 'Export ZIP');
+  await waitFor(client, 'document.body.textContent.includes("shot_001/outputs/ai_result_frame.png")', 'final package export with AI result');
 
   const questState = await evaluate(client, `
     document.querySelector('header + div')?.textContent ?? ''
@@ -107,6 +120,25 @@ async function createCdpClient(socketUrl) {
       socket.close();
     },
   };
+}
+
+async function importAiResultFrame(client) {
+  const imported = await evaluate(client, `
+    (() => {
+      const input = [...document.querySelectorAll('input[type="file"]')]
+        .find((candidate) => candidate.accept?.includes('image/png'));
+      if (!input) return false;
+      const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAGElEQVR4nGNk+M+ABzDhkxyMOnDqAQCmUQYFh4C22AAAAABJRU5ErkJggg==';
+      const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+      const file = new File([bytes], 'smoke-ai-result.png', { type: 'image/png' });
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()
+  `);
+  if (!imported) throw new Error('Could not find the AI result file input.');
 }
 
 async function clickButton(client, text, timeout = 20000) {

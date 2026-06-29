@@ -11,9 +11,9 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-slate-500">{hint}</span>}
+      {hint && <span className="mt-1 block text-xs text-zinc-500">{hint}</span>}
     </label>
   );
 }
@@ -22,7 +22,7 @@ export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-400 ${props.className ?? ''}`}
+      className={`w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 ${props.className ?? ''}`}
     />
   );
 }
@@ -31,7 +31,7 @@ export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
   return (
     <textarea
       {...props}
-      className={`min-h-24 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-400 ${props.className ?? ''}`}
+      className={`min-h-24 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-100 ${props.className ?? ''}`}
     />
   );
 }
@@ -40,7 +40,7 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...props}
-      className={`w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-400 ${props.className ?? ''}`}
+      className={`w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100 ${props.className ?? ''}`}
     />
   );
 }
@@ -55,9 +55,9 @@ export function Panel({
   actions?: React.ReactNode;
 }) {
   return (
-    <section className="border-b border-slate-800 p-4">
+    <section className="border-b border-zinc-200 p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">{title}</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-700">{title}</h2>
         {actions}
       </div>
       {children}
@@ -75,12 +75,11 @@ export function IconButton({
       {...props}
       className={`inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45 ${
         active
-          ? 'border-cyan-400 bg-cyan-400 text-slate-950'
-          : 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-500 hover:bg-slate-800'
+          ? 'border-teal-500 bg-teal-500 text-white shadow-sm'
+          : 'border-zinc-200 bg-white text-zinc-700 hover:border-teal-300 hover:text-teal-700'
       } ${props.className ?? ''}`}
     >
       {children}
     </button>
   );
 }
-

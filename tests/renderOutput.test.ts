@@ -9,7 +9,9 @@ describe('rendered shot output', () => {
 
     expect(source).not.toMatch(/renderSkinnedShotFrame|composeShotLockedSkinnedFrame|canonical_reference_skinning/i);
     expect(source).toContain('renderViewportClay');
-    expect(source).toContain('renderContinuityControlView');
+    expect(source).toContain('renderShotFrame');
+    expect(source).toContain('applyFlyCameraToPerspectiveCamera');
+    expect(source).not.toContain('renderContinuityControlView');
     expect(source).toContain('renderPanoPerspectiveCrop');
   });
 
@@ -18,7 +20,6 @@ describe('rendered shot output', () => {
 
     expect(source).toMatch(/renderGrayboxEquirectangularPano[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
     expect(source).toMatch(/renderViewportClay[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
-    expect(source).toMatch(/renderContinuityControlView[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
   });
 
   it('applies linked pano rotation to local reference exports', () => {
@@ -26,35 +27,33 @@ describe('rendered shot output', () => {
     expect(source).toContain('renderPanoPerspectiveCrop(linkedPanoAsset.uri, shot.panoCrop, linkedPano.rotation)');
   });
 
-  it('keeps FOV matching as an independent preview overlay instead of an export texture warp', () => {
-    const rendererSource = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
+  it('letterboxes full pano exports when the project setting is enabled', () => {
+    const source = readFileSync(new URL('../src/engine/packageExport.ts', import.meta.url), 'utf8');
+    expect(source).toContain('preparePanoExportDataUrl');
+    expect(source).toContain('panoLetterboxExports169');
+  });
+
+  it('keeps compare overlay as a preview-only yaw and opacity check', () => {
     const viewerSource = readFileSync(new URL('../src/components/viewers/PanoViewer.tsx', import.meta.url), 'utf8');
     const referenceSource = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
 
-    expect(rendererSource).not.toMatch(/panoFovScale|fovScale|safeFovScale/);
-    expect(viewerSource).not.toMatch(/panoFovScale|fovScale|safeFovScale/);
-    expect(viewerSource).toContain('panoFovDegrees?: number');
-    expect(viewerSource).toContain('compareFovDegrees?: number');
+    expect(viewerSource).not.toMatch(/panoFovDegrees|compareFovDegrees/);
     expect(viewerSource).toContain('rendererRef.current.render(compareSceneRef.current, cameraRef.current)');
     expect(viewerSource).toContain('rendererRef.current.clearDepth()');
     expect(viewerSource).toContain('rendererRef.current.render(activeSceneRef.current, cameraRef.current)');
     expect(viewerSource).toContain('view.yawDegrees - rotation[1]');
-    expect(referenceSource).toContain('label="Pano FOV"');
-    expect(referenceSource).toContain('label="Graybox FOV"');
-    expect(referenceSource).not.toContain('label="Compare FOV"');
+    expect(referenceSource).not.toContain('label="Pano FOV"');
+    expect(referenceSource).not.toContain('label="Graybox FOV"');
+    expect(referenceSource).not.toContain('Object Stamps');
   });
 
-  it('supports object-level stamped projection in AI-facing control renders', () => {
+  it('does not include continuity control projection in export renders', () => {
     const rendererSource = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
-    const referenceSource = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
+    const packageSource = readFileSync(new URL('../src/engine/packageExport.ts', import.meta.url), 'utf8');
 
-    expect(rendererSource).toContain('createStampedProjectionMaterials');
-    expect(rendererSource).toContain('createStampedPanoMaterial');
-    expect(rendererSource).toContain('hasStampedMaterials');
-    expect(rendererSource).toContain('!object.projectionStamp || object.projectionStamp.panoId !== params.pano.id');
-    expect(referenceSource).toContain('title="Object Stamps"');
-    expect(referenceSource).toContain('Stamp Object');
-    expect(referenceSource).toContain('projectionStamp: {');
+    expect(rendererSource).not.toContain('createProjectedPanoMaterial');
+    expect(rendererSource).not.toContain('createStampedProjectionMaterials');
+    expect(packageSource).not.toContain('continuity_control_view.png');
   });
 
   it('can hide helper object types while preserving build-scene visibility controls', () => {

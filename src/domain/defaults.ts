@@ -7,6 +7,7 @@ import {
   ProjectAsset,
   SceneObject,
   SceneObjectType,
+  ProjectSettings,
   Shot,
   ShotExportSettings,
   Transform,
@@ -31,11 +32,27 @@ const primitiveDefaults: Record<SceneObjectType, { dimensions: Vec3; category: S
   sun_marker: { dimensions: [0.8, 0.8, 0.8], category: 'helper' },
 };
 
+export const defaultProjectSettings = {
+  defaultShotWidth: 1920,
+  defaultShotHeight: 1080,
+  defaultShotFovDegrees: 55,
+  panoGoodMatchMeters: 1.5,
+  panoModerateMatchMeters: 4,
+  panoLetterboxExports169: true,
+} satisfies ProjectSettings;
+
+export function normalizeProjectSettings(settings?: Partial<ProjectSettings>): ProjectSettings {
+  return {
+    ...defaultProjectSettings,
+    ...settings,
+    panoLetterboxExports169: settings?.panoLetterboxExports169 ?? defaultProjectSettings.panoLetterboxExports169,
+  };
+}
+
 export const defaultShotExportSettings: ShotExportSettings = {
   width: 1920,
   height: 1080,
   includeViewport: true,
-  includeContinuityControlView: true,
   includeAiResultFrame: true,
   includePanoCrop: true,
   includeFullPano: true,
@@ -108,6 +125,22 @@ export function createCameraData(position: Vec3, target: Vec3, fovDegrees = 55):
     near: 0.1,
     far: 100,
   };
+}
+
+export function createOriginShot(
+  project: Pick<LocationProject, 'scene' | 'settings'>,
+  index = 1,
+): Shot {
+  const origin = project.scene.panoOrigin;
+  const camera = createCameraData(
+    [...origin],
+    [origin[0], origin[1], origin[2] + 10],
+    project.settings.defaultShotFovDegrees,
+  );
+  camera.aspectRatio = project.settings.defaultShotWidth / project.settings.defaultShotHeight;
+  const shot = createShot({ index, camera });
+  shot.name = `Camera ${String(index).padStart(3, '0')}`;
+  return shot;
 }
 
 export function createShot(params: {
@@ -199,6 +232,8 @@ export function createDefaultProject(): LocationProject {
     createSceneObject('sun_marker', 1),
   ];
 
+  starterObjects[0].name = 'Ground Slab';
+  starterObjects[0].locked = true;
   starterObjects[1].name = 'Main Temple Wall';
   starterObjects[1].dimensions = [5.4, 2.8, 0.2];
   starterObjects[2].name = 'Main Temple Gate';
@@ -214,6 +249,14 @@ export function createDefaultProject(): LocationProject {
   starterObjects[7].name = 'Man Facing Camera';
   starterObjects[7].transform.position = [-1.2, 0.875, 0.85];
 
+  const settings = { ...defaultProjectSettings };
+  const scene = {
+    worldUp: 'Y' as const,
+    objects: starterObjects,
+    panoOrigin: [0, 1.6, 0] as Vec3,
+    panoRotation: [0, 0, 0] as Vec3,
+  };
+
   return {
     schemaVersion: '0.1',
     id: createId('project'),
@@ -222,12 +265,7 @@ export function createDefaultProject(): LocationProject {
     units: 'meters',
     createdAt: now,
     updatedAt: now,
-    scene: {
-      worldUp: 'Y',
-      objects: starterObjects,
-      panoOrigin: [0, 1.6, 0],
-      panoRotation: [0, 0, 0],
-    },
+    scene,
     panoRefs: [],
     landmarks: [
       {
@@ -243,14 +281,8 @@ export function createDefaultProject(): LocationProject {
         description: 'Foreground human scale figure that should face the camera.',
       },
     ],
-    shots: [],
+    shots: [createOriginShot({ scene, settings })],
     assets: { assets: {} },
-    settings: {
-      defaultShotWidth: 1920,
-      defaultShotHeight: 1080,
-      defaultShotFovDegrees: 55,
-      panoGoodMatchMeters: 1.5,
-      panoModerateMatchMeters: 4,
-    },
+    settings,
   };
 }

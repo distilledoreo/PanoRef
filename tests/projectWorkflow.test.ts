@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createDefaultProject, createPanoAsset, createPanoReference, createShot } from '../src/domain/defaults';
 import { createShotPackageManifest } from '../src/engine/exportManifest';
 import { generateImagePrompt } from '../src/engine/prompts';
+import { ShotPackageError, buildShotPackage } from '../src/engine/packageExport';
 import { serializeProject, parseProject } from '../src/engine/projectIO';
 import { getProjectWarnings, getShotWarnings } from '../src/engine/warnings';
 import { getLatestGrayboxPano, getPanoAsset } from '../src/domain/selectors';
@@ -15,7 +16,9 @@ describe('project workflow logic', () => {
     expect(project.scene.objects.find((object) => object.name === 'Main Temple Gate')?.transform.position[2]).toBeGreaterThan(0);
     expect(project.scene.objects.find((object) => object.name === 'Man Facing Camera')?.transform.position[2]).toBeGreaterThan(0);
     expect(project.landmarks[0].promptCritical).toBe(true);
-    expect(project.shots.length).toBe(0);
+    expect(project.shots.length).toBe(1);
+    expect(project.shots[0].name).toBe('Camera 001');
+    expect(project.shots[0].camera.position).toEqual(project.scene.panoOrigin);
   });
 
   it('serializes and parses project JSON', () => {
@@ -42,7 +45,7 @@ describe('project workflow logic', () => {
       ...shot,
       exportSettings: {
         ...shot.exportSettings,
-        includeContinuityControlView: undefined,
+        includeContinuityControlView: true,
         includeAiResultFrame: undefined,
         includeSkinnedFrame: true,
       },
@@ -51,11 +54,11 @@ describe('project workflow logic', () => {
         skinnedFrameAssetId: 'asset_legacy_result',
       },
     };
-    project.shots.push(legacyShot as unknown as typeof shot);
+    project.shots = [legacyShot as unknown as typeof shot];
 
     const parsed = parseProject(JSON.stringify(project));
-    expect(parsed.shots[0].exportSettings.includeContinuityControlView).toBe(true);
     expect(parsed.shots[0].exportSettings.includeAiResultFrame).toBe(true);
+    expect(parsed.shots[0].exportSettings).not.toHaveProperty('includeContinuityControlView');
     expect(parsed.shots[0].assets.aiResultFrameAssetId).toBe('asset_legacy_result');
   });
 
@@ -83,7 +86,7 @@ describe('project workflow logic', () => {
     expect(parsed.panoRefs[0].rotation).toEqual([0, 0, 0]);
   });
 
-  it('serializes object-level projection stamps', () => {
+  it('drops legacy object-level projection stamps during parse', () => {
     const project = createDefaultProject();
     const asset = createPanoAsset({
       name: 'global_reference.png',
@@ -102,26 +105,24 @@ describe('project workflow logic', () => {
     });
     project.assets.assets[asset.id] = asset;
     project.panoRefs.push(pano);
-    project.scene.objects[0].projectionStamp = {
-      id: 'stamp_floor',
-      panoId: pano.id,
-      panoYawDegrees: 0,
-      yawDegrees: 12,
-      pitchDegrees: -4,
-      viewFovDegrees: 42,
-      panoFovDegrees: 58,
-      opacity: 0.8,
-      aspectRatio: 16 / 9,
-      createdAt: '2026-06-28T00:00:00.000Z',
-    };
+    project.scene.objects[0] = {
+      ...project.scene.objects[0],
+      projectionStamp: {
+        id: 'stamp_floor',
+        panoId: pano.id,
+        panoYawDegrees: 0,
+        yawDegrees: 12,
+        pitchDegrees: -4,
+        viewFovDegrees: 42,
+        panoFovDegrees: 58,
+        opacity: 0.8,
+        aspectRatio: 16 / 9,
+        createdAt: '2026-06-28T00:00:00.000Z',
+      },
+    } as typeof project.scene.objects[0];
 
     const parsed = parseProject(serializeProject(project));
-    expect(parsed.scene.objects[0].projectionStamp).toMatchObject({
-      panoId: pano.id,
-      yawDegrees: 12,
-      viewFovDegrees: 42,
-      panoFovDegrees: 58,
-    });
+    expect(parsed.scene.objects[0]).not.toHaveProperty('projectionStamp');
   });
 
   it('emits warnings until graybox and canonical panos exist', () => {
@@ -146,8 +147,9 @@ describe('project workflow logic', () => {
     });
     shot.landmarkIds = [project.landmarks[0].id];
     const prompt = generateImagePrompt(project, shot);
-    expect(prompt).toContain('Use continuity_control_view.png as the primary camera/layout control');
-    expect(prompt).toContain('Gray areas in continuity_control_view.png are untextured structure placeholders');
+    expect(prompt).toContain('Use viewport_clay.png as the strict camera, composition, perspective, scale, and layout reference.');
+    expect(prompt).not.toContain('continuity_control_view.png');
+    expect(prompt).not.toContain('projected style placement');
     expect(prompt).toContain(project.landmarks[0].displayName);
     expect(prompt).toContain('Do not move, redesign, remove, or replace');
   });
@@ -184,18 +186,17 @@ describe('project workflow logic', () => {
       },
     });
     project.shots.push(shot);
-    expect(shot.exportSettings.includeContinuityControlView).toBe(true);
 
     const manifest = createShotPackageManifest(project, shot);
     const paths = manifest.files.map((file) => file.path);
     expect(paths).toContain('shot_001/inputs/viewport_clay.png');
-    expect(paths).toContain('shot_001/inputs/continuity_control_view.png');
+    expect(paths).not.toContain('shot_001/inputs/continuity_control_view.png');
     expect(paths).not.toContain('shot_001/outputs/skinned_reference_frame.png');
     expect(paths).toContain('shot_001/inputs/global_graybox.png');
     expect(paths).toContain('shot_001/prompts/image_gen_prompt.txt');
   });
 
-  it('omits the continuity control view from the package manifest when disabled', () => {
+  it('includes pano crop in the manifest only when crop settings exist', () => {
     const project = createDefaultProject();
     const asset = createPanoAsset({
       name: 'global_reference.png',
@@ -226,11 +227,23 @@ describe('project workflow logic', () => {
         far: 100,
       },
     });
-    shot.exportSettings.includeContinuityControlView = false;
     project.shots.push(shot);
 
     expect(createShotPackageManifest(project, shot).files.map((file) => file.path))
-      .not.toContain('shot_001/inputs/continuity_control_view.png');
+      .not.toContain('shot_001/inputs/pano_crop.png');
+
+    shot.panoCrop = {
+      panoId: pano.id,
+      yawDegrees: 0,
+      pitchDegrees: 0,
+      rollDegrees: 0,
+      fovDegrees: 55,
+      aspectRatio: 16 / 9,
+      width: 1920,
+      height: 1080,
+    };
+    expect(createShotPackageManifest(project, shot).files.map((file) => file.path))
+      .toContain('shot_001/inputs/pano_crop.png');
   });
 
   it('adds an imported AI result frame to the package manifest only after one exists', () => {
@@ -253,6 +266,12 @@ describe('project workflow logic', () => {
     shot.assets.aiResultFrameAssetId = 'asset_ai_result';
     expect(createShotPackageManifest(project, shot).files.map((file) => file.path))
       .toContain('shot_001/outputs/ai_result_frame.png');
+  });
+
+  it('fails gracefully when exporting without a selected shot', async () => {
+    const project = createDefaultProject();
+    await expect(buildShotPackage(project, undefined)).rejects.toThrow(ShotPackageError);
+    await expect(buildShotPackage(project, undefined)).rejects.toThrow('Select a shot before exporting a package.');
   });
 
   it('selects the latest graybox pano asset for direct download controls', () => {

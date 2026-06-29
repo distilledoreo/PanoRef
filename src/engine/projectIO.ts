@@ -1,4 +1,5 @@
-import { LocationProject, PanoReference, Shot } from '../domain/types';
+import { LocationProject, PanoReference, SceneObject, Shot } from '../domain/types';
+import { normalizeProjectSettings } from '../domain/defaults';
 
 export function serializeProject(project: LocationProject): string {
   return JSON.stringify(project, null, 2);
@@ -14,9 +15,19 @@ export function parseProject(json: string): LocationProject {
   }
   return {
     ...parsed,
+    scene: {
+      ...parsed.scene,
+      objects: parsed.scene.objects.map(normalizeSceneObject),
+    },
     panoRefs: parsed.panoRefs.map(normalizePanoReference),
     shots: parsed.shots.map(normalizeShot),
+    settings: normalizeProjectSettings(parsed.settings),
   };
+}
+
+function normalizeSceneObject(object: SceneObject & { projectionStamp?: unknown }): SceneObject {
+  const { projectionStamp: _ignored, ...normalized } = object;
+  return normalized;
 }
 
 function normalizePanoReference(pano: PanoReference): PanoReference {
@@ -32,11 +43,11 @@ function normalizeShot(shot: Shot): Shot {
     includeSkinnedFrame?: boolean;
   };
   const legacyAssets = shot.assets as Shot['assets'] & { skinnedFrameAssetId?: string };
+  const { includeContinuityControlView: _ignored, includeSkinnedFrame: _ignoredSkinned, ...exportSettings } = legacyExportSettings;
   return {
     ...shot,
     exportSettings: {
-      ...shot.exportSettings,
-      includeContinuityControlView: legacyExportSettings.includeContinuityControlView ?? true,
+      ...exportSettings,
       includeAiResultFrame: legacyExportSettings.includeAiResultFrame ?? legacyExportSettings.includeSkinnedFrame ?? true,
     },
     assets: {

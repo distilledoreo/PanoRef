@@ -2,8 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Euler, PanoViewState } from '../../domain/types';
 
-const EMPTY_COLOR = 0x1e293b;
-const BACKGROUND_COLOR = 0x020617;
+const EMPTY_COLOR = 0xe4e7e5;
+const BACKGROUND_COLOR = 0xf4f6f4;
 
 export function PanoViewer({
   imageUrl,
@@ -11,10 +11,8 @@ export function PanoViewer({
   onViewChange,
   label,
   panoRotation = [0, 0, 0],
-  panoFovDegrees,
   compareImageUrl,
   compareRotation = [0, 0, 0],
-  compareFovDegrees,
   compareOpacity = 1,
 }: {
   imageUrl?: string;
@@ -22,10 +20,8 @@ export function PanoViewer({
   onViewChange: (updates: Partial<PanoViewState>) => void;
   label?: string;
   panoRotation?: Euler;
-  panoFovDegrees?: number;
   compareImageUrl?: string;
   compareRotation?: Euler;
-  compareFovDegrees?: number;
   compareOpacity?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -82,22 +78,12 @@ export function PanoViewer({
       const hasCompare = Boolean(compareImageUrlRef.current);
 
       if (hasCompare) {
-        configureCamera(
-          cameraRef.current,
-          viewRef.current,
-          compareRotationRef.current,
-          resolveLayerFov(compareFovRef.current, viewRef.current.fovDegrees),
-        );
+        configureCamera(cameraRef.current, viewRef.current, compareRotationRef.current);
         rendererRef.current.render(compareSceneRef.current, cameraRef.current);
         rendererRef.current.clearDepth();
       }
 
-      configureCamera(
-        cameraRef.current,
-        viewRef.current,
-        activeRotationRef.current,
-        resolveLayerFov(hasCompare ? activeFovRef.current : undefined, viewRef.current.fovDegrees),
-      );
+      configureCamera(cameraRef.current, viewRef.current, activeRotationRef.current);
       rendererRef.current.render(activeSceneRef.current, cameraRef.current);
     };
     animate();
@@ -115,8 +101,6 @@ export function PanoViewer({
   const viewRef = useRef(view);
   const activeRotationRef = useRef(panoRotation);
   const compareRotationRef = useRef(compareRotation);
-  const activeFovRef = useRef(panoFovDegrees);
-  const compareFovRef = useRef(compareFovDegrees);
   const compareImageUrlRef = useRef(compareImageUrl);
   const opacityRef = useRef(compareOpacity);
   useEffect(() => {
@@ -126,14 +110,8 @@ export function PanoViewer({
     activeRotationRef.current = panoRotation;
   }, [panoRotation]);
   useEffect(() => {
-    activeFovRef.current = panoFovDegrees;
-  }, [panoFovDegrees]);
-  useEffect(() => {
     compareRotationRef.current = compareRotation;
   }, [compareRotation]);
-  useEffect(() => {
-    compareFovRef.current = compareFovDegrees;
-  }, [compareFovDegrees]);
   useEffect(() => {
     compareImageUrlRef.current = compareImageUrl;
   }, [compareImageUrl]);
@@ -211,32 +189,24 @@ export function PanoViewer({
   }, [onViewChange]);
 
   return (
-    <div className="relative h-full min-h-[420px] overflow-hidden bg-slate-950" ref={containerRef}>
+    <div className="relative h-full min-h-0 overflow-hidden bg-zinc-50" ref={containerRef}>
       {!imageUrl && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950 text-slate-500">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-zinc-50 text-zinc-500">
           <p className="text-sm font-medium">No panorama selected</p>
           <p className="mt-1 text-xs">Render a graybox pano or import a canonical reference.</p>
         </div>
       )}
-      <div className="pointer-events-none absolute left-4 top-4 rounded-md bg-slate-950/80 px-3 py-2 text-xs text-slate-300 backdrop-blur">
+      <div className="pointer-events-none absolute left-4 top-4 rounded-md border border-white/70 bg-white/90 px-3 py-2 text-xs text-zinc-700 shadow-sm backdrop-blur">
         {label ?? 'Panorama Reference'}
       </div>
       {imageUrl && (
         <>
-          <div className="pointer-events-none absolute left-1/2 top-1/2 h-[52%] max-h-[70vh] w-[52%] max-w-[80vw] -translate-x-1/2 -translate-y-1/2 border border-cyan-300/80 shadow-[0_0_0_9999px_rgba(2,6,23,0.18)]" />
-          <div className="pointer-events-none absolute bottom-4 right-4 flex flex-wrap gap-3 rounded-md bg-slate-950/80 px-3 py-2 font-mono text-xs text-slate-200 backdrop-blur">
+          <div className="pointer-events-none absolute left-1/2 top-1/2 h-[52%] max-h-[70vh] w-[52%] max-w-[80vw] -translate-x-1/2 -translate-y-1/2 border border-teal-500/80 shadow-[0_0_0_9999px_rgba(244,246,244,0.18)]" />
+          <div className="pointer-events-none absolute bottom-4 right-4 flex flex-wrap gap-3 rounded-md border border-white/70 bg-white/90 px-3 py-2 font-mono text-xs text-zinc-700 shadow-sm backdrop-blur">
             <span>YAW {normalizeYaw(view.yawDegrees).toFixed(1)}</span>
             <span>PITCH {view.pitchDegrees.toFixed(1)}</span>
-            {compareImageUrl ? (
-              <>
-                <span>VIEW {view.fovDegrees.toFixed(1)}</span>
-                <span>PANO {Math.round(resolveLayerFov(panoFovDegrees, view.fovDegrees))}°</span>
-                <span>GRAY {Math.round(resolveLayerFov(compareFovDegrees, view.fovDegrees))}°</span>
-                <span>OPACITY {Math.round(clamp01(compareOpacity) * 100)}%</span>
-              </>
-            ) : (
-              <span>FOV {view.fovDegrees.toFixed(1)}</span>
-            )}
+            <span>FOV {view.fovDegrees.toFixed(1)}</span>
+            {compareImageUrl && <span>OPACITY {Math.round(clamp01(compareOpacity) * 100)}%</span>}
           </div>
         </>
       )}
@@ -250,12 +220,12 @@ function createSphere(material: THREE.Material) {
   return new THREE.Mesh(geometry, material);
 }
 
-function configureCamera(camera: THREE.PerspectiveCamera, view: PanoViewState, rotation: Euler, fovDegrees: number) {
+function configureCamera(camera: THREE.PerspectiveCamera, view: PanoViewState, rotation: Euler) {
   camera.rotation.order = 'YXZ';
   camera.rotation.y = THREE.MathUtils.degToRad(view.yawDegrees - rotation[1]);
   camera.rotation.x = THREE.MathUtils.degToRad(view.pitchDegrees);
   camera.rotation.z = 0;
-  camera.fov = clampFovDegrees(fovDegrees);
+  camera.fov = clampFovDegrees(view.fovDegrees);
   camera.updateProjectionMatrix();
 }
 
@@ -308,10 +278,6 @@ function updateLayerOpacity(
     item.depthWrite = !transparent;
     item.needsUpdate = true;
   }
-}
-
-function resolveLayerFov(layerFovDegrees: number | undefined, fallbackFovDegrees: number) {
-  return clampFovDegrees(layerFovDegrees ?? fallbackFovDegrees);
 }
 
 function clampFovDegrees(value: number) {

@@ -36,24 +36,24 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-slate-950 text-slate-100">
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-950 px-4">
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-zinc-100 text-zinc-900">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3 shadow-sm">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-cyan-400 text-slate-950">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-teal-500 text-white shadow-sm">
             <Boxes className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Continuity Stage</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-teal-700">Continuity Stage</div>
             <TextInput
               value={project.name}
               onChange={(event) => updateProjectInfo({ name: event.target.value })}
-              className="mt-1 h-7 border-transparent bg-transparent px-0 py-0 text-base font-semibold focus:border-transparent"
+              className="mt-1 h-7 border-transparent bg-transparent px-0 py-0 text-base font-semibold shadow-none focus:border-transparent focus:ring-0"
               aria-label="Project name"
             />
           </div>
         </div>
 
-        <nav className="flex items-center gap-1 rounded-md border border-slate-800 bg-slate-900 p-1">
+        <nav className="flex max-w-full items-center gap-1 overflow-x-auto rounded-md border border-zinc-200 bg-zinc-50 p-1">
           {workspaceItems.map((item) => {
             const Icon = item.icon;
             const active = workspace === item.id;
@@ -61,10 +61,10 @@ export default function App() {
               <button
                 key={item.id}
                 onClick={() => setWorkspace(item.id)}
-                className={`inline-flex min-w-24 items-center justify-center gap-2 rounded px-3 py-2 text-sm font-medium transition ${
+                className={`inline-flex min-w-20 shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
                   active
-                    ? 'bg-cyan-400 text-slate-950'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+                    ? 'bg-teal-500 text-white shadow-sm'
+                    : 'text-zinc-500 hover:bg-white hover:text-zinc-900'
                 }`}
               >
                 <Icon className="h-4 w-4" />
@@ -84,21 +84,21 @@ export default function App() {
           />
           <button
             onClick={() => fileRef.current?.click()}
-            className="inline-flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800"
+            className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-teal-300 hover:text-teal-700"
           >
             <FolderOpen className="h-4 w-4" />
             Open
           </button>
           <button
             onClick={() => downloadProject(project)}
-            className="inline-flex items-center gap-2 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800"
+            className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-teal-300 hover:text-teal-700"
           >
             <FileJson className="h-4 w-4" />
             Save
           </button>
           <button
             onClick={() => setWorkspace('export')}
-            className="inline-flex items-center gap-2 rounded-md bg-cyan-400 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
+            className="inline-flex items-center gap-2 rounded-md bg-teal-500 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-600"
           >
             <Download className="h-4 w-4" />
             Package
@@ -106,7 +106,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="shrink-0 border-b border-slate-800 bg-slate-950 px-4 py-2">
+      <div className="shrink-0 border-b border-zinc-200 bg-zinc-100 px-4 py-2">
         <DirectorQuest project={project} />
       </div>
 

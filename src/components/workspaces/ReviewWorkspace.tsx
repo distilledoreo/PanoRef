@@ -70,17 +70,17 @@ export function ReviewWorkspace() {
                   onClick={() => selectShot(shot.id)}
                   className={`w-full rounded-md border px-3 py-2 text-left transition ${
                     selectedShot?.id === shot.id
-                      ? 'border-cyan-400 bg-cyan-950/60'
-                      : 'border-slate-800 bg-slate-900 hover:border-slate-600'
+                      ? 'border-teal-500 bg-teal-50 shadow-sm'
+                      : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-100">{shot.name}</span>
-                    <span className="text-xs text-slate-500">{shot.status}</span>
+                    <span className="text-sm font-medium text-zinc-900">{shot.name}</span>
+                    <span className="text-xs text-zinc-500">{shot.status}</span>
                   </div>
                 </button>
               ))}
-              {project.shots.length === 0 && <p className="text-sm text-slate-500">No shots are ready for review.</p>}
+              {project.shots.length === 0 && <p className="text-sm text-zinc-500">No shots are ready for review.</p>}
             </div>
           </Panel>
 
@@ -94,7 +94,7 @@ export function ReviewWorkspace() {
                   className="hidden"
                   onChange={(event) => void importAiResult(event.target.files?.[0])}
                 />
-                <IconButton onClick={() => void exportAiBrief()} disabled={isBuildingBrief} className="w-full bg-cyan-500 text-slate-950 hover:bg-cyan-400">
+                <IconButton onClick={() => void exportAiBrief()} disabled={isBuildingBrief} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
                   <Package className="h-4 w-4" />
                   {isBuildingBrief ? 'Building Brief...' : 'Export AI Brief ZIP'}
                 </IconButton>
@@ -137,13 +137,13 @@ export function ReviewWorkspace() {
         </>
       )}
     >
-      <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_300px] bg-slate-950">
-        <div className="grid min-h-0 grid-cols-2 gap-0">
+      <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_300px] bg-white">
+        <div className="grid min-h-0 grid-cols-1 gap-0 lg:grid-cols-2">
           <ReviewImage title="Linked Pano Reference" src={selectedPanoAsset?.uri} emptyText="No linked pano reference" />
           <ReviewImage title="AI Result Frame" src={selectedAiResultAsset?.uri} emptyText="Export the AI brief, generate externally, then import a result frame." />
         </div>
-        <div className="grid min-h-0 grid-cols-2 border-t border-slate-800">
-          <div className="min-h-0 overflow-y-auto border-r border-slate-800 p-4">
+        <div className="grid min-h-0 grid-cols-1 border-t border-zinc-200 lg:grid-cols-2">
+          <div className="min-h-0 overflow-y-auto border-b border-zinc-200 p-4 lg:border-b-0 lg:border-r">
             <Field label="Image Prompt">
               <TextArea readOnly value={selectedShot ? generateImagePrompt(project, selectedShot) : ''} className="min-h-56 font-mono text-xs" />
             </Field>
@@ -161,14 +161,14 @@ export function ReviewWorkspace() {
 
 function ReviewImage({ title, src, emptyText }: { title: string; src?: string; emptyText: string }) {
   return (
-    <div className="relative min-h-0 border-r border-slate-800 bg-slate-950">
-      <div className="absolute left-4 top-4 z-10 rounded-md bg-slate-950/80 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-300 backdrop-blur">
+    <div className="relative min-h-0 border-b border-zinc-200 bg-zinc-50 lg:border-b-0 lg:border-r">
+      <div className="absolute left-4 top-4 z-10 rounded-md border border-white/70 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-wide text-zinc-700 shadow-sm backdrop-blur">
         {title}
       </div>
       {src ? (
         <img src={src} alt={title} className="h-full w-full object-contain" />
       ) : (
-        <div className="flex h-full items-center justify-center px-8 text-center text-sm text-slate-500">{emptyText}</div>
+        <div className="flex h-full items-center justify-center px-8 text-center text-sm text-zinc-500">{emptyText}</div>
       )}
     </div>
   );

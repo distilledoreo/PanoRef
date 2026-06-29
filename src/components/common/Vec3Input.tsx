@@ -17,7 +17,7 @@ export function Vec3Input({
     <div className="grid grid-cols-3 gap-2">
       {value.map((item, index) => (
         <div key={labels[index]}>
-          <span className="mb-1 block text-[10px] font-medium text-slate-500">{labels[index]}</span>
+          <span className="mb-1 block text-[10px] font-medium text-zinc-500">{labels[index]}</span>
           <TextInput
             type="number"
             step={step}
@@ -33,4 +33,3 @@ export function Vec3Input({
     </div>
   );
 }
-

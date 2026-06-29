@@ -2,7 +2,8 @@ import JSZip from 'jszip';
 import { LocationProject, Shot } from '../domain/types';
 import { buildShotMetadata, createShotPackageManifest } from './exportManifest';
 import { generateImagePrompt, generateVideoPrompt } from './prompts';
-import { renderContinuityControlView, renderPanoPerspectiveCrop, renderViewportClay } from './renderers';
+import { preparePanoExportDataUrl } from './panoImage';
+import { renderPanoPerspectiveCrop, renderShotFrame } from './renderers';
 
 export interface ShotPackageResult {
   blob: Blob;
@@ -10,7 +11,18 @@ export interface ShotPackageResult {
   manifestPaths: string[];
 }
 
-export async function buildShotPackage(project: LocationProject, shot: Shot): Promise<ShotPackageResult> {
+export class ShotPackageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ShotPackageError';
+  }
+}
+
+export async function buildShotPackage(project: LocationProject, shot?: Shot): Promise<ShotPackageResult> {
+  if (!shot) {
+    throw new ShotPackageError('Select a shot before exporting a package.');
+  }
+
   const zip = new JSZip();
   const manifest = createShotPackageManifest(project, shot);
   const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);
@@ -22,7 +34,7 @@ export async function buildShotPackage(project: LocationProject, shot: Shot): Pr
   const aiResultAssetId = shot.assets.aiResultFrameAssetId ?? shot.assets.finalBaseFrameAssetId;
 
   if (shot.exportSettings.includeViewport) {
-    const viewport = await renderViewportClay(project, shot.camera, shot.exportSettings.width, shot.exportSettings.height);
+    const viewport = await renderShotFrame(project, shot);
     addDataUrl(zip, `${manifest.rootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
   }
 
@@ -33,18 +45,6 @@ export async function buildShotPackage(project: LocationProject, shot: Shot): Pr
     }
   }
 
-  if (shot.exportSettings.includeContinuityControlView && linkedPano && linkedPanoAsset) {
-    const controlView = await renderContinuityControlView(
-      project,
-      shot.camera,
-      linkedPano,
-      linkedPanoAsset.uri,
-      shot.exportSettings.width,
-      shot.exportSettings.height,
-    );
-    addDataUrl(zip, `${manifest.rootFolder}/inputs/continuity_control_view.png`, controlView.dataUrl);
-  }
-
   if (shot.exportSettings.includePanoCrop && linkedPano && shot.panoCrop) {
     if (linkedPanoAsset) {
       const crop = await renderPanoPerspectiveCrop(linkedPanoAsset.uri, shot.panoCrop, linkedPano.rotation);
@@ -52,12 +52,32 @@ export async function buildShotPackage(project: LocationProject, shot: Shot): Pr
     }
   }
 
-  if (shot.exportSettings.includeFullPano && canonicalAsset) {
-    addDataUrl(zip, `${manifest.rootFolder}/inputs/global_reference.png`, canonicalAsset.uri);
+  if (shot.exportSettings.includeFullPano && canonicalAsset && canonicalPano) {
+    const exportUrl = await preparePanoExportDataUrl(
+      canonicalAsset.uri,
+      canonicalPano.width,
+      canonicalPano.height,
+      {
+        letterboxEnabled: project.settings.panoLetterboxExports169,
+        targetWidth: project.settings.defaultShotWidth,
+        targetHeight: project.settings.defaultShotHeight,
+      },
+    );
+    addDataUrl(zip, `${manifest.rootFolder}/inputs/global_reference.png`, exportUrl);
   }
 
-  if (shot.exportSettings.includeGrayboxPano && grayboxAsset) {
-    addDataUrl(zip, `${manifest.rootFolder}/inputs/global_graybox.png`, grayboxAsset.uri);
+  if (shot.exportSettings.includeGrayboxPano && grayboxAsset && grayboxPano) {
+    const exportUrl = await preparePanoExportDataUrl(
+      grayboxAsset.uri,
+      grayboxPano.width,
+      grayboxPano.height,
+      {
+        letterboxEnabled: project.settings.panoLetterboxExports169,
+        targetWidth: project.settings.defaultShotWidth,
+        targetHeight: project.settings.defaultShotHeight,
+      },
+    );
+    addDataUrl(zip, `${manifest.rootFolder}/inputs/global_graybox.png`, exportUrl);
   }
 
   if (shot.exportSettings.includeMetadata) {

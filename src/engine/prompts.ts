@@ -12,28 +12,46 @@ export function generateImagePrompt(project: LocationProject, shot: Shot): strin
   const landmarkText = landmarkNames.length > 0
     ? landmarkNames.join(', ')
     : 'No prompt-critical landmarks selected.';
-  const controlInstructions = shot.exportSettings.includeContinuityControlView
+
+  const canonicalPano = project.panoRefs.find((pano) => pano.isCanonical);
+  const grayboxPano = project.panoRefs.find((pano) => pano.type === 'graybox_render');
+  const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);
+  const hasGlobalReference = Boolean(shot.exportSettings.includeFullPano && canonicalPano);
+  const hasGrayboxPano = Boolean(shot.exportSettings.includeGrayboxPano && grayboxPano);
+  const hasPanoCrop = Boolean(shot.exportSettings.includePanoCrop && linkedPano && shot.panoCrop);
+
+  const referenceInstructions = [
+    'Use viewport_clay.png as the strict camera, composition, perspective, scale, and layout reference.',
+  ];
+  if (hasGlobalReference) {
+    referenceInstructions.push('Use global_reference.png, when available, as the visual identity, lighting, material, and palette reference.');
+  }
+  if (hasGrayboxPano) {
+    referenceInstructions.push('Use global_graybox.png, when available, as the full-location spatial reference.');
+  }
+  if (hasPanoCrop) {
+    referenceInstructions.push('Use pano_crop.png, when available, only as supporting local context.');
+  }
+
+  const continuityLines = hasGlobalReference
     ? [
-      'Use continuity_control_view.png as the primary camera/layout control: exact composition, perspective, object placement, scale, local lighting, and reliable projected style placement.',
-      'Gray areas in continuity_control_view.png are untextured structure placeholders, not final material design.',
-      'Use viewport_clay.png as the secondary exact clay fallback for camera composition if the projection view has gray unknown regions.',
+      'Preserve the same layout, proportions, architecture, lighting direction, material language, and color palette from the global reference.',
+      'Do not add new doors, windows, buildings, props, or modern objects unless explicitly requested.',
     ]
     : [
-      'Use viewport_clay.png as the exact camera composition, perspective, scale, and spatial layout.',
+      'Preserve the graybox layout, proportions, architecture, and spatial relationships from viewport_clay.png.',
+      'Do not add new doors, windows, buildings, props, or modern objects unless explicitly requested.',
     ];
 
   return [
-    ...controlInstructions,
-    'Use global_reference.png as the final material richness, architectural detail, lighting style, color palette, and environment identity authority.',
-    'Use pano_crop.png only as secondary local context when it agrees with the camera-locked control view.',
+    ...referenceInstructions,
     '',
     `Location: ${project.name}`,
     `Shot: ${shot.name}`,
     '',
     `Preserve these landmarks: ${landmarkText}`,
     '',
-    'Preserve the same layout, proportions, architecture, lighting direction, material language, and color palette from the global reference.',
-    'Do not add new doors, windows, buildings, props, or modern objects unless explicitly requested.',
+    ...continuityLines,
     'Do not move, redesign, remove, or replace the named landmarks.',
     '',
     'Render the viewport frame as a polished final base frame suitable for image-to-video generation.',

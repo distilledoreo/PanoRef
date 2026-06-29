@@ -45,22 +45,8 @@ export interface SceneObject {
   category: 'architecture' | 'environment' | 'helper' | 'landmark';
   locked: boolean;
   visible: boolean;
-  projectionStamp?: ProjectionStamp;
   materialId?: string;
   metadata?: Record<string, unknown>;
-}
-
-export interface ProjectionStamp {
-  id: string;
-  panoId: string;
-  panoYawDegrees: number;
-  yawDegrees: number;
-  pitchDegrees: number;
-  viewFovDegrees: number;
-  panoFovDegrees: number;
-  opacity: number;
-  aspectRatio: number;
-  createdAt: string;
 }
 
 export interface SceneData {
@@ -122,7 +108,6 @@ export interface ShotExportSettings {
   width: number;
   height: number;
   includeViewport: boolean;
-  includeContinuityControlView: boolean;
   includeAiResultFrame: boolean;
   includePanoCrop: boolean;
   includeFullPano: boolean;
@@ -184,6 +169,7 @@ export interface ProjectSettings {
   defaultShotFovDegrees: number;
   panoGoodMatchMeters: number;
   panoModerateMatchMeters: number;
+  panoLetterboxExports169: boolean;
 }
 
 export interface LocationProject {

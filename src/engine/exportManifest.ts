@@ -21,13 +21,7 @@ export function createShotPackageManifest(project: LocationProject, shot: Shot):
   if (shot.exportSettings.includeViewport) {
     files.push({ path: `${rootFolder}/inputs/viewport_clay.png`, kind: 'image', required: true });
   }
-  if (shot.exportSettings.includeContinuityControlView && linkedPano) {
-    files.push({ path: `${rootFolder}/inputs/continuity_control_view.png`, kind: 'image', required: true });
-  }
-  if (shot.exportSettings.includeAiResultFrame && aiResultAssetId) {
-    files.push({ path: `${rootFolder}/outputs/ai_result_frame.png`, kind: 'image', required: false });
-  }
-  if (shot.exportSettings.includePanoCrop) {
+  if (shot.exportSettings.includePanoCrop && linkedPano && shot.panoCrop) {
     files.push({ path: `${rootFolder}/inputs/pano_crop.png`, kind: 'image', required: true });
   }
   if (shot.exportSettings.includeFullPano && canonical) {
@@ -35,6 +29,9 @@ export function createShotPackageManifest(project: LocationProject, shot: Shot):
   }
   if (shot.exportSettings.includeGrayboxPano && graybox) {
     files.push({ path: `${rootFolder}/inputs/global_graybox.png`, kind: 'image', required: false });
+  }
+  if (shot.exportSettings.includeAiResultFrame && aiResultAssetId) {
+    files.push({ path: `${rootFolder}/outputs/ai_result_frame.png`, kind: 'image', required: false });
   }
   if (shot.exportSettings.includeMetadata) {
     files.push({ path: `${rootFolder}/metadata/shot.json`, kind: 'json', required: true });

@@ -1,8 +1,7 @@
 import * as THREE from 'three';
-import { CameraData, Euler, LocationProject, PanoCropSettings, PanoReference, ProjectionStamp } from '../domain/types';
-import { PROJECTION_MIN_FACING, PROJECTION_OCCLUSION_BIAS_METERS } from './projection';
+import { CameraData, Euler, LocationProject, PanoCropSettings, Shot } from '../domain/types';
 import { buildScene, disposeScene } from './sceneObjects';
-import { degreesToRadians } from './sync';
+import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 
 export interface ImageRenderResult {
   dataUrl: string;
@@ -71,6 +70,35 @@ export async function renderGrayboxEquirectangularPano(
   return { dataUrl, width, height };
 }
 
+export async function renderShotFrame(project: LocationProject, shot: Shot): Promise<ImageRenderResult> {
+  return renderViewportClay(
+    project,
+    shot.camera,
+    shot.exportSettings.width,
+    shot.exportSettings.height,
+  );
+}
+
+export function applyFlyCameraToPerspectiveCamera(
+  camera: THREE.PerspectiveCamera,
+  fly: FlyCameraState,
+  fovDegrees: number,
+  aspect: number,
+  near = 0.1,
+  far = 200,
+) {
+  camera.fov = fovDegrees;
+  camera.aspect = aspect;
+  camera.near = near;
+  camera.far = far;
+  camera.position.set(fly.position[0], fly.position[1], fly.position[2]);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = THREE.MathUtils.degToRad(fly.yawDegrees);
+  camera.rotation.x = THREE.MathUtils.degToRad(fly.pitchDegrees);
+  camera.rotation.z = 0;
+  camera.updateProjectionMatrix();
+}
+
 export async function renderViewportClay(
   project: LocationProject,
   cameraData: CameraData,
@@ -85,85 +113,18 @@ export async function renderViewportClay(
     cameraData.near,
     cameraData.far,
   );
-  camera.position.fromArray(cameraData.position);
-  camera.lookAt(new THREE.Vector3().fromArray(cameraData.target));
-  camera.updateProjectionMatrix();
-  renderer.render(scene, camera);
-  const dataUrl = renderer.domElement.toDataURL('image/png');
-
-  disposeScene(scene);
-  renderer.dispose();
-
-  return { dataUrl, width, height };
-}
-
-export async function renderContinuityControlView(
-  project: LocationProject,
-  cameraData: CameraData,
-  pano: PanoReference,
-  panoImageUrl: string,
-  width: number,
-  height: number,
-): Promise<ImageRenderResult> {
-  const renderer = createRenderer(width, height);
-  const scene = buildScene(project, { showHelpers: false, hiddenObjectTypes: ['sun_marker'] });
-  const panoOrigin = new THREE.Vector3().fromArray(pano.origin);
-  const maxDistance = Math.max(cameraData.far, 100);
-
-  const occlusionTarget = new THREE.WebGLCubeRenderTarget(512, {
-    type: THREE.UnsignedByteType,
-    generateMipmaps: false,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-  });
-  const cubeCamera = new THREE.CubeCamera(0.1, maxDistance, occlusionTarget);
-  cubeCamera.position.copy(panoOrigin);
-
-  const distanceMaterial = createProjectionDistanceMaterial(panoOrigin, maxDistance);
-  scene.overrideMaterial = distanceMaterial;
-  cubeCamera.update(renderer, scene);
-  scene.overrideMaterial = null;
-
-  const panoTexture = await loadTexture(panoImageUrl);
-  panoTexture.colorSpace = THREE.SRGBColorSpace;
-  panoTexture.wrapS = THREE.RepeatWrapping;
-  panoTexture.wrapT = THREE.ClampToEdgeWrapping;
-
-  const projectionMaterial = createProjectedPanoMaterial({
-    panoTexture,
-    occlusionTexture: occlusionTarget.texture,
-    panoOrigin,
-    panoYawDegrees: pano.rotation[1],
-    maxDistance,
-  });
-  const stampedMaterials = createStampedProjectionMaterials({
-    project,
-    pano,
-    panoTexture,
-    occlusionTexture: occlusionTarget.texture,
-    panoOrigin,
-    maxDistance,
-  });
-  const clayMaterial = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.8 });
-  applyProjectionMaterials(scene, project, projectionMaterial, clayMaterial, stampedMaterials);
-
-  const camera = new THREE.PerspectiveCamera(
+  applyFlyCameraToPerspectiveCamera(
+    camera,
+    flyCameraFromCamera(cameraData),
     cameraData.fovDegrees,
     width / height,
     cameraData.near,
     cameraData.far,
   );
-  camera.position.fromArray(cameraData.position);
-  camera.lookAt(new THREE.Vector3().fromArray(cameraData.target));
-  camera.updateProjectionMatrix();
-
   renderer.render(scene, camera);
   const dataUrl = renderer.domElement.toDataURL('image/png');
 
   disposeScene(scene);
-  distanceMaterial.dispose();
-  panoTexture.dispose();
-  occlusionTarget.dispose();
   renderer.dispose();
 
   return { dataUrl, width, height };
@@ -202,262 +163,6 @@ export async function renderPanoPerspectiveCrop(
   renderer.dispose();
 
   return { dataUrl, width: crop.width, height: crop.height };
-}
-
-function applyProjectionMaterials(
-  scene: THREE.Scene,
-  project: LocationProject,
-  projectionMaterial: THREE.Material,
-  clayMaterial: THREE.Material,
-  stampedMaterials: Map<string, THREE.Material>,
-) {
-  const sceneObjects = new Map(project.scene.objects.map((object) => [object.id, object]));
-  const hasStampedMaterials = stampedMaterials.size > 0;
-  for (const root of scene.children) {
-    const objectId = root.userData.sceneObjectId as string | undefined;
-    if (!objectId) continue;
-
-    const sceneObject = sceneObjects.get(objectId);
-    const stampedMaterial = stampedMaterials.get(objectId);
-    const shouldProject = !hasStampedMaterials && (sceneObject?.category === 'architecture' || sceneObject?.category === 'environment');
-    root.traverse((node) => {
-      const mesh = node as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      mesh.material = stampedMaterial ?? (shouldProject ? projectionMaterial : clayMaterial);
-    });
-  }
-}
-
-function createStampedProjectionMaterials(params: {
-  project: LocationProject;
-  pano: PanoReference;
-  panoTexture: THREE.Texture;
-  occlusionTexture: THREE.CubeTexture;
-  panoOrigin: THREE.Vector3;
-  maxDistance: number;
-}) {
-  const materials = new Map<string, THREE.Material>();
-  for (const object of params.project.scene.objects) {
-    if (!object.projectionStamp || object.projectionStamp.panoId !== params.pano.id) continue;
-    if (object.category !== 'architecture' && object.category !== 'environment') continue;
-    materials.set(object.id, createStampedPanoMaterial({
-      stamp: object.projectionStamp,
-      panoTexture: params.panoTexture,
-      occlusionTexture: params.occlusionTexture,
-      panoOrigin: params.panoOrigin,
-      maxDistance: params.maxDistance,
-    }));
-  }
-  return materials;
-}
-
-function createProjectionDistanceMaterial(panoOrigin: THREE.Vector3, maxDistance: number) {
-  return new THREE.ShaderMaterial({
-    side: THREE.DoubleSide,
-    uniforms: {
-      panoOrigin: { value: panoOrigin },
-      maxDistance: { value: maxDistance },
-    },
-    vertexShader: `
-      varying vec3 vWorldPosition;
-
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldPosition = worldPosition.xyz;
-        gl_Position = projectionMatrix * viewMatrix * worldPosition;
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 panoOrigin;
-      uniform float maxDistance;
-      varying vec3 vWorldPosition;
-
-      void main() {
-        float normalizedDistance = clamp(length(vWorldPosition - panoOrigin) / maxDistance, 0.0, 1.0);
-        gl_FragColor = vec4(vec3(normalizedDistance), 1.0);
-      }
-    `,
-  });
-}
-
-function createProjectedPanoMaterial(params: {
-  panoTexture: THREE.Texture;
-  occlusionTexture: THREE.CubeTexture;
-  panoOrigin: THREE.Vector3;
-  panoYawDegrees: number;
-  maxDistance: number;
-}) {
-  return new THREE.ShaderMaterial({
-    side: THREE.DoubleSide,
-    uniforms: {
-      panoMap: { value: params.panoTexture },
-      occlusionMap: { value: params.occlusionTexture },
-      panoOrigin: { value: params.panoOrigin },
-      panoYawRadians: { value: degreesToRadians(params.panoYawDegrees) },
-      maxDistance: { value: params.maxDistance },
-      clayColor: { value: new THREE.Color(0x9aa0a6) },
-      minFacing: { value: PROJECTION_MIN_FACING },
-      occlusionBias: { value: PROJECTION_OCCLUSION_BIAS_METERS },
-    },
-    vertexShader: `
-      varying vec3 vWorldPosition;
-      varying vec3 vWorldNormal;
-
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldPosition = worldPosition.xyz;
-        vWorldNormal = normalize(mat3(modelMatrix) * normal);
-        gl_Position = projectionMatrix * viewMatrix * worldPosition;
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D panoMap;
-      uniform samplerCube occlusionMap;
-      uniform vec3 panoOrigin;
-      uniform float panoYawRadians;
-      uniform float maxDistance;
-      uniform vec3 clayColor;
-      uniform float minFacing;
-      uniform float occlusionBias;
-      varying vec3 vWorldPosition;
-      varying vec3 vWorldNormal;
-
-      const float PI = 3.141592653589793;
-
-      void main() {
-        vec3 fromPano = vWorldPosition - panoOrigin;
-        float hitDistance = length(fromPano);
-        vec3 direction = normalize(fromPano);
-        vec3 towardPano = -direction;
-        float facingConfidence = clamp(dot(normalize(vWorldNormal), towardPano), 0.0, 1.0);
-        float nearestDistance = textureCube(occlusionMap, direction).r * maxDistance;
-        float occlusionConfidence = hitDistance <= nearestDistance + occlusionBias ? 1.0 : 0.0;
-
-        float yaw = atan(direction.x, direction.z);
-        float pitch = asin(clamp(direction.y, -1.0, 1.0));
-        float localYaw = atan(sin(yaw - panoYawRadians), cos(yaw - panoYawRadians));
-        vec2 uv = vec2(localYaw / (2.0 * PI) + 0.5, pitch / PI + 0.5);
-        vec3 projectedColor = texture2D(panoMap, uv).rgb;
-
-        float useProjection = facingConfidence >= minFacing && occlusionConfidence > 0.5 ? 1.0 : 0.0;
-        gl_FragColor = vec4(mix(clayColor, projectedColor, useProjection), 1.0);
-      }
-    `,
-  });
-}
-
-function createStampedPanoMaterial(params: {
-  stamp: ProjectionStamp;
-  panoTexture: THREE.Texture;
-  occlusionTexture: THREE.CubeTexture;
-  panoOrigin: THREE.Vector3;
-  maxDistance: number;
-}) {
-  return new THREE.ShaderMaterial({
-    side: THREE.DoubleSide,
-    uniforms: {
-      panoMap: { value: params.panoTexture },
-      occlusionMap: { value: params.occlusionTexture },
-      panoOrigin: { value: params.panoOrigin },
-      panoYawRadians: { value: degreesToRadians(params.stamp.panoYawDegrees) },
-      stampYawRadians: { value: degreesToRadians(params.stamp.yawDegrees) },
-      stampPitchRadians: { value: degreesToRadians(params.stamp.pitchDegrees) },
-      stampViewFovRadians: { value: degreesToRadians(clampFovDegrees(params.stamp.viewFovDegrees)) },
-      stampPanoFovRadians: { value: degreesToRadians(clampFovDegrees(params.stamp.panoFovDegrees)) },
-      stampAspectRatio: { value: safeAspectRatio(params.stamp.aspectRatio) },
-      stampOpacity: { value: clamp01(params.stamp.opacity) },
-      maxDistance: { value: params.maxDistance },
-      clayColor: { value: new THREE.Color(0x9aa0a6) },
-      minFacing: { value: PROJECTION_MIN_FACING },
-      occlusionBias: { value: PROJECTION_OCCLUSION_BIAS_METERS },
-    },
-    vertexShader: `
-      varying vec3 vWorldPosition;
-      varying vec3 vWorldNormal;
-
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldPosition = worldPosition.xyz;
-        vWorldNormal = normalize(mat3(modelMatrix) * normal);
-        gl_Position = projectionMatrix * viewMatrix * worldPosition;
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D panoMap;
-      uniform samplerCube occlusionMap;
-      uniform vec3 panoOrigin;
-      uniform float panoYawRadians;
-      uniform float stampYawRadians;
-      uniform float stampPitchRadians;
-      uniform float stampViewFovRadians;
-      uniform float stampPanoFovRadians;
-      uniform float stampAspectRatio;
-      uniform float stampOpacity;
-      uniform float maxDistance;
-      uniform vec3 clayColor;
-      uniform float minFacing;
-      uniform float occlusionBias;
-      varying vec3 vWorldPosition;
-      varying vec3 vWorldNormal;
-
-      const float PI = 3.141592653589793;
-
-      void main() {
-        vec3 fromPano = vWorldPosition - panoOrigin;
-        float hitDistance = length(fromPano);
-        vec3 direction = normalize(fromPano);
-        vec3 towardPano = -direction;
-        float facingConfidence = clamp(dot(normalize(vWorldNormal), towardPano), 0.0, 1.0);
-        float nearestDistance = textureCube(occlusionMap, direction).r * maxDistance;
-        float occlusionConfidence = hitDistance <= nearestDistance + occlusionBias ? 1.0 : 0.0;
-
-        vec3 forward = normalize(vec3(
-          sin(stampYawRadians) * cos(stampPitchRadians),
-          sin(stampPitchRadians),
-          cos(stampYawRadians) * cos(stampPitchRadians)
-        ));
-        vec3 right = normalize(vec3(cos(stampYawRadians), 0.0, -sin(stampYawRadians)));
-        vec3 up = normalize(cross(forward, right));
-
-        float localZ = dot(direction, forward);
-        float viewHalfTan = tan(stampViewFovRadians * 0.5);
-        float ndcX = (dot(direction, right) / max(localZ, 0.0001)) / (viewHalfTan * stampAspectRatio);
-        float ndcY = (dot(direction, up) / max(localZ, 0.0001)) / viewHalfTan;
-        float insideStampFrame = localZ > 0.0 && abs(ndcX) <= 1.0 && abs(ndcY) <= 1.0 ? 1.0 : 0.0;
-
-        float panoHalfTan = tan(stampPanoFovRadians * 0.5);
-        vec3 sampledDirection = normalize(
-          forward
-          + right * ndcX * panoHalfTan * stampAspectRatio
-          + up * ndcY * panoHalfTan
-        );
-
-        float yaw = atan(sampledDirection.x, sampledDirection.z);
-        float pitch = asin(clamp(sampledDirection.y, -1.0, 1.0));
-        float localYaw = atan(sin(yaw - panoYawRadians), cos(yaw - panoYawRadians));
-        vec2 uv = vec2(localYaw / (2.0 * PI) + 0.5, pitch / PI + 0.5);
-        vec3 projectedColor = texture2D(panoMap, uv).rgb;
-
-        float useProjection = facingConfidence >= minFacing && occlusionConfidence > 0.5 && insideStampFrame > 0.5 ? stampOpacity : 0.0;
-        gl_FragColor = vec4(mix(clayColor, projectedColor, useProjection), 1.0);
-      }
-    `,
-  });
-}
-
-function clampFovDegrees(value: number) {
-  if (!Number.isFinite(value)) return 65;
-  return Math.max(18, Math.min(120, value));
-}
-
-function safeAspectRatio(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return 16 / 9;
-  return value;
-}
-
-function clamp01(value: number) {
-  if (!Number.isFinite(value)) return 1;
-  return Math.max(0, Math.min(1, value));
 }
 
 function createRenderer(width: number, height: number): THREE.WebGLRenderer {

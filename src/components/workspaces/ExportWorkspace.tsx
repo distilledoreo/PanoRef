@@ -71,7 +71,6 @@ export function ExportWorkspace() {
                   </div>
                   {([
                     ['includeViewport', 'Viewport clay render'],
-                    ['includeContinuityControlView', 'Continuity control view'],
                     ['includeAiResultFrame', 'Imported AI result frame'],
                     ['includePanoCrop', 'Pano crop'],
                     ['includeFullPano', 'Canonical global pano'],
@@ -79,14 +78,14 @@ export function ExportWorkspace() {
                     ['includeMetadata', 'Metadata JSON'],
                     ['includePrompt', 'Prompts'],
                   ] as const).map(([key, label]) => (
-                    <label key={key} className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-300">
+                    <label key={key} className="flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700">
                       <input
                         type="checkbox"
                         checked={selectedShot.exportSettings[key]}
                         onChange={(event) => updateShot(selectedShot.id, {
                           exportSettings: { ...selectedShot.exportSettings, [key]: event.target.checked },
                         })}
-                        className="accent-cyan-400"
+                        className="accent-teal-500"
                       />
                       {label}
                     </label>
@@ -102,12 +101,12 @@ export function ExportWorkspace() {
         </>
       )}
     >
-      <div className="flex h-full min-h-0 flex-col bg-slate-950">
-        <div className="border-b border-slate-800 p-5">
+      <div className="flex h-full min-h-0 flex-col bg-white">
+        <div className="border-b border-zinc-200 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-xl font-semibold text-slate-100">AI Shot Package</h2>
-              <p className="mt-1 text-sm text-slate-500">
+              <h2 className="text-xl font-semibold text-zinc-900">AI Shot Package</h2>
+              <p className="mt-1 text-sm text-zinc-500">
                 Export a ZIP containing reference images, prompts, and metadata for the selected shot.
               </p>
             </div>
@@ -117,37 +116,37 @@ export function ExportWorkspace() {
             </IconButton>
           </div>
         </div>
-        <div className="grid min-h-0 flex-1 grid-cols-2">
-          <div className="min-h-0 overflow-y-auto border-r border-slate-800 p-5">
-            <div className="mb-4 flex items-center gap-2 text-slate-200">
-              <Archive className="h-5 w-5 text-cyan-300" />
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
+          <div className="min-h-0 overflow-y-auto border-b border-zinc-200 p-5 lg:border-b-0 lg:border-r">
+            <div className="mb-4 flex items-center gap-2 text-zinc-800">
+              <Archive className="h-5 w-5 text-teal-600" />
               <h3 className="font-semibold">Manifest Preview</h3>
             </div>
             <div className="space-y-2">
               {manifest?.files.map((file) => (
-                <div key={file.path} className="flex items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-300">
+                <div key={file.path} className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-xs text-zinc-700">
                   <span className="truncate">{file.path}</span>
-                  <span className={file.required ? 'text-cyan-300' : 'text-slate-500'}>{file.required ? 'required' : 'optional'}</span>
+                  <span className={file.required ? 'text-teal-700' : 'text-zinc-500'}>{file.required ? 'required' : 'optional'}</span>
                 </div>
               ))}
-              {!manifest && <p className="text-sm text-slate-500">Create a shot before exporting.</p>}
+              {!manifest && <p className="text-sm text-zinc-500">Create a shot before exporting.</p>}
             </div>
           </div>
           <div className="min-h-0 overflow-y-auto p-5">
-            <div className="mb-4 flex items-center gap-2 text-slate-200">
-              <Check className="h-5 w-5 text-emerald-300" />
+            <div className="mb-4 flex items-center gap-2 text-zinc-800">
+              <Check className="h-5 w-5 text-emerald-600" />
               <h3 className="font-semibold">Last Export</h3>
             </div>
             {lastExport.length > 0 ? (
               <div className="space-y-2">
                 {lastExport.map((path) => (
-                  <div key={path} className="rounded-md border border-emerald-900 bg-emerald-950/40 px-3 py-2 font-mono text-xs text-emerald-200">
+                  <div key={path} className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 font-mono text-xs text-emerald-800">
                     {path}
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-slate-500">No package has been exported in this session.</p>
+              <p className="text-sm text-zinc-500">No package has been exported in this session.</p>
             )}
           </div>
         </div>

@@ -15,13 +15,26 @@ import {
 import {
   createDefaultProject,
   createLandmark,
+  createOriginShot,
   createPanoAsset,
   createPanoReference,
   createSceneObject,
   createShot,
 } from '../domain/defaults';
-import { getPanoCropSettingsForShot, createCameraFromPanoView, yawPitchToDirection, add, multiplyScalar } from '../engine/sync';
+import {
+  getCanonicalPano,
+  getPanoCropSettingsForShot,
+  linkAllShotsToCanonicalPano,
+  panoViewFromCamera,
+  withShotPanoLink,
+  yawPitchToDirection,
+  add,
+  multiplyScalar,
+} from '../engine/sync';
 import { renderGrayboxEquirectangularPano } from '../engine/renderers';
+import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition } from '../engine/sandbox';
+
+export type BuildMode = 'select' | 'place' | 'pano_origin';
 
 interface ContinuityStore {
   project: LocationProject;
@@ -31,25 +44,38 @@ interface ContinuityStore {
   selectedLandmarkId?: string;
   activePanoId?: string;
   panoView: PanoViewState;
+  buildMode: BuildMode;
+  activePrimitive: SceneObjectType;
+  gridSnap: boolean;
   isRenderingGraybox: boolean;
   isExportingPackage: boolean;
+  shotCameraFlying: boolean;
   setWorkspace: (workspace: Workspace) => void;
   setProject: (project: LocationProject) => void;
   updateProjectInfo: (updates: Pick<LocationProject, 'name'> | Partial<Pick<LocationProject, 'name' | 'description'>>) => void;
+  updateProjectSettings: (updates: Partial<LocationProject['settings']>) => void;
+  setBuildMode: (mode: BuildMode) => void;
+  setActivePrimitive: (type: SceneObjectType) => void;
+  setGridSnap: (value: boolean) => void;
   addObject: (type: SceneObjectType) => void;
+  placeObject: (type: SceneObjectType, point: Vec3) => SceneObject;
   selectObject: (id?: string) => void;
   updateObject: (id: string, updates: Partial<SceneObject>) => void;
+  moveObjectToGroundPoint: (id: string, point: Vec3) => void;
+  duplicateObject: (id: string) => SceneObject | undefined;
+  toggleObjectVisibility: (id: string) => void;
+  toggleObjectLocked: (id: string) => void;
   removeObject: (id: string) => void;
   setPanoOrigin: (origin: Vec3) => void;
   renderGrayboxPano: () => Promise<PanoReference>;
-  importCanonicalPano: (params: { name: string; dataUrl: string; width?: number; height?: number }) => void;
+  importCanonicalPano: (params: { name: string; dataUrl: string; width?: number; height?: number; importNote?: string }) => void;
   setActivePano: (id?: string) => void;
   updatePanoReference: (id: string, updates: Partial<PanoReference>) => void;
   setPanoView: (updates: Partial<PanoViewState>) => void;
-  createShotFromCurrentPanoView: () => Shot | undefined;
-  createPresetShot: (preset: ShotPresetId) => Shot | undefined;
-  createMainStructureWideShot: () => Shot | undefined;
+  addCamera: () => Shot;
   selectShot: (id?: string) => void;
+  setShotCameraFlying: (value: boolean) => void;
+  lockShotCamera: () => void;
   updateShot: (id: string, updates: Partial<Shot>) => void;
   removeShot: (id: string) => void;
   attachAiResultFrameToShot: (shotId: string, params: { name: string; dataUrl: string; width?: number; height?: number }) => ProjectAsset;
@@ -59,56 +85,13 @@ interface ContinuityStore {
   setExportingPackage: (value: boolean) => void;
 }
 
-export type ShotPresetId =
-  | 'wide_establishing'
-  | 'medium_frontal'
-  | 'low_angle'
-  | 'doorway_view'
-  | 'insert_detail';
-
-export const shotPresets: Record<ShotPresetId, { label: string; position: Vec3; target: Vec3; fov: number }> = {
-  wide_establishing: {
-    label: 'Wide Establishing',
-    position: [0, 1.7, -6],
-    target: [0, 1.5, 4.5],
-    fov: 65,
-  },
-  medium_frontal: {
-    label: 'Medium Frontal',
-    position: [0.85, 1.55, -3.3],
-    target: [-0.45, 1.45, 3.6],
-    fov: 46,
-  },
-  low_angle: {
-    label: 'Low Angle',
-    position: [-1.8, 0.75, -4.4],
-    target: [0, 2.2, 4.8],
-    fov: 52,
-  },
-  doorway_view: {
-    label: 'Doorway View',
-    position: [-4.2, 1.55, -1.5],
-    target: [0.2, 1.6, 4.8],
-    fov: 58,
-  },
-  insert_detail: {
-    label: 'Insert Detail',
-    position: [2.2, 1.35, -2.6],
-    target: [0.2, 1.2, 4.4],
-    fov: 32,
-  },
-};
-
-export const shotPresetOptions = Object.entries(shotPresets).map(([id, preset]) => ({
-  id: id as ShotPresetId,
-  label: preset.label,
-}));
+const initialProject = createDefaultProject();
 
 export const useContinuityStore = create<ContinuityStore>((set, get) => ({
-  project: createDefaultProject(),
+  project: initialProject,
   workspace: 'build',
   selectedObjectId: undefined,
-  selectedShotId: undefined,
+  selectedShotId: initialProject.shots[0]?.id,
   selectedLandmarkId: undefined,
   activePanoId: undefined,
   panoView: {
@@ -116,23 +99,57 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     pitchDegrees: 0,
     fovDegrees: 65,
   },
+  buildMode: 'select',
+  activePrimitive: 'box',
+  gridSnap: true,
   isRenderingGraybox: false,
   isExportingPackage: false,
+  shotCameraFlying: true,
 
-  setWorkspace: (workspace) => set({ workspace }),
-  setProject: (project) => {
-    const canonical = project.panoRefs.find((pano) => pano.isCanonical) ?? project.panoRefs[0];
-    set({
+  setWorkspace: (workspace) => set((state) => {
+    if (workspace !== 'shots') {
+      return { workspace };
+    }
+    const project = ensureProjectHasCamera(state.project);
+    const shot = project.shots.find((item) => item.id === state.selectedShotId)
+      ?? project.shots[0];
+    return {
+      workspace,
       project,
+      selectedShotId: shot.id,
+      activePanoId: shot.linkedPanoId ?? state.activePanoId,
+      panoView: panoViewFromCamera(shot.camera),
+      shotCameraFlying: true,
+    };
+  }),
+  setProject: (project) => {
+    const linkedProject = linkAllShotsToCanonicalPano(project);
+    const canonical = linkedProject.panoRefs.find((pano) => pano.isCanonical) ?? linkedProject.panoRefs[0];
+    set({
+      project: linkedProject,
       activePanoId: canonical?.id,
       selectedObjectId: project.scene.objects[0]?.id,
-      selectedShotId: project.shots[0]?.id,
-      selectedLandmarkId: project.landmarks[0]?.id,
+      selectedShotId: linkedProject.shots[0]?.id,
+      selectedLandmarkId: linkedProject.landmarks[0]?.id,
+      buildMode: 'select',
     });
   },
   updateProjectInfo: (updates) => set((state) => ({
     project: touchProject({ ...state.project, ...updates }),
   })),
+  updateProjectSettings: (updates) => set((state) => ({
+    project: touchProject({
+      ...state.project,
+      settings: { ...state.project.settings, ...updates },
+    }),
+  })),
+  setBuildMode: (buildMode) => set({ buildMode }),
+  setActivePrimitive: (activePrimitive) => set({
+    activePrimitive,
+    buildMode: 'place',
+    selectedObjectId: undefined,
+  }),
+  setGridSnap: (gridSnap) => set({ gridSnap }),
   addObject: (type) => set((state) => {
     const count = state.project.scene.objects.filter((object) => object.type === type).length + 1;
     const object = createSceneObject(type, count);
@@ -147,6 +164,27 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       selectedObjectId: object.id,
     };
   }),
+  placeObject: (type, point) => {
+    const state = get();
+    const count = state.project.scene.objects.filter((object) => object.type === type).length + 1;
+    const object = createPlacedSceneObject({
+      type,
+      index: count,
+      point,
+      snapToGrid: state.gridSnap,
+    });
+    set((current) => ({
+      project: touchProject({
+        ...current.project,
+        scene: {
+          ...current.project.scene,
+          objects: [...current.project.scene.objects, object],
+        },
+      }),
+      buildMode: 'place',
+    }));
+    return object;
+  },
   selectObject: (id) => set({ selectedObjectId: id }),
   updateObject: (id, updates) => set((state) => ({
     project: touchProject({
@@ -154,6 +192,63 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       scene: {
         ...state.project.scene,
         objects: state.project.scene.objects.map((object) => object.id === id ? { ...object, ...updates } : object),
+      },
+    }),
+  })),
+  moveObjectToGroundPoint: (id, point) => set((state) => {
+    const object = state.project.scene.objects.find((item) => item.id === id);
+    if (!object || object.locked) return state;
+    const position = getGroundPlacementPosition(object, point, state.gridSnap);
+    return {
+      project: touchProject({
+        ...state.project,
+        scene: {
+          ...state.project.scene,
+          objects: state.project.scene.objects.map((item) => item.id === id
+            ? { ...item, transform: { ...item.transform, position } }
+            : item),
+        },
+      }),
+    };
+  }),
+  duplicateObject: (id) => {
+    const state = get();
+    const object = state.project.scene.objects.find((item) => item.id === id);
+    if (!object) return undefined;
+    const count = state.project.scene.objects.filter((item) => item.type === object.type).length + 1;
+    const duplicate = duplicateSceneObject(object, count, state.gridSnap);
+    set((current) => ({
+      project: touchProject({
+        ...current.project,
+        scene: {
+          ...current.project.scene,
+          objects: [...current.project.scene.objects, duplicate],
+        },
+      }),
+      selectedObjectId: duplicate.id,
+      buildMode: 'select',
+    }));
+    return duplicate;
+  },
+  toggleObjectVisibility: (id) => set((state) => ({
+    project: touchProject({
+      ...state.project,
+      scene: {
+        ...state.project.scene,
+        objects: state.project.scene.objects.map((object) => object.id === id
+          ? { ...object, visible: !object.visible }
+          : object),
+      },
+    }),
+  })),
+  toggleObjectLocked: (id) => set((state) => ({
+    project: touchProject({
+      ...state.project,
+      scene: {
+        ...state.project.scene,
+        objects: state.project.scene.objects.map((object) => object.id === id
+          ? { ...object, locked: !object.locked }
+          : object),
       },
     }),
   })),
@@ -198,7 +293,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       });
 
       set((current) => ({
-        project: touchProject({
+        project: touchProject(linkAllShotsToCanonicalPano({
           ...current.project,
           assets: {
             assets: {
@@ -212,7 +307,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
             )),
             pano,
           ],
-        }),
+        })),
         activePanoId: pano.id,
       }));
       return pano;
@@ -239,14 +334,14 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       height: asset.height ?? 2048,
       isCanonical: true,
       sourcePanoId: graybox?.id,
-      notes: 'Imported canonical global environment reference.',
+      notes: params.importNote ?? 'Imported canonical global environment reference.',
     });
     return {
-      project: touchProject({
+      project: touchProject(linkAllShotsToCanonicalPano({
         ...state.project,
         assets: { assets: { ...state.project.assets.assets, [asset.id]: asset } },
         panoRefs: [...state.project.panoRefs.map((existing) => ({ ...existing, isCanonical: false })), pano],
-      }),
+      })),
       activePanoId: pano.id,
     };
   }),
@@ -258,12 +353,13 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       shots: state.project.shots.map((shot) => {
         if (shot.linkedPanoId !== id) return shot;
         const linkedPano = state.project.panoRefs.find((pano) => pano.id === id);
-        if (!linkedPano || !shot.panoCrop) return shot;
+        if (!linkedPano) return shot;
+        const mergedPano = { ...linkedPano, ...updates };
         return {
           ...shot,
           panoCrop: getPanoCropSettingsForShot(
             shot.camera,
-            { ...linkedPano, ...updates },
+            mergedPano,
             shot.exportSettings.width,
             shot.exportSettings.height,
           ),
@@ -275,110 +371,48 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   setPanoView: (updates) => set((state) => ({
     panoView: { ...state.panoView, ...updates },
   })),
-  createShotFromCurrentPanoView: () => {
+  addCamera: () => {
     const state = get();
+    const originShot = createOriginShot(state.project, state.project.shots.length + 1);
     const pano = getActivePano(state.project, state.activePanoId);
-    if (!pano) return undefined;
-    const camera = createCameraFromPanoView({
-      pano,
-      yawDegrees: state.panoView.yawDegrees,
-      pitchDegrees: state.panoView.pitchDegrees,
-      fovDegrees: state.panoView.fovDegrees,
-      aspectRatio: state.project.settings.defaultShotWidth / state.project.settings.defaultShotHeight,
-    });
-    return addShotWithCamera(camera, pano.id);
-  },
-  createPresetShot: (presetId) => {
-    const state = get();
-    const pano = getActivePano(state.project, state.activePanoId);
-    const preset = shotPresets[presetId];
-    const camera: CameraData = {
-      position: preset.position,
-      target: preset.target,
-      fovDegrees: preset.fov,
-      aspectRatio: state.project.settings.defaultShotWidth / state.project.settings.defaultShotHeight,
-      near: 0.1,
-      far: 100,
-    };
-    return addShotWithCamera(camera, pano?.id);
-  },
-  createMainStructureWideShot: () => {
-    const state = get();
-    const pano = state.project.panoRefs.find((item) => item.isCanonical)
-      ?? state.project.panoRefs.find((item) => item.type === 'ai_global_reference')
-      ?? getActivePano(state.project, state.activePanoId);
-    const camera: CameraData = {
-      position: [0, 1.55, -5.8],
-      target: [0, 1.55, 4.4],
-      fovDegrees: 72,
-      aspectRatio: state.project.settings.defaultShotWidth / state.project.settings.defaultShotHeight,
-      near: 0.1,
-      far: 100,
-    };
-    const shot = addShotWithCamera(camera, pano?.id);
-    if (!shot) return undefined;
-    const criticalLandmarks = state.project.landmarks
-      .filter((landmark) => landmark.promptCritical)
-      .map((landmark) => landmark.id);
-    get().updateShot(shot.id, {
-      name: 'Main Structure Wide',
-      description: 'Wide hero framing of the central temple gate with the man in frame, facing the camera.',
-      landmarkIds: criticalLandmarks,
-      promptOverrides: {
-        imagePrompt: 'Night Egyptian temple courtyard, warm torch-lit carved stone, moonlit sky, central structure held wide, foreground man facing camera.',
-        videoPrompt: 'Hold the wide composition with subtle torch flicker and stable architecture.',
-      },
-    });
-    return useContinuityStore.getState().project.shots.find((item) => item.id === shot.id) ?? shot;
+    return addShotWithCamera(originShot.camera, pano?.id, originShot.name);
   },
   selectShot: (id) => set((state) => {
     const shot = state.project.shots.find((item) => item.id === id);
-    if (!shot) return { selectedShotId: id };
-    const direction = yawPitchToDirection(0, 0);
-    const forward = [
-      shot.camera.target[0] - shot.camera.position[0],
-      shot.camera.target[1] - shot.camera.position[1],
-      shot.camera.target[2] - shot.camera.position[2],
-    ] as Vec3;
-    const yaw = Math.atan2(forward[0] || direction[0], forward[2] || direction[2]) * (180 / Math.PI);
-    const horizontal = Math.hypot(forward[0], forward[2]);
-    const pitch = Math.atan2(forward[1], horizontal) * (180 / Math.PI);
+    if (!shot) return { selectedShotId: id, shotCameraFlying: false };
     return {
       selectedShotId: id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
-      panoView: {
-        yawDegrees: yaw,
-        pitchDegrees: pitch,
-        fovDegrees: shot.camera.fovDegrees,
-      },
+      panoView: panoViewFromCamera(shot.camera),
+      shotCameraFlying: true,
     };
   }),
+  setShotCameraFlying: (value) => set({ shotCameraFlying: value }),
+  lockShotCamera: () => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    set({ shotCameraFlying: false });
+  },
   updateShot: (id, updates) => set((state) => ({
     project: touchProject({
       ...state.project,
       shots: state.project.shots.map((shot) => {
         if (shot.id !== id) return shot;
         const updated = { ...shot, ...updates, updatedAt: new Date().toISOString() };
-        const linkedPano = state.project.panoRefs.find((pano) => pano.id === updated.linkedPanoId);
-        if (linkedPano) {
-          updated.panoCrop = getPanoCropSettingsForShot(
-            updated.camera,
-            linkedPano,
-            updated.exportSettings.width,
-            updated.exportSettings.height,
-          );
-        }
-        return updated;
+        return withShotPanoLink(state.project, updated);
       }),
     }),
   })),
-  removeShot: (id) => set((state) => ({
-    project: touchProject({
-      ...state.project,
-      shots: state.project.shots.filter((shot) => shot.id !== id),
-    }),
-    selectedShotId: state.selectedShotId === id ? undefined : state.selectedShotId,
-  })),
+  removeShot: (id) => set((state) => {
+    if (state.project.shots.length <= 1) return state;
+    const shots = state.project.shots.filter((shot) => shot.id !== id);
+    const nextSelected = state.selectedShotId === id ? shots[0]?.id : state.selectedShotId;
+    const nextShot = shots.find((shot) => shot.id === nextSelected);
+    return {
+      project: touchProject({ ...state.project, shots }),
+      selectedShotId: nextSelected,
+      panoView: nextShot ? panoViewFromCamera(nextShot.camera) : state.panoView,
+    };
+  }),
   attachAiResultFrameToShot: (shotId, params) => {
     const state = get();
     const shot = state.project.shots.find((item) => item.id === shotId);
@@ -462,26 +496,34 @@ function touchProject(project: LocationProject): LocationProject {
   return { ...project, updatedAt: new Date().toISOString() };
 }
 
+function ensureProjectHasCamera(project: LocationProject): LocationProject {
+  const withShots = project.shots.length > 0
+    ? project
+    : touchProject({ ...project, shots: [createOriginShot(project)] });
+  return linkAllShotsToCanonicalPano(withShots);
+}
+
 function getActivePano(project: LocationProject, activePanoId?: string): PanoReference | undefined {
   return project.panoRefs.find((pano) => pano.id === activePanoId)
     ?? project.panoRefs.find((pano) => pano.isCanonical)
     ?? project.panoRefs[0];
 }
 
-function addShotWithCamera(camera: CameraData, linkedPanoId?: string): Shot {
+function addShotWithCamera(camera: CameraData, linkedPanoId?: string, name?: string): Shot {
   const state = useContinuityStore.getState();
-  const linkedPano = state.project.panoRefs.find((pano) => pano.id === linkedPanoId);
-  const shot = createShot({
-    index: state.project.shots.length + 1,
-    camera,
-    linkedPanoId,
-    panoCrop: linkedPano
-      ? getPanoCropSettingsForShot(camera, linkedPano, state.project.settings.defaultShotWidth, state.project.settings.defaultShotHeight)
-      : undefined,
-  });
-  shot.landmarkIds = state.project.landmarks
-    .filter((landmark) => landmark.promptCritical)
-    .map((landmark) => landmark.id);
+  const linkedPano = linkedPanoId
+    ? state.project.panoRefs.find((pano) => pano.id === linkedPanoId)
+    : getCanonicalPano(state.project);
+  const shot = withShotPanoLink(
+    state.project,
+    createShot({
+      index: state.project.shots.length + 1,
+      camera,
+      linkedPanoId: linkedPano?.id,
+    }),
+    linkedPano,
+  );
+  if (name) shot.name = name;
 
   useContinuityStore.setState((current) => ({
     project: touchProject({
@@ -490,6 +532,7 @@ function addShotWithCamera(camera: CameraData, linkedPanoId?: string): Shot {
     }),
     selectedShotId: shot.id,
     workspace: 'shots',
+    shotCameraFlying: true,
   }));
 
   return shot;

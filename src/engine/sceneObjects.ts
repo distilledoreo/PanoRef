@@ -3,35 +3,52 @@ import { Landmark, LocationProject, SceneObject, SceneObjectType } from '../doma
 import { degreesToRadians } from './sync';
 
 const materialByCategory: Record<SceneObject['category'], THREE.MeshStandardMaterial> = {
-  architecture: new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.8 }),
-  environment: new THREE.MeshStandardMaterial({ color: 0x8ba888, roughness: 0.85 }),
-  helper: new THREE.MeshStandardMaterial({ color: 0xd6b15d, roughness: 0.75 }),
-  landmark: new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.6 }),
+  architecture: new THREE.MeshStandardMaterial({ color: 0xd8ddd7, roughness: 0.82 }),
+  environment: new THREE.MeshStandardMaterial({ color: 0x91a78f, roughness: 0.86 }),
+  helper: new THREE.MeshStandardMaterial({ color: 0xc79a48, roughness: 0.76 }),
+  landmark: new THREE.MeshStandardMaterial({ color: 0x5f9b7a, roughness: 0.65 }),
 };
 
-const selectedMaterial = new THREE.MeshStandardMaterial({ color: 0x60a5fa, roughness: 0.55 });
-const panoOriginMaterial = new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0x4a1d00 });
-const landmarkMaterial = new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x052e16 });
+const selectedMaterial = new THREE.MeshStandardMaterial({ color: 0x14b8a6, roughness: 0.52 });
+const panoOriginMaterial = new THREE.MeshStandardMaterial({ color: 0xd08a28, emissive: 0x3a2306 });
+const landmarkMaterial = new THREE.MeshStandardMaterial({ color: 0x5f9b7a, emissive: 0x0b2e1e });
 const robeMaterial = new THREE.MeshStandardMaterial({ color: 0xb9a27e, roughness: 0.9 });
 const skinMaterial = new THREE.MeshStandardMaterial({ color: 0x9a6a4a, roughness: 0.7 });
 const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x111111 });
 
+const SHARED_MATERIALS = new Set<THREE.Material>([
+  ...Object.values(materialByCategory),
+  selectedMaterial,
+  panoOriginMaterial,
+  landmarkMaterial,
+  robeMaterial,
+  skinMaterial,
+  eyeMaterial,
+]);
+
 export function buildScene(
   project: LocationProject,
-  options: { selectedObjectId?: string; showHelpers?: boolean; hiddenObjectTypes?: SceneObjectType[] } = {},
+  options: {
+    selectedObjectId?: string;
+    selectedShotId?: string;
+    hideShotFrustums?: boolean;
+    showHelpers?: boolean;
+    hiddenObjectTypes?: SceneObjectType[];
+    previewObject?: SceneObject;
+  } = {},
 ) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111318);
+  scene.background = new THREE.Color(0xf3f6f4);
   const hiddenTypes = new Set(options.hiddenObjectTypes ?? []);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 1.2);
+  const ambient = new THREE.AmbientLight(0xffffff, 1.45);
   scene.add(ambient);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 2);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.9);
   sun.position.set(4, 6, 3);
   scene.add(sun);
 
-  const grid = new THREE.GridHelper(14, 14, 0x475569, 0x27313f);
+  const grid = new THREE.GridHelper(14, 14, 0x9aa7a2, 0xd7dedb);
   grid.position.y = 0.002;
   scene.add(grid);
 
@@ -43,24 +60,31 @@ export function buildScene(
     scene.add(mesh);
   }
 
+  if (options.previewObject) {
+    scene.add(createPreviewMesh(options.previewObject));
+  }
+
   if (options.showHelpers !== false) {
     scene.add(createPanoOrigin(project.scene.panoOrigin));
     for (const landmark of project.landmarks) {
       if (landmark.visible) scene.add(createLandmarkMarker(landmark));
     }
-    for (const shot of project.shots) {
-      const camera = new THREE.PerspectiveCamera(
-        shot.camera.fovDegrees,
-        shot.camera.aspectRatio,
-        shot.camera.near,
-        shot.camera.far,
-      );
-      camera.position.fromArray(shot.camera.position);
-      camera.lookAt(new THREE.Vector3().fromArray(shot.camera.target));
-      camera.updateProjectionMatrix();
-      const helper = new THREE.CameraHelper(camera);
-      helper.name = `Frustum ${shot.shotNumber}`;
-      scene.add(helper);
+    if (!options.hideShotFrustums) {
+      for (const shot of project.shots) {
+        if (options.selectedShotId && shot.id !== options.selectedShotId) continue;
+        const camera = new THREE.PerspectiveCamera(
+          shot.camera.fovDegrees,
+          shot.camera.aspectRatio,
+          shot.camera.near,
+          shot.camera.far,
+        );
+        camera.position.fromArray(shot.camera.position);
+        camera.lookAt(new THREE.Vector3().fromArray(shot.camera.target));
+        camera.updateProjectionMatrix();
+        const helper = new THREE.CameraHelper(camera);
+        helper.name = `Frustum ${shot.shotNumber}`;
+        scene.add(helper);
+      }
     }
   }
 
@@ -225,6 +249,9 @@ function createPanoOrigin(origin: [number, number, number]) {
   ring.rotation.x = Math.PI / 2;
   group.add(sphere, ring);
   group.position.fromArray(origin);
+  group.traverse((node) => {
+    node.userData.panoOrigin = true;
+  });
   return group;
 }
 
@@ -239,12 +266,63 @@ function createLandmarkMarker(landmark: Landmark) {
   return group;
 }
 
+export function createPreviewMesh(object: SceneObject): THREE.Object3D {
+  const preview = createObject3D(object);
+  preview.name = 'Placement Preview';
+  preview.userData.previewObject = true;
+  applyPreviewMaterial(preview);
+  return preview;
+}
+
+export function disposePreviewMesh(node: THREE.Object3D) {
+  node.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose();
+    disposeOwnedMaterials(mesh.material);
+  });
+}
+
 export function disposeScene(scene: THREE.Scene) {
   scene.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (mesh.geometry) mesh.geometry.dispose();
-    const material = mesh.material;
-    if (Array.isArray(material)) material.forEach((item) => item.dispose());
-    else if (material) material.dispose();
+    disposeOwnedMaterials(mesh.material);
   });
+}
+
+function disposeOwnedMaterials(material: THREE.Material | THREE.Material[] | undefined) {
+  if (!material) return;
+  const materials = Array.isArray(material) ? material : [material];
+  materials.forEach((item) => {
+    if (!SHARED_MATERIALS.has(item)) item.dispose();
+  });
+}
+
+function applyPreviewMaterial(node: THREE.Object3D) {
+  node.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    const material = mesh.material;
+    if (!material) return;
+    const materials = Array.isArray(material) ? material : [material];
+    mesh.material = materials.length === 1
+      ? createPreviewMaterial(materials[0])
+      : materials.map((item) => createPreviewMaterial(item));
+    mesh.renderOrder = 10;
+  });
+}
+
+function createPreviewMaterial(source: THREE.Material): THREE.Material {
+  const clone = source.clone();
+  clone.transparent = true;
+  clone.opacity = 0.42;
+  clone.depthWrite = false;
+  clone.side = THREE.DoubleSide;
+  if ('color' in clone && clone.color instanceof THREE.Color) {
+    clone.color.lerp(new THREE.Color(0x14b8a6), 0.28);
+  }
+  if (clone instanceof THREE.MeshStandardMaterial) {
+    clone.emissive.setHex(0x0a2d28);
+    clone.emissiveIntensity = 0.18;
+  }
+  return clone;
 }
