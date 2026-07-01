@@ -4,11 +4,13 @@ import { useContinuityStore } from '../../state/useContinuityStore';
 import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
 import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
+import { GuidedSidebar } from '../common/GuidedSidebar';
 import { Field, IconButton, Panel, TextInput } from '../common/Field';
 import { WarningList } from '../common/WarningList';
 import { PanoViewer } from '../viewers/PanoViewer';
+import { isReferenceReady, resolveWorkspaceObjective } from '../../engine/workflow';
 import { getProjectWarnings } from '../../engine/warnings';
-import { WorkspaceLayout } from './BuildWorkspace';
+import { WorkspaceLayout } from './WorkspaceShell';
 
 export function ReferenceWorkspace() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -24,6 +26,8 @@ export function ReferenceWorkspace() {
     importCanonicalPano,
     renderGrayboxPano,
     isRenderingGraybox,
+    approveGrayboxForReference,
+    setWorkspace,
   } = useContinuityStore();
   const activePano = project.panoRefs.find((pano) => pano.id === activePanoId) ?? project.panoRefs.find((pano) => pano.isCanonical);
   const activeAsset = activePano ? project.assets.assets[activePano.imageAssetId] : undefined;
@@ -91,12 +95,20 @@ export function ReferenceWorkspace() {
     );
   };
 
+  const objective = resolveWorkspaceObjective({
+    project,
+    workspace: 'reference',
+    selectedShotId: undefined,
+    shotCameraFlying: false,
+  });
+
   return (
     <WorkspaceLayout
       sidebar={(
-        <>
-          <Panel title="Global Reference">
-            <div className="space-y-3">
+        <GuidedSidebar
+          objective={objective}
+          doThisNext={(
+            <div className="space-y-2">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -104,29 +116,40 @@ export function ReferenceWorkspace() {
                 className="hidden"
                 onChange={(event) => void importFile(event.target.files?.[0])}
               />
-              <IconButton onClick={() => fileInputRef.current?.click()} className="w-full">
+              <IconButton onClick={() => fileInputRef.current?.click()} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
                 <ImagePlus className="h-4 w-4" />
                 Import Canonical Pano
               </IconButton>
-              <IconButton onClick={() => void loadAttachedReference()} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
+              <IconButton onClick={() => void loadAttachedReference()} className="w-full">
                 <Sparkles className="h-4 w-4" />
                 Use Attached Reference
               </IconButton>
-              <IconButton onClick={() => void renderGrayboxPano()} disabled={isRenderingGraybox} className="w-full">
-                <Download className="h-4 w-4" />
-                {isRenderingGraybox ? 'Rendering Graybox...' : 'Render Graybox 360'}
-              </IconButton>
-              <IconButton
-                onClick={() => grayboxAsset && downloadDataUrl(grayboxAsset.uri, grayboxAsset.name || 'global_graybox.png')}
-                disabled={!grayboxAsset || isRenderingGraybox}
-                className="w-full"
-              >
-                <FileDown className="h-4 w-4" />
-                Download Graybox PNG
-              </IconButton>
+              {grayboxPano && !isReferenceReady(project) && (
+                <IconButton onClick={() => approveGrayboxForReference()} className="w-full">
+                  <Star className="h-4 w-4" />
+                  Approve Graybox as Working Reference
+                </IconButton>
+              )}
+              {isReferenceReady(project) && (
+                <IconButton onClick={() => setWorkspace('shots')} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
+                  <Download className="h-4 w-4" />
+                  Continue to Shots
+                </IconButton>
+              )}
             </div>
-          </Panel>
-
+          )}
+          checkYourWork={(
+            <>
+              <WarningList warnings={getProjectWarnings(project)} />
+              {grayboxPano && (
+                <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                  Graybox available at {grayboxPano.width}×{grayboxPano.height}. Calibrate styled references against it before exporting shot packages.
+                </p>
+              )}
+            </>
+          )}
+          adjustAdvanced={(
+            <>
           <Panel title="Pano References">
             <div className="space-y-2">
               {project.panoRefs.length === 0 && (
@@ -152,10 +175,6 @@ export function ReferenceWorkspace() {
                 </button>
               ))}
             </div>
-          </Panel>
-
-          <Panel title="Checks">
-            <WarningList warnings={getProjectWarnings(project)} />
           </Panel>
 
           {activePano && (
@@ -259,7 +278,9 @@ export function ReferenceWorkspace() {
               </div>
             </Panel>
           )}
-        </>
+            </>
+          )}
+        />
       )}
     >
       <PanoViewer

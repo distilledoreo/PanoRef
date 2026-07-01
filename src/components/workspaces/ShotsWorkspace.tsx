@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Move3D, Plus, Trash2 } from 'lucide-react';
+import { CheckCircle2, Download, Move3D, Plus, Trash2 } from 'lucide-react';
 import { CameraData, ShotStatus } from '../../domain/types';
 import { downloadDataUrl } from '../../engine/projectIO';
 import { renderShotFrame } from '../../engine/renderers';
+import { GuidedSidebar } from '../common/GuidedSidebar';
+import { isShotFramingAccepted, resolveWorkspaceObjective } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
 import { getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
@@ -11,7 +13,7 @@ import { Vec3Input } from '../common/Vec3Input';
 import { WarningList } from '../common/WarningList';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
-import { WorkspaceLayout } from './BuildWorkspace';
+import { WorkspaceWithDrawer } from './WorkspaceShell';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
 
@@ -29,6 +31,8 @@ export function ShotsWorkspace() {
     shotCameraFlying,
     setShotCameraFlying,
     lockShotCamera,
+    acceptShotFraming,
+    setWorkspace,
   } = useContinuityStore();
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
@@ -149,69 +153,70 @@ export function ShotsWorkspace() {
     shotCameraFlying,
   ]);
 
+  const objective = resolveWorkspaceObjective({
+    project,
+    workspace: 'shots',
+    selectedShotId: selectedShot?.id,
+    shotCameraFlying,
+  });
+  const framingAccepted = selectedShot ? isShotFramingAccepted(project, selectedShot.id) : false;
+
   return (
-    <WorkspaceLayout
+    <WorkspaceWithDrawer
+      showDrawer
+      project={project}
+      selectedShotId={selectedShot?.id}
+      onSelectShot={selectShot}
       sidebar={(
-        <>
-          <Panel title="Cameras">
+        <GuidedSidebar
+          objective={objective}
+          doThisNext={selectedShot ? (
             <div className="space-y-2">
-              <IconButton onClick={() => addCamera()} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
+              <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+                {shotCameraFlying
+                  ? 'Fly with WASD, drag to look, then left-click the viewport to lock the camera. The teal rectangle is the export frame.'
+                  : 'Camera is locked. Accept framing when the clay and pano crop previews look right.'}
+              </p>
+              {shotCameraFlying ? (
+                <p className="text-xs text-zinc-500">Use the viewport to lock the camera — no separate lock button needed.</p>
+              ) : (
+                <>
+                  <IconButton onClick={startFlyCamera} className="w-full">
+                    <Move3D className="h-4 w-4" />
+                    Fly Camera
+                  </IconButton>
+                  {!framingAccepted && (
+                    <IconButton
+                      onClick={() => acceptShotFraming(selectedShot.id)}
+                      className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600"
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      Accept Framing
+                    </IconButton>
+                  )}
+                  {framingAccepted && (
+                    <IconButton onClick={() => setWorkspace('review')} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Continue to Review
+                    </IconButton>
+                  )}
+                </>
+              )}
+              <IconButton onClick={() => addCamera()} className="w-full">
                 <Plus className="h-4 w-4" />
                 Add Camera
               </IconButton>
-              <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
-                {project.shots.map((shot) => (
-                  <button
-                    key={shot.id}
-                    onClick={() => selectShot(shot.id)}
-                    className={`w-full rounded-md border px-3 py-2 text-left transition ${
-                      selectedShot?.id === shot.id
-                        ? 'border-teal-500 bg-teal-50 shadow-sm'
-                        : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-zinc-900">{shot.name}</span>
-                      <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">{shot.status}</span>
-                    </div>
-                    <div className="mt-1 font-mono text-xs text-zinc-500">
-                      {shot.camera.fovDegrees.toFixed(0)}° · {shot.exportSettings.width}x{shot.exportSettings.height}
-                    </div>
-                  </button>
-                ))}
-              </div>
             </div>
-          </Panel>
-
-          {selectedShot && (
-            <Panel title="Frame Camera">
-              <div className="space-y-2">
-                <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
-                  {shotCameraFlying
-                    ? 'Fly with WASD, drag to look, then left-click the viewport to lock the camera. The teal rectangle is the export frame.'
-                    : 'Camera is locked. Use Fly Camera to adjust it again.'}
-                </p>
-                {!shotCameraFlying && (
-                  <>
-                    <IconButton onClick={startFlyCamera} className="w-full">
-                      <Move3D className="h-4 w-4" />
-                      Fly Camera
-                    </IconButton>
-                    <IconButton
-                      onClick={() => void exportCameraFrame()}
-                      disabled={isExportingFrame || isRenderingFrame}
-                      className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600"
-                    >
-                      <Download className="h-4 w-4" />
-                      {isExportingFrame ? 'Exporting Frame...' : `Export Frame (${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height})`}
-                    </IconButton>
-                  </>
-                )}
-              </div>
-            </Panel>
+          ) : (
+            <p className="text-sm text-zinc-500">Add a camera from the shot drawer.</p>
           )}
-
-          {selectedShot && (
+          checkYourWork={selectedShot ? (
+            <WarningList warnings={getShotWarnings(project, selectedShot)} />
+          ) : (
+            <p className="text-sm text-zinc-500">Select a shot in the drawer to see readiness checks.</p>
+          )}
+          adjustAdvanced={selectedShot && (
+            <>
             <Panel
               title="Camera Inspector"
               actions={(
@@ -260,9 +265,7 @@ export function ShotsWorkspace() {
                 </Field>
               </div>
             </Panel>
-          )}
 
-          {selectedShot && (
             <Panel title="Landmarks">
               <div className="space-y-2">
                 {project.landmarks.map((landmark) => (
@@ -279,14 +282,19 @@ export function ShotsWorkspace() {
                 ))}
               </div>
             </Panel>
-          )}
-
-          {selectedShot && (
-            <Panel title="Shot Checks">
-              <WarningList warnings={getShotWarnings(project, selectedShot)} />
+            <Panel title="Export Frame">
+              <IconButton
+                onClick={() => void exportCameraFrame()}
+                disabled={shotCameraFlying || isExportingFrame || isRenderingFrame}
+                className="w-full"
+              >
+                <Download className="h-4 w-4" />
+                {isExportingFrame ? 'Exporting...' : `Download Frame (${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height})`}
+              </IconButton>
             </Panel>
+            </>
           )}
-        </>
+        />
       )}
     >
       <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(240px,38%)] lg:grid-rows-[minmax(0,1fr)_minmax(260px,40%)]">
@@ -360,6 +368,6 @@ export function ShotsWorkspace() {
           </div>
         </div>
       </div>
-    </WorkspaceLayout>
+    </WorkspaceWithDrawer>
   );
 }

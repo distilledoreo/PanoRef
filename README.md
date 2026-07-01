@@ -15,13 +15,27 @@ The dev server starts at `http://localhost:3000`. If that port is already occupi
 
 ## Workflow
 
-1. **Build:** use the canvas-first sandbox to shape the graybox set. Pick a primitive from the top toybox tray or press its number key to enter **Stamp Mode**, then click the floor to place as many copies as needed. Press `Esc` or `V` to return to **Select** mode, click an existing piece to select it, and drag a selected piece across the floor plane. The quickbar handles rename, duplicate, rotate, scale, lock, visibility, delete, and the precision drawer. Grid snap can be toggled from the tray or with `G`. The amber origin beacon can be dragged directly or moved with **Origin** mode; it marks where the global 360 reference will be captured. The backdrop card and sun marker are click-only helper tools; the sun marker is omitted from AI-facing exports.
-2. **Build Export:** click **Render** from the Build side rail or **Render Graybox 360** from Reference to create a full equirectangular graybox panorama without viewport helpers. Use **Download Graybox PNG** to save that standalone 360 image, or keep it in the project as a `graybox_render` pano reference.
-3. **Reference:** use the preview-first panorama bench to import a canonical AI-finalized panorama, load the attached reference, or use the graybox panorama as the current reference.
-   Use **Calibrate to Graybox** on a canonical pano to overlay it against the latest graybox pano. The opacity slider fades the canonical pano over the graybox. Set the yaw offset when the AI-finalized 360 image is rotated relative to the graybox render. The calibrated yaw is used by the viewer and pano crop export.
-4. **Shots:** use the split preview workspace to frame shots from the scene, presets, or active pano view. Click **Main Structure Wide Shot** for the guided hero shot. Fly camera movement stays in the live viewport until you lock the camera; the pano crop and export-frame previews refresh from that locked camera so they stay aligned and avoid rerendering on every movement tick. New shots start with prompt-critical landmarks selected so exports preserve continuity anchors; remove a landmark only when it is intentionally out of scope for that shot. Each shot stores camera position, target, FOV, linked pano, selected landmarks, warnings, and export settings.
-5. **Review:** use the comparison bench to export an **AI Brief ZIP** for an external image generator, then import the generated result frame for approval. The app creates control/reference inputs; it does not procedurally fake the final styled frame.
-6. **Export:** use the packaging desk to download a ZIP package with viewport clay render, optional pano crop, optional global reference, optional graybox pano, prompts, metadata, and any imported AI result frame.
+The **Production Path** rail at the top tracks progress for the selected shot across Build → Reference → Shots → Review → Export. It guides without locking you in — every workspace remains available at any time.
+
+Persisted workflow checkpoints are saved in project JSON under `workflow`:
+
+- `grayboxApprovedForReferenceAt`
+- `shotFramingAcceptedAtByShotId`
+- `aiBriefSentAtByShotId`
+- `finalPackageExportedAtByShotId`
+
+1. **Build:** shape the graybox set in the canvas-first sandbox. The guided sidebar leads with **Render Graybox 360** once blocking and the pano origin look right. Advanced controls hold toybox layers, shortcuts, and the precision drawer.
+2. **Reference:** import a styled canonical pano or **Approve Graybox as Working Reference** when you are iterating without a final AI pano yet. Calibrate yaw and opacity when a canonical pano overlays the graybox.
+3. **Shots:** frame the active shot from the **Shot Drawer** (peek bar at the bottom). Fly the camera, lock it in the viewport, then explicitly **Accept Framing** before moving on. Pano crop and export-frame previews refresh from the locked camera.
+4. **Review:** export the **AI Brief ZIP**, which marks the brief as sent, then import the external AI result frame. Use the drawer to switch shots without losing production-path context.
+5. **Export:** download the final continuity ZIP for the selected shot. The manifest and warning checks live in **Check Your Work**; package include/exclude toggles stay under **Adjust / Advanced**.
+
+Each workspace sidebar follows the same objective order:
+
+- **Current Objective** — goal, why it matters, proceed signal
+- **Do This Next** — primary action
+- **Check Your Work** — readiness and warnings
+- **Adjust / Advanced** — collapsed secondary controls
 
 ## Build Shortcuts
 
@@ -42,6 +56,7 @@ Top-level fields include:
 - `landmarks`: named continuity anchors used in prompts and review.
 - `shots`: camera truth, status, linked pano, selected landmarks, prompt overrides, and export settings.
 - `assets`: local data URLs for imported or rendered images.
+- `workflow`: persisted production-path checkpoints for reference approval, accepted framing, AI brief handoff, and final export.
 
 Legacy project files may still contain ignored `projectionStamp` fields on scene objects or `includeContinuityControlView` in shot export settings. Those values are dropped on load.
 

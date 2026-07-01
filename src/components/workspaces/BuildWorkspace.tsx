@@ -30,9 +30,12 @@ import {
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
 import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
+import { GuidedSidebar } from '../common/GuidedSidebar';
 import { Field, IconButton, Panel, Select, TextInput } from '../common/Field';
 import { Vec3Input } from '../common/Vec3Input';
+import { resolveWorkspaceObjective } from '../../engine/workflow';
 import { SceneViewport } from '../viewers/SceneViewport';
+import { WorkspaceLayout } from './WorkspaceShell';
 
 const primitiveTypes: SceneObjectType[] = [
   ...HOTKEYED_BUILD_PRIMITIVES,
@@ -144,10 +147,59 @@ export function BuildWorkspace() {
     toggleObjectVisibility,
   ]);
 
+  const objective = resolveWorkspaceObjective({
+    project,
+    workspace: 'build',
+    selectedShotId: undefined,
+    shotCameraFlying: false,
+  });
+
   return (
     <WorkspaceLayout
       sidebar={(
-        <>
+        <GuidedSidebar
+          objective={objective}
+          doThisNext={(
+            <>
+              <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+                Place primitives from the toybox tray, drag pieces on the floor, then move the pano origin where the 360 should be captured.
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <IconButton
+                  onClick={() => setBuildMode(buildMode === 'pano_origin' ? 'select' : 'pano_origin')}
+                  active={buildMode === 'pano_origin'}
+                >
+                  <Move3D className="h-4 w-4" />
+                  Move Origin
+                </IconButton>
+                <IconButton onClick={() => void renderGrayboxPano()} disabled={isRenderingGraybox} className="border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
+                  <Download className="h-4 w-4" />
+                  {isRenderingGraybox ? 'Rendering...' : 'Render Graybox 360'}
+                </IconButton>
+              </div>
+            </>
+          )}
+          checkYourWork={(
+            <>
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                Pano origin: {project.scene.panoOrigin.map((item) => item.toFixed(1)).join(', ')}
+              </div>
+              {grayboxPano ? (
+                <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                  Graybox ready: {grayboxPano.width}×{grayboxPano.height}. Open Reference to approve or replace it.
+                </p>
+              ) : (
+                <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                  No graybox pano yet. Render one before moving to Reference.
+                </p>
+              )}
+              <p className="text-xs text-zinc-500">
+                Sun markers and backdrop cards are helper objects only — they stay out of AI-facing graybox exports.
+              </p>
+            </>
+          )}
+          adjustAdvanced={(
+            <>
           <Panel
             title="Toybox Layers"
             actions={(
@@ -181,24 +233,6 @@ export function BuildWorkspace() {
             </div>
           </Panel>
 
-          <Panel title="Origin & 360">
-            <div className="space-y-3">
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-                Pano origin: {project.scene.panoOrigin.map((item) => item.toFixed(1)).join(', ')}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <IconButton
-                  onClick={() => setBuildMode(buildMode === 'pano_origin' ? 'select' : 'pano_origin')}
-                  active={buildMode === 'pano_origin'}
-                >
-                  <Move3D className="h-4 w-4" />
-                  Origin
-                </IconButton>
-                <IconButton onClick={() => void renderGrayboxPano()} disabled={isRenderingGraybox}>
-                  <Download className="h-4 w-4" />
-                  {isRenderingGraybox ? 'Rendering' : 'Render'}
-                </IconButton>
-              </div>
               <IconButton
                 onClick={() => {
                   if (!grayboxAsset || !grayboxPano) return;
@@ -221,13 +255,6 @@ export function BuildWorkspace() {
                 <FileDown className="h-4 w-4" />
                 Download Graybox PNG
               </IconButton>
-              {grayboxPano && (
-                <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-zinc-600">
-                  Latest graybox: {grayboxPano.width}x{grayboxPano.height} equirectangular PNG
-                </p>
-              )}
-            </div>
-          </Panel>
 
           <Panel title="Shortcuts">
             <div className="space-y-3 text-sm text-zinc-600">
@@ -279,7 +306,9 @@ export function BuildWorkspace() {
               )}
             </Panel>
           )}
-        </>
+            </>
+          )}
+        />
       )}
     >
       <div className="relative h-full min-h-0">
@@ -615,21 +644,6 @@ function Kbd({ children }: { children: React.ReactNode }) {
     <kbd className="inline-flex min-w-5 items-center justify-center rounded border border-zinc-200 bg-white px-1.5 text-[10px] font-semibold leading-5 text-zinc-600 shadow-sm">
       {children}
     </kbd>
-  );
-}
-
-export function WorkspaceLayout({
-  sidebar,
-  children,
-}: {
-  sidebar: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-3 bg-zinc-100 p-3 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
-      <main className="order-1 min-h-[520px] overflow-hidden rounded-md border border-zinc-200 bg-white shadow-sm lg:min-h-0">{children}</main>
-      <aside className="order-2 min-h-0 overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-sm">{sidebar}</aside>
-    </div>
   );
 }
 

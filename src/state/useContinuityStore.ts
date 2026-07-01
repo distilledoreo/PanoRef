@@ -83,6 +83,10 @@ interface ContinuityStore {
   updateLandmark: (id: string, updates: Partial<Landmark>) => void;
   toggleShotLandmark: (shotId: string, landmarkId: string) => void;
   setExportingPackage: (value: boolean) => void;
+  approveGrayboxForReference: () => void;
+  acceptShotFraming: (shotId: string) => void;
+  markAiBriefSent: (shotId: string) => void;
+  markFinalPackageExported: (shotId: string) => void;
 }
 
 const initialProject = createDefaultProject();
@@ -387,7 +391,20 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       shotCameraFlying: true,
     };
   }),
-  setShotCameraFlying: (value) => set({ shotCameraFlying: value }),
+  setShotCameraFlying: (value) => set((state) => {
+    if (!value) return { shotCameraFlying: false };
+    const shotId = state.selectedShotId;
+    if (!shotId) return { shotCameraFlying: true };
+    const accepted = { ...state.project.workflow.shotFramingAcceptedAtByShotId };
+    delete accepted[shotId];
+    return {
+      shotCameraFlying: true,
+      project: touchProject({
+        ...state.project,
+        workflow: { ...state.project.workflow, shotFramingAcceptedAtByShotId: accepted },
+      }),
+    };
+  }),
   lockShotCamera: () => {
     if (document.pointerLockElement) document.exitPointerLock();
     set({ shotCameraFlying: false });
@@ -490,6 +507,51 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     }),
   })),
   setExportingPackage: (value) => set({ isExportingPackage: value }),
+  approveGrayboxForReference: () => set((state) => ({
+    project: touchProject({
+      ...state.project,
+      workflow: {
+        ...state.project.workflow,
+        grayboxApprovedForReferenceAt: new Date().toISOString(),
+      },
+    }),
+  })),
+  acceptShotFraming: (shotId) => set((state) => ({
+    project: touchProject({
+      ...state.project,
+      workflow: {
+        ...state.project.workflow,
+        shotFramingAcceptedAtByShotId: {
+          ...state.project.workflow.shotFramingAcceptedAtByShotId,
+          [shotId]: new Date().toISOString(),
+        },
+      },
+    }),
+  })),
+  markAiBriefSent: (shotId) => set((state) => ({
+    project: touchProject({
+      ...state.project,
+      workflow: {
+        ...state.project.workflow,
+        aiBriefSentAtByShotId: {
+          ...state.project.workflow.aiBriefSentAtByShotId,
+          [shotId]: new Date().toISOString(),
+        },
+      },
+    }),
+  })),
+  markFinalPackageExported: (shotId) => set((state) => ({
+    project: touchProject({
+      ...state.project,
+      workflow: {
+        ...state.project.workflow,
+        finalPackageExportedAtByShotId: {
+          ...state.project.workflow.finalPackageExportedAtByShotId,
+          [shotId]: new Date().toISOString(),
+        },
+      },
+    }),
+  })),
 }));
 
 function touchProject(project: LocationProject): LocationProject {

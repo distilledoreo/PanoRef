@@ -9,7 +9,7 @@ import { ShotsWorkspace } from './components/workspaces/ShotsWorkspace';
 import { ReviewWorkspace } from './components/workspaces/ReviewWorkspace';
 import { ExportWorkspace } from './components/workspaces/ExportWorkspace';
 import { TextInput } from './components/common/Field';
-import { DirectorQuest } from './components/common/DirectorQuest';
+import { ProductionPath } from './components/common/ProductionPath';
 
 const workspaceItems: Array<{ id: Workspace; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'build', label: 'Build', icon: Boxes },
@@ -27,6 +27,8 @@ export default function App() {
     setWorkspace,
     setProject,
     updateProjectInfo,
+    selectedShotId,
+    shotCameraFlying,
   } = useContinuityStore();
 
   const importProject = async (file?: File) => {
@@ -107,7 +109,7 @@ export default function App() {
       </header>
 
       <div className="shrink-0 border-b border-zinc-200 bg-zinc-100 px-4 py-2">
-        <DirectorQuest project={project} />
+        <ProductionPath project={project} selectedShotId={selectedShotId} shotCameraFlying={shotCameraFlying} />
       </div>
 
       <section className="min-h-0 flex-1">
