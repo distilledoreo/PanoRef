@@ -194,7 +194,7 @@ export function PanoViewer({
       {!imageUrl && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-zinc-50 text-zinc-500">
           <p className="text-sm font-medium">No panorama selected</p>
-          <p className="mt-1 text-xs">Render a graybox pano or import a canonical reference.</p>
+          <p className="mt-1 text-xs">Render a graybox pano or import a styled pano.</p>
         </div>
       )}
       <div className="pointer-events-none absolute left-4 top-4 rounded-md border border-white/70 bg-white/90 px-3 py-2 text-xs text-zinc-700 shadow-sm backdrop-blur">

@@ -165,6 +165,7 @@ export interface AssetRegistry {
 
 export interface ProjectWorkflow {
   grayboxApprovedForReferenceAt?: string;
+  referenceAlignmentAcceptedForPanoId?: string;
   shotFramingAcceptedAtByShotId: Record<string, string>;
   aiBriefSentAtByShotId: Record<string, string>;
   finalPackageExportedAtByShotId: Record<string, string>;

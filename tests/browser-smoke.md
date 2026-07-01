@@ -6,7 +6,7 @@ Use the Codex Browser plugin for runtime smoke verification.
 2. Open the local URL printed by Vite. It usually starts at `http://localhost:3000`, but use the next free port if Vite reports one.
 3. On a fresh project in **Build**, confirm a **Current Objective** modal appears once. Dismiss it with **Got it**, then reopen it from the header **Objective** button.
 4. In **Build**, render **Graybox 360** from the sidebar. When the step is complete, confirm an advance modal appears with **Continue to Reference** and **Not right now**. Choose **Not right now** and confirm you stay in Build without the modal immediately reappearing.
-5. In **Reference**, confirm **Approve Graybox as Working Reference** appears when no styled canonical pano exists. Approve it and verify the advance modal offers **Continue to Shots**.
+5. In **Reference**, confirm the initial objective modal includes the graybox styling prompt builder. Import a styled pano, confirm the alignment guide modal appears, use yaw and graybox fade in the sidebar, then click **Looks good enough**. If alignment is still poor, open retry tips and confirm generation advice appears. Verify the advance modal offers **Continue to Shots** only after alignment is confirmed.
 6. Open **Shots**, switch shots from the sidebar **Shots** panel if more than one exists, and confirm the active shot updates framing controls.
 7. Fly the camera, lock it in the viewport, and click **Accept Framing**. Verify an advance modal offers Review and reopening fly mode clears the accepted checkpoint.
 8. In **Review**, export **AI Brief ZIP** and confirm the brief-sent checkpoint appears. Import an AI result frame and verify the comparison panes update, then confirm the advance modal offers Export.

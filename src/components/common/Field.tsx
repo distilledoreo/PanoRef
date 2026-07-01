@@ -68,16 +68,19 @@ export function Panel({
 export function IconButton({
   children,
   active,
+  highlighted,
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean; highlighted?: boolean }) {
+  const tone = active
+    ? 'border-teal-500 bg-teal-500 text-white shadow-sm'
+    : highlighted
+      ? 'border-emerald-500 bg-emerald-500 text-white shadow-md ring-2 ring-emerald-300 hover:bg-emerald-600'
+      : 'border-zinc-200 bg-white text-zinc-700 hover:border-teal-300 hover:text-teal-700';
+
   return (
     <button
       {...props}
-      className={`inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45 ${
-        active
-          ? 'border-teal-500 bg-teal-500 text-white shadow-sm'
-          : 'border-zinc-200 bg-white text-zinc-700 hover:border-teal-300 hover:text-teal-700'
-      } ${props.className ?? ''}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45 ${tone} ${props.className ?? ''}`}
     >
       {children}
     </button>

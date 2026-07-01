@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Camera,
@@ -30,6 +30,8 @@ import {
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
 import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
+import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
+import { NextStepHighlight } from '../common/NextStepHighlight';
 import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
 import { Field, IconButton, Panel, Select, TextInput } from '../common/Field';
 import { Vec3Input } from '../common/Vec3Input';
@@ -75,6 +77,10 @@ export function BuildWorkspace() {
   const selectedObject = project.scene.objects.find((object) => object.id === selectedObjectId);
   const grayboxPano = getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
+  const primaryAction = useMemo(
+    () => resolveWorkspacePrimaryAction({ project, workspace: 'build', shotCameraFlying: false }),
+    [project],
+  );
 
   const rotateSelected = useCallback((degrees: number) => {
     if (!selectedObject) return;
@@ -163,10 +169,20 @@ export function BuildWorkspace() {
                   <Move3D className="h-4 w-4" />
                   Move Origin
                 </IconButton>
-                <IconButton onClick={() => void renderGrayboxPano()} disabled={isRenderingGraybox} className="border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
-                  <Download className="h-4 w-4" />
-                  {isRenderingGraybox ? 'Rendering...' : 'Render Graybox 360'}
-                </IconButton>
+                <NextStepHighlight
+                  active={primaryAction?.id === 'render-graybox'}
+                  hint={primaryAction?.hint}
+                >
+                  <IconButton
+                    onClick={() => void renderGrayboxPano()}
+                    disabled={isRenderingGraybox}
+                    highlighted={primaryAction?.id === 'render-graybox'}
+                    className={`w-full ${primaryAction?.id === 'render-graybox' ? '' : 'border-teal-500 bg-teal-500 text-white hover:bg-teal-600'}`}
+                  >
+                    <Download className="h-4 w-4" />
+                    {isRenderingGraybox ? 'Rendering...' : 'Render Graybox 360'}
+                  </IconButton>
+                </NextStepHighlight>
               </div>
             </>
           )}

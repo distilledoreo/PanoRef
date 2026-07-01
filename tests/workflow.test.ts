@@ -3,13 +3,16 @@ import { createDefaultProject, createPanoAsset, createPanoReference } from '../s
 import {
   getRecommendedWorkspace,
   hasGrayboxPano,
+  isReferenceAlignmentAccepted,
   isReferenceReady,
   isShotFramingAccepted,
+  needsReferenceAlignment,
   isStepComplete,
   buildAdvancePromptKey,
   resolveProductionPath,
   resolveWorkflowAdvancePrompt,
   resolveWorkspaceObjective,
+  resolveWorkspacePrimaryAction,
 } from '../src/engine/workflow';
 
 function withGraybox(project = createDefaultProject()) {
@@ -48,6 +51,33 @@ describe('workflow resolver', () => {
     project.workflow.grayboxApprovedForReferenceAt = new Date().toISOString();
     expect(isReferenceReady(project)).toBe(true);
     expect(isStepComplete('reference', project)).toBe(true);
+  });
+
+  it('requires alignment acceptance after importing a styled reference', () => {
+    const project = withGraybox();
+    const graybox = project.panoRefs[0];
+    graybox.isCanonical = false;
+    const asset = createPanoAsset({ name: 'styled.png', uri: 'data:image/png;base64,BBBB', width: 4096, height: 2048 });
+    const styled = createPanoReference({
+      name: 'Styled Reference',
+      assetId: asset.id,
+      type: 'ai_global_reference',
+      origin: project.scene.panoOrigin,
+      width: 4096,
+      height: 2048,
+      isCanonical: true,
+      sourcePanoId: graybox.id,
+    });
+    project.assets.assets[asset.id] = asset;
+    project.panoRefs.push(styled);
+
+    expect(needsReferenceAlignment(project)).toBe(true);
+    expect(isReferenceAlignmentAccepted(project)).toBe(false);
+    expect(isReferenceReady(project)).toBe(false);
+
+    project.workflow.referenceAlignmentAcceptedForPanoId = styled.id;
+    expect(isReferenceAlignmentAccepted(project)).toBe(true);
+    expect(isReferenceReady(project)).toBe(true);
   });
 
   it('requires explicit accept framing after camera lock', () => {
@@ -97,6 +127,29 @@ describe('workflow resolver', () => {
     expect(prompt?.nextStep).toBe('reference');
     expect(prompt?.promptKey).toBe(buildAdvancePromptKey('build', 'reference'));
     expect(resolveWorkflowAdvancePrompt(context, [prompt!.promptKey])).toBeUndefined();
+  });
+
+  it('highlights the next major action for each workspace', () => {
+    const project = createDefaultProject();
+    expect(resolveWorkspacePrimaryAction({ project, workspace: 'build', shotCameraFlying: false })?.id).toBe('render-graybox');
+
+    const withBox = withGraybox();
+    expect(resolveWorkspacePrimaryAction({ project: withBox, workspace: 'reference', shotCameraFlying: false })?.id).toBe('import-styled-pano');
+
+    withBox.workflow.grayboxApprovedForReferenceAt = new Date().toISOString();
+    const shotId = withBox.shots[0].id;
+    expect(resolveWorkspacePrimaryAction({
+      project: withBox,
+      workspace: 'shots',
+      selectedShotId: shotId,
+      shotCameraFlying: true,
+    })?.id).toBe('lock-camera');
+    expect(resolveWorkspacePrimaryAction({
+      project: withBox,
+      workspace: 'shots',
+      selectedShotId: shotId,
+      shotCameraFlying: false,
+    })?.id).toBe('accept-framing');
   });
 
   it('describes workspace objectives with proceed signals', () => {

@@ -5,7 +5,8 @@ import { downloadDataUrl } from '../../engine/projectIO';
 import { renderShotFrame } from '../../engine/renderers';
 import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
 import { ShotSelector } from '../common/ShotSelector';
-import { isShotFramingAccepted } from '../../engine/workflow';
+import { isShotFramingAccepted, resolveWorkspacePrimaryAction } from '../../engine/workflow';
+import { NextStepHighlight } from '../common/NextStepHighlight';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
 import { getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
@@ -154,6 +155,15 @@ export function ShotsWorkspace() {
   ]);
 
   const framingAccepted = selectedShot ? isShotFramingAccepted(project, selectedShot.id) : false;
+  const primaryAction = useMemo(
+    () => resolveWorkspacePrimaryAction({
+      project,
+      workspace: 'shots',
+      selectedShotId: selectedShot?.id,
+      shotCameraFlying,
+    }),
+    [project, selectedShot?.id, shotCameraFlying],
+  );
 
   return (
     <WorkspaceLayout
@@ -169,13 +179,25 @@ export function ShotsWorkspace() {
               />
               {selectedShot ? (
             <div className="space-y-2">
-              <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
-                {shotCameraFlying
-                  ? 'Fly with WASD, drag to look, then left-click the viewport to lock the camera. The teal rectangle is the export frame.'
-                  : 'Camera is locked. Accept framing when the clay and pano crop previews look right.'}
-              </p>
+              <NextStepHighlight
+                active={primaryAction?.id === 'lock-camera'}
+                hint={primaryAction?.hint}
+              >
+                <p className={`rounded-md px-3 py-2 text-xs ${
+                  primaryAction?.id === 'lock-camera'
+                    ? 'text-emerald-950'
+                    : 'border border-teal-200 bg-teal-50 text-teal-900'
+                }`}
+                >
+                  {shotCameraFlying
+                    ? 'Fly with WASD, drag to look, then left-click the viewport to lock the camera. The teal rectangle is the export frame.'
+                    : 'Camera is locked. Accept framing when the clay and pano crop previews look right.'}
+                </p>
+              </NextStepHighlight>
               {shotCameraFlying ? (
-                <p className="text-xs text-zinc-500">Use the viewport to lock the camera — no separate lock button needed.</p>
+                primaryAction?.id !== 'lock-camera' && (
+                  <p className="text-xs text-zinc-500">Use the viewport to lock the camera — no separate lock button needed.</p>
+                )
               ) : (
                 <>
                   <IconButton onClick={startFlyCamera} className="w-full">
@@ -183,13 +205,19 @@ export function ShotsWorkspace() {
                     Fly Camera
                   </IconButton>
                   {!framingAccepted && (
-                    <IconButton
-                      onClick={() => acceptShotFraming(selectedShot.id)}
-                      className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600"
+                    <NextStepHighlight
+                      active={primaryAction?.id === 'accept-framing'}
+                      hint={primaryAction?.hint}
                     >
-                      <CheckCircle2 className="h-4 w-4" />
-                      Accept Framing
-                    </IconButton>
+                      <IconButton
+                        onClick={() => acceptShotFraming(selectedShot.id)}
+                        highlighted={primaryAction?.id === 'accept-framing'}
+                        className={`w-full ${primaryAction?.id === 'accept-framing' ? '' : 'border-teal-500 bg-teal-500 text-white hover:bg-teal-600'}`}
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        Accept Framing
+                      </IconButton>
+                    </NextStepHighlight>
                   )}
                 </>
               )}

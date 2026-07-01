@@ -84,15 +84,22 @@ interface ContinuityStore {
   toggleShotLandmark: (shotId: string, landmarkId: string) => void;
   setExportingPackage: (value: boolean) => void;
   approveGrayboxForReference: () => void;
+  acceptReferenceAlignment: () => void;
   acceptShotFraming: (shotId: string) => void;
   markAiBriefSent: (shotId: string) => void;
   markFinalPackageExported: (shotId: string) => void;
   dismissedWorkflowAdvanceKeys: string[];
   seenObjectiveWorkspaces: Workspace[];
   objectiveModalRequest: number;
+  alignmentIntroRequest: number;
+  alignmentRetryModalRequest: number;
+  seenAlignmentIntroForPanoId?: string;
   dismissWorkflowAdvance: (promptKey: string) => void;
   markObjectiveSeen: (workspace: Workspace) => void;
   requestObjectiveModal: () => void;
+  requestAlignmentIntro: () => void;
+  requestAlignmentRetryModal: () => void;
+  markAlignmentIntroSeen: (panoId: string) => void;
   resetWorkflowSession: () => void;
 }
 
@@ -119,6 +126,9 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   dismissedWorkflowAdvanceKeys: [],
   seenObjectiveWorkspaces: [],
   objectiveModalRequest: 0,
+  alignmentIntroRequest: 0,
+  alignmentRetryModalRequest: 0,
+  seenAlignmentIntroForPanoId: undefined,
 
   setWorkspace: (workspace) => set((state) => {
     if (workspace !== 'shots') {
@@ -149,6 +159,9 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       dismissedWorkflowAdvanceKeys: [],
       seenObjectiveWorkspaces: [],
       objectiveModalRequest: 0,
+      alignmentIntroRequest: 0,
+      alignmentRetryModalRequest: 0,
+      seenAlignmentIntroForPanoId: undefined,
     });
   },
   updateProjectInfo: (updates) => set((state) => ({
@@ -342,7 +355,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     });
     const graybox = state.project.panoRefs.find((pano) => pano.type === 'graybox_render');
     const pano = createPanoReference({
-      name: params.name.replace(/\.[^.]+$/, '') || 'Canonical Global Reference',
+      name: params.name.replace(/\.[^.]+$/, '') || 'Styled Reference',
       assetId: asset.id,
       type: 'ai_global_reference',
       origin: state.project.scene.panoOrigin,
@@ -351,15 +364,22 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       height: asset.height ?? 2048,
       isCanonical: true,
       sourcePanoId: graybox?.id,
-      notes: params.importNote ?? 'Imported canonical global environment reference.',
+      notes: params.importNote ?? 'Imported styled reference pano.',
+    });
+    const linkedProject = linkAllShotsToCanonicalPano({
+      ...state.project,
+      assets: { assets: { ...state.project.assets.assets, [asset.id]: asset } },
+      panoRefs: [...state.project.panoRefs.map((existing) => ({ ...existing, isCanonical: false })), pano],
+      workflow: {
+        ...state.project.workflow,
+        referenceAlignmentAcceptedForPanoId: undefined,
+      },
     });
     return {
-      project: touchProject(linkAllShotsToCanonicalPano({
-        ...state.project,
-        assets: { assets: { ...state.project.assets.assets, [asset.id]: asset } },
-        panoRefs: [...state.project.panoRefs.map((existing) => ({ ...existing, isCanonical: false })), pano],
-      })),
+      project: touchProject(linkedProject),
       activePanoId: pano.id,
+      alignmentIntroRequest: state.alignmentIntroRequest + 1,
+      seenAlignmentIntroForPanoId: undefined,
     };
   }),
   setActivePano: (id) => set({ activePanoId: id }),
@@ -529,6 +549,19 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       },
     }),
   })),
+  acceptReferenceAlignment: () => set((state) => {
+    const canonical = getCanonicalPano(state.project);
+    if (!canonical) return state;
+    return {
+      project: touchProject({
+        ...state.project,
+        workflow: {
+          ...state.project.workflow,
+          referenceAlignmentAcceptedForPanoId: canonical.id,
+        },
+      }),
+    };
+  }),
   acceptShotFraming: (shotId) => set((state) => ({
     project: touchProject({
       ...state.project,
@@ -578,10 +611,20 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   requestObjectiveModal: () => set((state) => ({
     objectiveModalRequest: state.objectiveModalRequest + 1,
   })),
+  requestAlignmentIntro: () => set((state) => ({
+    alignmentIntroRequest: state.alignmentIntroRequest + 1,
+  })),
+  requestAlignmentRetryModal: () => set((state) => ({
+    alignmentRetryModalRequest: state.alignmentRetryModalRequest + 1,
+  })),
+  markAlignmentIntroSeen: (panoId) => set({ seenAlignmentIntroForPanoId: panoId }),
   resetWorkflowSession: () => set({
     dismissedWorkflowAdvanceKeys: [],
     seenObjectiveWorkspaces: [],
     objectiveModalRequest: 0,
+    alignmentIntroRequest: 0,
+    alignmentRetryModalRequest: 0,
+    seenAlignmentIntroForPanoId: undefined,
   }),
 }));
 

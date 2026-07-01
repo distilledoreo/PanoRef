@@ -51,6 +51,7 @@ export const defaultProjectWorkflow: ProjectWorkflow = {
 export function normalizeProjectWorkflow(workflow?: Partial<ProjectWorkflow>): ProjectWorkflow {
   return {
     grayboxApprovedForReferenceAt: workflow?.grayboxApprovedForReferenceAt,
+    referenceAlignmentAcceptedForPanoId: workflow?.referenceAlignmentAcceptedForPanoId,
     shotFramingAcceptedAtByShotId: { ...workflow?.shotFramingAcceptedAtByShotId },
     aiBriefSentAtByShotId: { ...workflow?.aiBriefSentAtByShotId },
     finalPackageExportedAtByShotId: { ...workflow?.finalPackageExportedAtByShotId },

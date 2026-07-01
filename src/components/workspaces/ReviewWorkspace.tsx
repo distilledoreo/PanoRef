@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Download, ImagePlus, Package, RotateCcw, Send, XCircle } from 'lucide-react';
 import { ShotStatus } from '../../domain/types';
 import { buildShotPackage, downloadBlob } from '../../engine/packageExport';
@@ -10,7 +10,8 @@ import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
 import { ShotSelector } from '../common/ShotSelector';
 import { Field, IconButton, Panel, TextArea } from '../common/Field';
 import { WarningList } from '../common/WarningList';
-import { isAiBriefSent } from '../../engine/workflow';
+import { isAiBriefSent, resolveWorkspacePrimaryAction } from '../../engine/workflow';
+import { NextStepHighlight } from '../common/NextStepHighlight';
 import { WorkspaceLayout } from './WorkspaceShell';
 
 export function ReviewWorkspace() {
@@ -52,6 +53,16 @@ export function ReviewWorkspace() {
     }
   };
 
+  const primaryAction = useMemo(
+    () => resolveWorkspacePrimaryAction({
+      project,
+      workspace: 'review',
+      selectedShotId: selectedShot?.id,
+      shotCameraFlying: false,
+    }),
+    [project, selectedShot?.id],
+  );
+
   const importAiResult = async (file?: File) => {
     if (!file || !selectedShot) return;
     const dataUrl = await readFileAsDataUrl(file);
@@ -85,10 +96,20 @@ export function ReviewWorkspace() {
                 className="hidden"
                 onChange={(event) => void importAiResult(event.target.files?.[0])}
               />
-              <IconButton onClick={() => void exportAiBrief()} disabled={isBuildingBrief} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
-                <Package className="h-4 w-4" />
-                {isBuildingBrief ? 'Building Brief...' : 'Export AI Brief ZIP'}
-              </IconButton>
+              <NextStepHighlight
+                active={primaryAction?.id === 'export-ai-brief'}
+                hint={primaryAction?.hint}
+              >
+                <IconButton
+                  onClick={() => void exportAiBrief()}
+                  disabled={isBuildingBrief}
+                  highlighted={primaryAction?.id === 'export-ai-brief'}
+                  className={`w-full ${primaryAction?.id === 'export-ai-brief' ? '' : 'border-teal-500 bg-teal-500 text-white hover:bg-teal-600'}`}
+                >
+                  <Package className="h-4 w-4" />
+                  {isBuildingBrief ? 'Building Brief...' : 'Export AI Brief ZIP'}
+                </IconButton>
+              </NextStepHighlight>
               {!isAiBriefSent(project, selectedShot.id) && (
                 <p className="text-xs text-zinc-500">Exporting the brief also marks it sent for the production path.</p>
               )}
@@ -98,10 +119,19 @@ export function ReviewWorkspace() {
                   AI brief marked sent.
                 </p>
               )}
-              <IconButton onClick={() => fileRef.current?.click()} className="w-full">
-                <ImagePlus className="h-4 w-4" />
-                Import AI Result Frame
-              </IconButton>
+              <NextStepHighlight
+                active={primaryAction?.id === 'import-ai-result'}
+                hint={primaryAction?.hint}
+              >
+                <IconButton
+                  onClick={() => fileRef.current?.click()}
+                  highlighted={primaryAction?.id === 'import-ai-result'}
+                  className="w-full"
+                >
+                  <ImagePlus className="h-4 w-4" />
+                  Import AI Result Frame
+                </IconButton>
+              </NextStepHighlight>
             </div>
               ) : null}
             </>

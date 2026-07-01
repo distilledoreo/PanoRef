@@ -44,10 +44,40 @@ const STEP_ORDER: ProductionStepId[] = ['build', 'reference', 'shots', 'review',
 export function normalizeProjectWorkflow(workflow?: Partial<ProjectWorkflow>): ProjectWorkflow {
   return {
     grayboxApprovedForReferenceAt: workflow?.grayboxApprovedForReferenceAt,
+    referenceAlignmentAcceptedForPanoId: workflow?.referenceAlignmentAcceptedForPanoId,
     shotFramingAcceptedAtByShotId: { ...workflow?.shotFramingAcceptedAtByShotId },
     aiBriefSentAtByShotId: { ...workflow?.aiBriefSentAtByShotId },
     finalPackageExportedAtByShotId: { ...workflow?.finalPackageExportedAtByShotId },
   };
+}
+
+export const REFERENCE_ALIGNMENT_RETRY_TIPS = [
+  'Try a few more generations. One bad result can just be bad luck.',
+  'Use the graybox as your main image. One other reference is usually fine — but the more you add, the easier it is to confuse the model.',
+  'Use the strongest image model you have.',
+  'Set aspect ratio to 2:1 if you can. 16:9 also works if the pano sits in the middle band.',
+  'Use high resolution. 360 panos hold a lot of detail — 4K or higher is best.',
+] as const;
+
+export function needsReferenceAlignment(project: LocationProject): boolean {
+  return hasStyledCanonicalPano(project) && hasGrayboxPano(project);
+}
+
+export function isReferenceAlignmentAccepted(project: LocationProject): boolean {
+  if (project.workflow.grayboxApprovedForReferenceAt && !hasStyledCanonicalPano(project)) {
+    return true;
+  }
+
+  const canonical = getCanonicalPano(project);
+  if (!canonical || canonical.type === 'graybox_render') {
+    return Boolean(project.workflow.grayboxApprovedForReferenceAt);
+  }
+
+  if (!hasGrayboxPano(project)) {
+    return true;
+  }
+
+  return project.workflow.referenceAlignmentAcceptedForPanoId === canonical.id;
 }
 
 export function getSelectedShot(project: LocationProject, selectedShotId?: string): Shot | undefined {
@@ -63,11 +93,16 @@ export function hasStyledCanonicalPano(project: LocationProject): boolean {
   return Boolean(canonical && canonical.type !== 'graybox_render');
 }
 
-export function isReferenceReady(project: LocationProject): boolean {
+export function hasReferenceCandidate(project: LocationProject): boolean {
   return Boolean(
     project.workflow.grayboxApprovedForReferenceAt
     || hasStyledCanonicalPano(project),
   );
+}
+
+export function isReferenceReady(project: LocationProject): boolean {
+  if (!hasReferenceCandidate(project)) return false;
+  return isReferenceAlignmentAccepted(project);
 }
 
 export function isShotFramingAccepted(project: LocationProject, shotId?: string): boolean {
@@ -117,7 +152,11 @@ function stepBlockers(step: ProductionStepId, context: ProductionPathContext): s
     case 'reference':
       if (isReferenceReady(project)) return [];
       if (!hasGrayboxPano(project)) return ['Render the graybox 360 in Build first.'];
-      return ['Import a styled reference or approve the graybox as your working reference.'];
+      if (!hasReferenceCandidate(project)) return ['Download the graybox, run the prompt in your image AI, and import the finished pano.'];
+      if (needsReferenceAlignment(project) && !isReferenceAlignmentAccepted(project)) {
+        return ['Check that the styled pano lines up with the graybox, then confirm alignment.'];
+      }
+      return ['Finish the reference step before moving on.'];
     case 'shots':
       if (!shot) return ['Add a camera shot.'];
       if (shotCameraFlying) return ['Lock the camera to finish framing.'];
@@ -197,11 +236,17 @@ export function resolveWorkspaceObjective(context: ProductionPathContext): Works
       };
     case 'reference':
       return {
-        goal: 'Choose the global environment reference for shot crops and prompts.',
-        why: 'Shots borrow style and context from the reference you establish here.',
+        goal: needsReferenceAlignment(project) && !isReferenceAlignmentAccepted(project)
+          ? 'Check that your styled pano lines up with the 3D scene.'
+          : 'Style the graybox pano in your image AI, then import the result.',
+        why: 'A well-aligned reference keeps every shot tied to the same physical space.',
         proceedSignal: isReferenceReady(project)
-          ? 'Reference is ready — open Shots to frame cameras.'
-          : 'Import a styled pano or approve the graybox as the working reference.',
+          ? 'You are done here. Open Shots to place cameras.'
+          : needsReferenceAlignment(project)
+            ? 'Compare the styled pano to the graybox in the viewer. Adjust yaw if needed, then confirm when it looks good enough.'
+            : hasGrayboxPano(project)
+              ? 'Download the graybox, copy the prompt, run your image AI, then import the result.'
+              : 'Render a graybox in Build first.',
         blockers,
       };
     case 'shots':
@@ -269,6 +314,96 @@ export interface WorkflowAdvancePrompt {
   title: string;
   body: string;
   nextLabel: string;
+}
+
+export type WorkspacePrimaryActionId =
+  | 'render-graybox'
+  | 'import-styled-pano'
+  | 'confirm-alignment'
+  | 'lock-camera'
+  | 'fly-camera'
+  | 'accept-framing'
+  | 'export-ai-brief'
+  | 'import-ai-result'
+  | 'export-final-zip';
+
+export interface WorkspacePrimaryAction {
+  id: WorkspacePrimaryActionId;
+  hint: string;
+}
+
+export function resolveWorkspacePrimaryAction(
+  context: ProductionPathContext,
+): WorkspacePrimaryAction | undefined {
+  const { project, workspace, selectedShotId, shotCameraFlying } = context;
+  const shot = getSelectedShot(project, selectedShotId);
+
+  switch (workspace) {
+    case 'build':
+      if (!hasGrayboxPano(project)) {
+        return {
+          id: 'render-graybox',
+          hint: 'Render the graybox 360 when your set and pano origin look right.',
+        };
+      }
+      return undefined;
+    case 'reference':
+      if (!hasGrayboxPano(project)) return undefined;
+      if (needsReferenceAlignment(project) && !isReferenceAlignmentAccepted(project)) {
+        return {
+          id: 'confirm-alignment',
+          hint: 'Compare the styled pano to the graybox, adjust yaw if needed, then confirm.',
+        };
+      }
+      if (!hasReferenceCandidate(project)) {
+        return {
+          id: 'import-styled-pano',
+          hint: 'Import the finished pano from your image AI.',
+        };
+      }
+      return undefined;
+    case 'shots':
+      if (!shot) return undefined;
+      if (!isShotFramingAccepted(project, shot.id)) {
+        if (shotCameraFlying) {
+          return {
+            id: 'lock-camera',
+            hint: 'Fly the camera in the viewport, then click to lock it.',
+          };
+        }
+        return {
+          id: 'accept-framing',
+          hint: 'Accept framing when the clay and pano crop previews look right.',
+        };
+      }
+      return undefined;
+    case 'review':
+      if (!shot) return undefined;
+      if (!isAiBriefSent(project, shot.id)) {
+        return {
+          id: 'export-ai-brief',
+          hint: 'Export the AI brief ZIP for your image generator.',
+        };
+      }
+      if (!hasAiResultFrame(shot)) {
+        return {
+          id: 'import-ai-result',
+          hint: 'Import the image your generator produced.',
+        };
+      }
+      return undefined;
+    case 'export':
+      if (!shot) return undefined;
+      if (!isFinalPackageExported(project, shot.id)) {
+        return {
+          id: 'export-final-zip',
+          hint: 'Export the final ZIP package for this shot.',
+        };
+      }
+      return undefined;
+    default:
+      return undefined;
+  }
 }
 
 export function resolveWorkflowAdvancePrompt(

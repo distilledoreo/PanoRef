@@ -8,6 +8,8 @@ import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
 import { ShotSelector } from '../common/ShotSelector';
 import { Field, IconButton, Panel, TextInput } from '../common/Field';
 import { WarningList } from '../common/WarningList';
+import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
+import { NextStepHighlight } from '../common/NextStepHighlight';
 import { WorkspaceLayout } from './WorkspaceShell';
 
 export function ExportWorkspace() {
@@ -24,6 +26,15 @@ export function ExportWorkspace() {
   const [lastExport, setLastExport] = useState<string[]>([]);
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const manifest = useMemo(() => selectedShot ? createShotPackageManifest(project, selectedShot) : undefined, [project, selectedShot]);
+  const primaryAction = useMemo(
+    () => resolveWorkspacePrimaryAction({
+      project,
+      workspace: 'export',
+      selectedShotId: selectedShot?.id,
+      shotCameraFlying: false,
+    }),
+    [project, selectedShot?.id],
+  );
 
   const exportShot = async () => {
     if (!selectedShot) return;
@@ -52,10 +63,20 @@ export function ExportWorkspace() {
                 onAddShot={addCamera}
               />
               {selectedShot ? (
-                <IconButton onClick={() => void exportShot()} disabled={isExportingPackage} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
-                  <Download className="h-4 w-4" />
-                  {isExportingPackage ? 'Building Package...' : 'Export Final ZIP'}
-                </IconButton>
+                <NextStepHighlight
+                  active={primaryAction?.id === 'export-final-zip'}
+                  hint={primaryAction?.hint}
+                >
+                  <IconButton
+                    onClick={() => void exportShot()}
+                    disabled={isExportingPackage}
+                    highlighted={primaryAction?.id === 'export-final-zip'}
+                    className={`w-full ${primaryAction?.id === 'export-final-zip' ? '' : 'border-teal-500 bg-teal-500 text-white hover:bg-teal-600'}`}
+                  >
+                    <Download className="h-4 w-4" />
+                    {isExportingPackage ? 'Building Package...' : 'Export Final ZIP'}
+                  </IconButton>
+                </NextStepHighlight>
               ) : null}
             </>
           )}
@@ -98,7 +119,7 @@ export function ExportWorkspace() {
                     ['includeViewport', 'Viewport clay render'],
                     ['includeAiResultFrame', 'Imported AI result frame'],
                     ['includePanoCrop', 'Pano crop'],
-                    ['includeFullPano', 'Canonical global pano'],
+                    ['includeFullPano', 'Styled reference pano'],
                     ['includeGrayboxPano', 'Graybox pano'],
                     ['includeMetadata', 'Metadata JSON'],
                     ['includePrompt', 'Prompts'],
