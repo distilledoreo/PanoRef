@@ -1,5 +1,41 @@
 import { Landmark, LocationProject, Shot } from '../domain/types';
 
+const DEFAULT_GRAYBOX_CREATIVE_BRIEF = 'Describe the look you want: style, time of day, materials, and mood.';
+
+const GRAYBOX_REFERENCE_FORMAT_INSTRUCTION = 'The output must be a 16:9 image containing a centered 2:1 equirectangular panorama band. The usable panorama is the central horizontal band only. The top and bottom padding exist only because the image generator cannot output 2:1 directly. Keep the actual scene content inside the central 2:1 panorama area so it can be cropped back into a true equirectangular 360 panorama afterward.';
+
+export function generateGrayboxReferencePrompt(creativeBrief: string): string {
+  const brief = creativeBrief.trim() || DEFAULT_GRAYBOX_CREATIVE_BRIEF;
+
+  return [
+    'Transform the provided graybox 360 equirectangular panorama into a finished final render.',
+    '',
+    'Important format instruction:',
+    GRAYBOX_REFERENCE_FORMAT_INSTRUCTION,
+    '',
+    'Creative brief:',
+    brief,
+    '',
+    'Geometry lock:',
+    'Use the graybox panorama as the authoritative source for camera position, horizon line, perspective, scale, navigation space, foreground/midground/background relationships, and all major scene landmarks. Preserve the placement and silhouette of the main masses so the final render aligns with the graybox panorama after the center 2:1 band is cropped out.',
+    '',
+    'Allowed changes:',
+    'Add materials, lighting, atmosphere, texture, surface detail, props, vegetation, weathering, set dressing, small secondary objects, color grading, and stylistic polish that fit the creative brief.',
+    '',
+    'Forbidden changes:',
+    'Do not move, rotate, resize, delete, or redesign the major structures. Do not change the camera angle, horizon, scene geography, pathway layout, room/courtyard shape, gate/opening positions, wall positions, column positions, terrain profile, or 360 panorama orientation. Do not introduce large new architecture or objects that conflict with the graybox silhouette.',
+    '',
+    'Padding behavior:',
+    'Do not treat the top and bottom padding as part of the scene composition. Do not place important subject matter, landmarks, horizon detail, text, faces, buildings, or key visual information in the padding. The final usable image will be cropped from the center 2:1 panorama band.',
+    '',
+    '360 requirements:',
+    'Maintain seamless equirectangular continuity inside the central panorama band. The left and right edges of the panorama must connect naturally. Avoid duplicated landmarks, broken perspective, pole artifacts, bent verticals, mismatched seams, inconsistent scale, or visible discontinuities.',
+    '',
+    'Rendering goal:',
+    'Make the central panorama band look like a fully realized final scene built on top of the graybox layout, not a new image loosely inspired by it.',
+  ].join('\n');
+}
+
 export function getShotLandmarks(project: LocationProject, shot: Shot): Landmark[] {
   return project.landmarks.filter((landmark) => shot.landmarkIds.includes(landmark.id));
 }

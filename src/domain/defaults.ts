@@ -8,6 +8,7 @@ import {
   SceneObject,
   SceneObjectType,
   ProjectSettings,
+  ProjectWorkflow,
   Shot,
   ShotExportSettings,
   Transform,
@@ -40,6 +41,22 @@ export const defaultProjectSettings = {
   panoModerateMatchMeters: 4,
   panoLetterboxExports169: true,
 } satisfies ProjectSettings;
+
+export const defaultProjectWorkflow: ProjectWorkflow = {
+  shotFramingAcceptedAtByShotId: {},
+  aiBriefSentAtByShotId: {},
+  finalPackageExportedAtByShotId: {},
+};
+
+export function normalizeProjectWorkflow(workflow?: Partial<ProjectWorkflow>): ProjectWorkflow {
+  return {
+    grayboxApprovedForReferenceAt: workflow?.grayboxApprovedForReferenceAt,
+    referenceAlignmentAcceptedForPanoId: workflow?.referenceAlignmentAcceptedForPanoId,
+    shotFramingAcceptedAtByShotId: { ...workflow?.shotFramingAcceptedAtByShotId },
+    aiBriefSentAtByShotId: { ...workflow?.aiBriefSentAtByShotId },
+    finalPackageExportedAtByShotId: { ...workflow?.finalPackageExportedAtByShotId },
+  };
+}
 
 export function normalizeProjectSettings(settings?: Partial<ProjectSettings>): ProjectSettings {
   return {
@@ -284,5 +301,6 @@ export function createDefaultProject(): LocationProject {
     shots: [createOriginShot({ scene, settings })],
     assets: { assets: {} },
     settings,
+    workflow: { ...defaultProjectWorkflow },
   };
 }

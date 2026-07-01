@@ -9,7 +9,7 @@ import { ShotsWorkspace } from './components/workspaces/ShotsWorkspace';
 import { ReviewWorkspace } from './components/workspaces/ReviewWorkspace';
 import { ExportWorkspace } from './components/workspaces/ExportWorkspace';
 import { TextInput } from './components/common/Field';
-import { DirectorQuest } from './components/common/DirectorQuest';
+import { ObjectiveHelpButton, WorkflowGuidance } from './components/common/WorkflowGuidance';
 
 const workspaceItems: Array<{ id: Workspace; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'build', label: 'Build', icon: Boxes },
@@ -75,6 +75,7 @@ export default function App() {
         </nav>
 
         <div className="flex items-center gap-2">
+          <ObjectiveHelpButton />
           <input
             ref={fileRef}
             type="file"
@@ -106,10 +107,6 @@ export default function App() {
         </div>
       </header>
 
-      <div className="shrink-0 border-b border-zinc-200 bg-zinc-100 px-4 py-2">
-        <DirectorQuest project={project} />
-      </div>
-
       <section className="min-h-0 flex-1">
         {workspace === 'build' && <BuildWorkspace />}
         {workspace === 'reference' && <ReferenceWorkspace />}
@@ -117,6 +114,8 @@ export default function App() {
         {workspace === 'review' && <ReviewWorkspace />}
         {workspace === 'export' && <ExportWorkspace />}
       </section>
+
+      <WorkflowGuidance />
     </div>
   );
 }

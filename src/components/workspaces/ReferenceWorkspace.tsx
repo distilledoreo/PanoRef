@@ -1,17 +1,28 @@
-import React, { useRef, useState } from 'react';
-import { Download, FileDown, ImagePlus, RotateCcw, Sparkles, Star } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { FileDown, Sparkles, Star } from 'lucide-react';
+import { STYLED_PANO } from '../../domain/copy';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
 import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
+import { ReferenceAlignmentPanel } from '../common/ReferenceAlignmentPanel';
+import { StyledPanoImportButton } from '../common/StyledPanoImportButton';
+import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
 import { Field, IconButton, Panel, TextInput } from '../common/Field';
 import { WarningList } from '../common/WarningList';
 import { PanoViewer } from '../viewers/PanoViewer';
+import {
+  hasReferenceCandidate,
+  isReferenceAlignmentAccepted,
+  isReferenceReady,
+  needsReferenceAlignment,
+  resolveWorkspacePrimaryAction,
+} from '../../engine/workflow';
+import { NextStepHighlight } from '../common/NextStepHighlight';
 import { getProjectWarnings } from '../../engine/warnings';
-import { WorkspaceLayout } from './BuildWorkspace';
+import { WorkspaceLayout } from './WorkspaceShell';
 
 export function ReferenceWorkspace() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [compareOpacity, setCompareOpacity] = useState(0.65);
   const {
     project,
@@ -22,14 +33,23 @@ export function ReferenceWorkspace() {
     updatePanoReference,
     updateProjectSettings,
     importCanonicalPano,
-    renderGrayboxPano,
-    isRenderingGraybox,
+    approveGrayboxForReference,
+    acceptReferenceAlignment,
+    requestAlignmentIntro,
+    requestAlignmentRetryModal,
   } = useContinuityStore();
   const activePano = project.panoRefs.find((pano) => pano.id === activePanoId) ?? project.panoRefs.find((pano) => pano.isCanonical);
   const activeAsset = activePano ? project.assets.assets[activePano.imageAssetId] : undefined;
   const grayboxPano = getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
   const canCalibrate = Boolean(activePano && activePano.type !== 'graybox_render' && grayboxPano);
+  const alignmentPending = needsReferenceAlignment(project) && !isReferenceAlignmentAccepted(project);
+  const alignmentAccepted = isReferenceAlignmentAccepted(project);
+  const primaryAction = useMemo(
+    () => resolveWorkspacePrimaryAction({ project, workspace: 'reference', shotCameraFlying: false }),
+    [project],
+  );
+
   const setActiveYaw = (yawDegrees: number) => {
     if (!activePano) return;
     updatePanoReference(activePano.id, {
@@ -52,13 +72,6 @@ export function ReferenceWorkspace() {
         ? `Imported from ${params.width}×${params.height} letterboxed 16:9; extracted ${prepared.width}×${prepared.height} equirectangular region.`
         : undefined,
     });
-  };
-
-  const importFile = async (file?: File) => {
-    if (!file) return;
-    const dataUrl = await readFileAsDataUrl(file);
-    const dimensions = await getImageDimensions(dataUrl);
-    await importPanoImage({ name: file.name, dataUrl, width: dimensions.width, height: dimensions.height });
   };
 
   const loadAttachedReference = async () => {
@@ -94,44 +107,78 @@ export function ReferenceWorkspace() {
   return (
     <WorkspaceLayout
       sidebar={(
-        <>
-          <Panel title="Global Reference">
-            <div className="space-y-3">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={(event) => void importFile(event.target.files?.[0])}
-              />
-              <IconButton onClick={() => fileInputRef.current?.click()} className="w-full">
-                <ImagePlus className="h-4 w-4" />
-                Import Canonical Pano
-              </IconButton>
-              <IconButton onClick={() => void loadAttachedReference()} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
+        <WorkspaceSidebar
+          primary={(
+            <div className="space-y-2">
+              {canCalibrate && activePano && (
+                <ReferenceAlignmentPanel
+                  activePano={activePano}
+                  compareOpacity={compareOpacity}
+                  onYawChange={setActiveYaw}
+                  onOpacityChange={setCompareOpacity}
+                  onAcceptAlignment={() => acceptReferenceAlignment()}
+                  onShowRetryTips={() => requestAlignmentRetryModal()}
+                  alignmentAccepted={alignmentAccepted}
+                  highlightNextStep={primaryAction?.id === 'confirm-alignment'}
+                />
+              )}
+              {!grayboxPano && (
+                <p className="text-sm text-zinc-600">
+                  Render a graybox in Build first. Then open Objective for the image AI prompt.
+                </p>
+              )}
+              {alignmentPending && (
+                <button
+                  type="button"
+                  onClick={() => requestAlignmentIntro()}
+                  className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 transition hover:border-teal-300 hover:text-teal-700"
+                >
+                  Reopen alignment guide
+                </button>
+              )}
+              <NextStepHighlight
+                active={primaryAction?.id === 'import-styled-pano'}
+                hint={primaryAction?.hint}
+              >
+                <StyledPanoImportButton
+                  primary={primaryAction?.id !== 'import-styled-pano'}
+                  highlighted={primaryAction?.id === 'import-styled-pano'}
+                />
+              </NextStepHighlight>
+              <IconButton onClick={() => void loadAttachedReference()} className="w-full">
                 <Sparkles className="h-4 w-4" />
                 Use Attached Reference
               </IconButton>
-              <IconButton onClick={() => void renderGrayboxPano()} disabled={isRenderingGraybox} className="w-full">
-                <Download className="h-4 w-4" />
-                {isRenderingGraybox ? 'Rendering Graybox...' : 'Render Graybox 360'}
-              </IconButton>
-              <IconButton
-                onClick={() => grayboxAsset && downloadDataUrl(grayboxAsset.uri, grayboxAsset.name || 'global_graybox.png')}
-                disabled={!grayboxAsset || isRenderingGraybox}
-                className="w-full"
-              >
-                <FileDown className="h-4 w-4" />
-                Download Graybox PNG
-              </IconButton>
+              {grayboxPano && !hasReferenceCandidate(project) && (
+                <IconButton onClick={() => approveGrayboxForReference()} className="w-full">
+                  <Star className="h-4 w-4" />
+                  Use graybox only (skip styling)
+                </IconButton>
+              )}
             </div>
-          </Panel>
-
+          )}
+          diagnostics={(
+            <>
+              <WarningList warnings={getProjectWarnings(project)} />
+              {grayboxPano && !canCalibrate && (
+                <p className="text-sm text-zinc-600">
+                  Import a {STYLED_PANO.short} to compare it against the graybox.
+                </p>
+              )}
+              {isReferenceReady(project) && (
+                <p className="text-sm text-emerald-800">
+                  Reference is ready. You can move on to Shots.
+                </p>
+              )}
+            </>
+          )}
+          advanced={(
+            <>
           <Panel title="Pano References">
             <div className="space-y-2">
               {project.panoRefs.length === 0 && (
                 <p className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-500">
-                  No pano references yet. Render the graybox scene or import a canonical pano.
+                  No pano references yet. Render the graybox scene or import a {STYLED_PANO.short}.
                 </p>
               )}
               {project.panoRefs.map((pano) => (
@@ -152,10 +199,6 @@ export function ReferenceWorkspace() {
                 </button>
               ))}
             </div>
-          </Panel>
-
-          <Panel title="Checks">
-            <WarningList warnings={getProjectWarnings(project)} />
           </Panel>
 
           {activePano && (
@@ -193,73 +236,9 @@ export function ReferenceWorkspace() {
               </span>
             </label>
           </Panel>
-
-          {activePano && canCalibrate && (
-            <Panel title="Calibrate to Graybox">
-              <div className="space-y-3">
-                <Field
-                  label="Pano yaw offset"
-                  hint="Rotate the canonical pano until its landmarks line up with the graybox pano. Exports and pano crop use this offset."
-                >
-                  <TextInput
-                    type="number"
-                    step="1"
-                    value={normalizeSignedYaw(activePano.rotation[1])}
-                    onChange={(event) => setActiveYaw(Number(event.target.value))}
-                  />
-                </Field>
-                <input
-                  type="range"
-                  min="-180"
-                  max="180"
-                  step="1"
-                  value={normalizeSignedYaw(activePano.rotation[1])}
-                  onChange={(event) => setActiveYaw(Number(event.target.value))}
-                  className="w-full accent-teal-500"
-                />
-                <div className="grid grid-cols-3 gap-2">
-                  {[-5, 5].map((delta) => (
-                    <IconButton
-                      key={delta}
-                      onClick={() => setActiveYaw(activePano.rotation[1] + delta)}
-                      className="px-2"
-                    >
-                      {delta > 0 ? '+' : ''}{delta}°
-                    </IconButton>
-                  ))}
-                  <IconButton onClick={() => setActiveYaw(0)} className="px-2">
-                    <RotateCcw className="h-4 w-4" />
-                  </IconButton>
-                </div>
-                <Field
-                  label="Pano opacity over graybox"
-                  hint="Lower this while calibrating to reveal the latest graybox pano underneath the canonical pano."
-                >
-                  <TextInput
-                    type="number"
-                    step="5"
-                    min="0"
-                    max="100"
-                    value={Math.round(compareOpacity * 100)}
-                    onChange={(event) => setCompareOpacity(clamp01(Number(event.target.value) / 100))}
-                  />
-                </Field>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={Math.round(compareOpacity * 100)}
-                  onChange={(event) => setCompareOpacity(clamp01(Number(event.target.value) / 100))}
-                  className="w-full accent-teal-500"
-                />
-                <p className="text-xs text-zinc-500">
-                  Use opacity to compare the canonical pano against the graybox render and set the yaw offset before exporting shot packages.
-                </p>
-              </div>
-            </Panel>
+            </>
           )}
-        </>
+        />
       )}
     >
       <PanoViewer
@@ -296,9 +275,4 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 
 function normalizeSignedYaw(value: number) {
   return ((((value + 180) % 360) + 360) % 360) - 180;
-}
-
-function clamp01(value: number) {
-  if (!Number.isFinite(value)) return 1;
-  return Math.max(0, Math.min(1, value));
 }

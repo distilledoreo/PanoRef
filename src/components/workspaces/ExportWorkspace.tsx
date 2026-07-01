@@ -4,15 +4,37 @@ import { createShotPackageManifest } from '../../engine/exportManifest';
 import { buildShotPackage, downloadBlob } from '../../engine/packageExport';
 import { getProjectWarnings, getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
-import { Field, IconButton, Panel, Select, TextInput } from '../common/Field';
+import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
+import { ShotSelector } from '../common/ShotSelector';
+import { Field, IconButton, Panel, TextInput } from '../common/Field';
 import { WarningList } from '../common/WarningList';
-import { WorkspaceLayout } from './BuildWorkspace';
+import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
+import { NextStepHighlight } from '../common/NextStepHighlight';
+import { WorkspaceLayout } from './WorkspaceShell';
 
 export function ExportWorkspace() {
-  const { project, selectedShotId, selectShot, updateShot, isExportingPackage, setExportingPackage } = useContinuityStore();
+  const {
+    project,
+    selectedShotId,
+    selectShot,
+    addCamera,
+    updateShot,
+    isExportingPackage,
+    setExportingPackage,
+    markFinalPackageExported,
+  } = useContinuityStore();
   const [lastExport, setLastExport] = useState<string[]>([]);
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const manifest = useMemo(() => selectedShot ? createShotPackageManifest(project, selectedShot) : undefined, [project, selectedShot]);
+  const primaryAction = useMemo(
+    () => resolveWorkspacePrimaryAction({
+      project,
+      workspace: 'export',
+      selectedShotId: selectedShot?.id,
+      shotCameraFlying: false,
+    }),
+    [project, selectedShot?.id],
+  );
 
   const exportShot = async () => {
     if (!selectedShot) return;
@@ -22,6 +44,7 @@ export function ExportWorkspace() {
       downloadBlob(result.blob, result.fileName);
       setLastExport(result.manifestPaths);
       updateShot(selectedShot.id, { status: 'exported' });
+      markFinalPackageExported(selectedShot.id);
     } finally {
       setExportingPackage(false);
     }
@@ -30,16 +53,39 @@ export function ExportWorkspace() {
   return (
     <WorkspaceLayout
       sidebar={(
-        <>
-          <Panel title="Shot Selection">
-            <Field label="Active Shot">
-              <Select value={selectedShot?.id ?? ''} onChange={(event) => selectShot(event.target.value)}>
-                {project.shots.map((shot) => <option key={shot.id} value={shot.id}>{shot.name}</option>)}
-              </Select>
-            </Field>
-          </Panel>
-
-          {selectedShot && (
+        <WorkspaceSidebar
+          primary={(
+            <>
+              <ShotSelector
+                project={project}
+                selectedShotId={selectedShot?.id}
+                onSelectShot={selectShot}
+                onAddShot={addCamera}
+              />
+              {selectedShot ? (
+                <NextStepHighlight
+                  active={primaryAction?.id === 'export-final-zip'}
+                  hint={primaryAction?.hint}
+                >
+                  <IconButton
+                    onClick={() => void exportShot()}
+                    disabled={isExportingPackage}
+                    highlighted={primaryAction?.id === 'export-final-zip'}
+                    className={`w-full ${primaryAction?.id === 'export-final-zip' ? '' : 'border-teal-500 bg-teal-500 text-white hover:bg-teal-600'}`}
+                  >
+                    <Download className="h-4 w-4" />
+                    {isExportingPackage ? 'Building Package...' : 'Export Final ZIP'}
+                  </IconButton>
+                </NextStepHighlight>
+              ) : null}
+            </>
+          )}
+          diagnostics={selectedShot ? (
+            <WarningList warnings={[...getProjectWarnings(project), ...getShotWarnings(project, selectedShot)]} />
+          ) : (
+            <p className="text-sm text-zinc-500">No shot selected.</p>
+          )}
+          advanced={selectedShot && (
             <>
               <Panel title="Package Settings">
                 <div className="space-y-3">
@@ -73,7 +119,7 @@ export function ExportWorkspace() {
                     ['includeViewport', 'Viewport clay render'],
                     ['includeAiResultFrame', 'Imported AI result frame'],
                     ['includePanoCrop', 'Pano crop'],
-                    ['includeFullPano', 'Canonical global pano'],
+                    ['includeFullPano', 'Styled reference pano'],
                     ['includeGrayboxPano', 'Graybox pano'],
                     ['includeMetadata', 'Metadata JSON'],
                     ['includePrompt', 'Prompts'],
@@ -92,13 +138,9 @@ export function ExportWorkspace() {
                   ))}
                 </div>
               </Panel>
-
-              <Panel title="Export Checks">
-                <WarningList warnings={[...getProjectWarnings(project), ...getShotWarnings(project, selectedShot)]} />
-              </Panel>
             </>
           )}
-        </>
+        />
       )}
     >
       <div className="flex h-full min-h-0 flex-col bg-white">

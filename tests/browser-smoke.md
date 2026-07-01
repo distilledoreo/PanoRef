@@ -4,15 +4,12 @@ Use the Codex Browser plugin for runtime smoke verification.
 
 1. Launch the app with `npm run dev`.
 2. Open the local URL printed by Vite. It usually starts at `http://localhost:3000`, but use the next free port if Vite reports one.
-3. In **Build**, press `3` to arm Box Stamp Mode, verify the mode badge reads **Stamping Box**, click the floor twice, and confirm each stamp lands under the cursor and the tool stays armed after each placement.
-4. Press `Esc` or `V` to return to **Select**, select and drag a placed object, then press `0` to arm Person. Confirm Backdrop and Sun remain visible in the toybox but have no number shortcut badge.
-5. Toggle snap with `G`, enter Origin mode with `O`, drag the amber pano-origin beacon or click the floor to move it, confirm the beacon follows the cursor without an offset, then return to Select.
-6. With an object selected, use Build shortcuts to duplicate (`D`), rotate (`R` / `Shift+R`), scale (`[` / `]`), lock/unlock (`L`), hide/show (`H`), open the precision drawer (`I`), and delete (`Delete` or `Backspace`).
-7. Edit the selected object name and confirm primitive/action shortcuts do not fire while the text field is focused.
-8. Render **Graybox 360**, then confirm **Download Graybox PNG** is enabled and downloads the standalone equirectangular PNG.
-9. In **Reference**, verify the graybox pano appears in the pano viewer and the calibration controls remain available for a canonical pano.
-10. In **Shots**, click **Main Structure Wide Shot** and confirm the central structure shot appears with landmarks selected.
-11. In **Review**, click **Export AI Brief ZIP** and confirm the package downloads with viewport clay, pano crop, global reference, prompts, and metadata for an external image generator.
-12. Import an externally generated result frame, confirm the **AI Result Frame** pane updates, then in **Export**, export the selected shot package.
-13. Exercise a warning path by creating a fresh project or shot with no selected critical landmarks and confirming the warning is visible.
-14. Repeat a visual smoke check at a phone-sized viewport and confirm there is no fixed 360px sidebar causing horizontal overflow.
+3. On a fresh project in **Build**, confirm a **Current Objective** modal appears once. Dismiss it with **Got it**, then reopen it from the header **Objective** button.
+4. In **Build**, render **Graybox 360** from the sidebar. When the step is complete, confirm an advance modal appears with **Continue to Reference** and **Not right now**. Choose **Not right now** and confirm you stay in Build without the modal immediately reappearing.
+5. In **Reference**, confirm the initial objective modal includes the graybox styling prompt builder. Import a styled pano, confirm the alignment guide modal appears, use yaw and graybox fade in the sidebar, then click **Looks good enough**. If alignment is still poor, open retry tips and confirm generation advice appears. Verify the advance modal offers **Continue to Shots** only after alignment is confirmed.
+6. Open **Shots**, switch shots from the sidebar **Shots** panel if more than one exists, and confirm the active shot updates framing controls.
+7. Fly the camera, lock it in the viewport, and click **Accept Framing**. Verify an advance modal offers Review and reopening fly mode clears the accepted checkpoint.
+8. In **Review**, export **AI Brief ZIP** and confirm the brief-sent checkpoint appears. Import an AI result frame and verify the comparison panes update, then confirm the advance modal offers Export.
+9. In **Export**, export the final ZIP from the sidebar and confirm the export checkpoint completes for the selected shot.
+10. At each workspace, confirm the sidebar stays tool-focused (actions, status, collapsed more options) and guidance appears in modals instead of persistent cards.
+11. Repeat at a phone-sized viewport and confirm modals fit the screen, sidebars scroll cleanly, and there is no horizontal overflow from the main canvas.

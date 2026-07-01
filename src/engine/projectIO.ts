@@ -1,5 +1,5 @@
 import { LocationProject, PanoReference, SceneObject, Shot } from '../domain/types';
-import { normalizeProjectSettings } from '../domain/defaults';
+import { normalizeProjectSettings, normalizeProjectWorkflow } from '../domain/defaults';
 
 export function serializeProject(project: LocationProject): string {
   return JSON.stringify(project, null, 2);
@@ -22,6 +22,7 @@ export function parseProject(json: string): LocationProject {
     panoRefs: parsed.panoRefs.map(normalizePanoReference),
     shots: parsed.shots.map(normalizeShot),
     settings: normalizeProjectSettings(parsed.settings),
+    workflow: normalizeProjectWorkflow(parsed.workflow),
   };
 }
 

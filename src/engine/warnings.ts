@@ -1,3 +1,4 @@
+import { STYLED_PANO } from '../domain/copy';
 import { LocationProject, Shot, WarningItem } from '../domain/types';
 import { getPanoMatchQuality } from './sync';
 
@@ -18,7 +19,7 @@ export function getProjectWarnings(project: LocationProject): WarningItem[] {
     warnings.push({
       id: 'missing-canonical-pano',
       severity: 'warning',
-      message: 'No canonical panorama reference is selected.',
+      message: STYLED_PANO.missing,
     });
   }
 

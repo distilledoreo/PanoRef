@@ -163,6 +163,14 @@ export interface AssetRegistry {
   assets: Record<string, ProjectAsset>;
 }
 
+export interface ProjectWorkflow {
+  grayboxApprovedForReferenceAt?: string;
+  referenceAlignmentAcceptedForPanoId?: string;
+  shotFramingAcceptedAtByShotId: Record<string, string>;
+  aiBriefSentAtByShotId: Record<string, string>;
+  finalPackageExportedAtByShotId: Record<string, string>;
+}
+
 export interface ProjectSettings {
   defaultShotWidth: number;
   defaultShotHeight: number;
@@ -186,6 +194,7 @@ export interface LocationProject {
   shots: Shot[];
   assets: AssetRegistry;
   settings: ProjectSettings;
+  workflow: ProjectWorkflow;
 }
 
 export interface PanoViewState {
