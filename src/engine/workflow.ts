@@ -124,13 +124,13 @@ function stepBlockers(step: ProductionStepId, context: ProductionPathContext): s
       if (!isShotFramingAccepted(project, shot.id)) return ['Accept framing after the camera is locked.'];
       return [];
     case 'review':
-      if (!shot) return ['Select a shot in the drawer.'];
+      if (!shot) return ['Select a shot.'];
       if (!isShotFramingAccepted(project, shot.id)) return ['Accept shot framing in Shots first.'];
       if (!isAiBriefSent(project, shot.id)) return ['Export the AI Brief ZIP and mark it sent.'];
       if (!hasAiResultFrame(shot)) return ['Import the generated AI result frame.'];
       return [];
     case 'export':
-      if (!shot) return ['Select a shot in the drawer.'];
+      if (!shot) return ['Select a shot.'];
       if (!hasAiResultFrame(shot)) return ['Import an AI result frame in Review first.'];
       if (!isFinalPackageExported(project, shot.id)) return ['Export the final ZIP package for this shot.'];
       return [];
@@ -246,4 +246,53 @@ export function resolveWorkspaceObjective(context: ProductionPathContext): Works
 export function getRecommendedWorkspace(context: ProductionPathContext): Workspace {
   const firstIncomplete = STEP_ORDER.find((step) => !isStepComplete(step, context.project, context.selectedShotId));
   return firstIncomplete ?? 'export';
+}
+
+export function getNextProductionStep(step: ProductionStepId): ProductionStepId | undefined {
+  const index = STEP_ORDER.indexOf(step);
+  if (index < 0 || index >= STEP_ORDER.length - 1) return undefined;
+  return STEP_ORDER[index + 1];
+}
+
+export function buildAdvancePromptKey(
+  completedStep: ProductionStepId,
+  nextStep: ProductionStepId,
+  shotId?: string,
+): string {
+  return `${completedStep}->${nextStep}:${shotId ?? 'global'}`;
+}
+
+export interface WorkflowAdvancePrompt {
+  promptKey: string;
+  completedStep: ProductionStepId;
+  nextStep: ProductionStepId;
+  title: string;
+  body: string;
+  nextLabel: string;
+}
+
+export function resolveWorkflowAdvancePrompt(
+  context: ProductionPathContext,
+  dismissedKeys: readonly string[] = [],
+): WorkflowAdvancePrompt | undefined {
+  const { workspace, project, selectedShotId } = context;
+
+  if (!isStepComplete(workspace, project, selectedShotId)) return undefined;
+
+  const nextStep = getNextProductionStep(workspace);
+  if (!nextStep) return undefined;
+
+  const promptKey = buildAdvancePromptKey(workspace, nextStep, selectedShotId);
+  if (dismissedKeys.includes(promptKey)) return undefined;
+
+  const objective = resolveWorkspaceObjective(context);
+
+  return {
+    promptKey,
+    completedStep: workspace,
+    nextStep,
+    title: `${STEP_LABELS[workspace]} is ready`,
+    body: objective.proceedSignal,
+    nextLabel: `Continue to ${STEP_LABELS[nextStep]}`,
+  };
 }

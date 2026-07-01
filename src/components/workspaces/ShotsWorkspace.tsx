@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Download, Move3D, Plus, Trash2 } from 'lucide-react';
+import { CheckCircle2, Download, Move3D, Trash2 } from 'lucide-react';
 import { CameraData, ShotStatus } from '../../domain/types';
 import { downloadDataUrl } from '../../engine/projectIO';
 import { renderShotFrame } from '../../engine/renderers';
-import { GuidedSidebar } from '../common/GuidedSidebar';
-import { isShotFramingAccepted, resolveWorkspaceObjective } from '../../engine/workflow';
+import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
+import { ShotSelector } from '../common/ShotSelector';
+import { isShotFramingAccepted } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
 import { getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
@@ -13,7 +14,7 @@ import { Vec3Input } from '../common/Vec3Input';
 import { WarningList } from '../common/WarningList';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
-import { WorkspaceWithDrawer } from './WorkspaceShell';
+import { WorkspaceLayout } from './WorkspaceShell';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
 
@@ -32,7 +33,6 @@ export function ShotsWorkspace() {
     setShotCameraFlying,
     lockShotCamera,
     acceptShotFraming,
-    setWorkspace,
   } = useContinuityStore();
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
@@ -153,24 +153,21 @@ export function ShotsWorkspace() {
     shotCameraFlying,
   ]);
 
-  const objective = resolveWorkspaceObjective({
-    project,
-    workspace: 'shots',
-    selectedShotId: selectedShot?.id,
-    shotCameraFlying,
-  });
   const framingAccepted = selectedShot ? isShotFramingAccepted(project, selectedShot.id) : false;
 
   return (
-    <WorkspaceWithDrawer
-      showDrawer
-      project={project}
-      selectedShotId={selectedShot?.id}
-      onSelectShot={selectShot}
+    <WorkspaceLayout
       sidebar={(
-        <GuidedSidebar
-          objective={objective}
-          doThisNext={selectedShot ? (
+        <WorkspaceSidebar
+          primary={(
+            <>
+              <ShotSelector
+                project={project}
+                selectedShotId={selectedShot?.id}
+                onSelectShot={selectShot}
+                onAddShot={addCamera}
+              />
+              {selectedShot ? (
             <div className="space-y-2">
               <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
                 {shotCameraFlying
@@ -194,28 +191,18 @@ export function ShotsWorkspace() {
                       Accept Framing
                     </IconButton>
                   )}
-                  {framingAccepted && (
-                    <IconButton onClick={() => setWorkspace('review')} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
-                      <CheckCircle2 className="h-4 w-4" />
-                      Continue to Review
-                    </IconButton>
-                  )}
                 </>
               )}
-              <IconButton onClick={() => addCamera()} className="w-full">
-                <Plus className="h-4 w-4" />
-                Add Camera
-              </IconButton>
             </div>
-          ) : (
-            <p className="text-sm text-zinc-500">Add a camera from the shot drawer.</p>
+              ) : null}
+            </>
           )}
-          checkYourWork={selectedShot ? (
+          diagnostics={selectedShot ? (
             <WarningList warnings={getShotWarnings(project, selectedShot)} />
           ) : (
-            <p className="text-sm text-zinc-500">Select a shot in the drawer to see readiness checks.</p>
+            <p className="text-sm text-zinc-500">Select a shot to see readiness checks.</p>
           )}
-          adjustAdvanced={selectedShot && (
+          advanced={selectedShot && (
             <>
             <Panel
               title="Camera Inspector"
@@ -368,6 +355,6 @@ export function ShotsWorkspace() {
           </div>
         </div>
       </div>
-    </WorkspaceWithDrawer>
+    </WorkspaceLayout>
   );
 }

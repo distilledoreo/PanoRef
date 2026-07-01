@@ -4,17 +4,18 @@ import { createShotPackageManifest } from '../../engine/exportManifest';
 import { buildShotPackage, downloadBlob } from '../../engine/packageExport';
 import { getProjectWarnings, getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
-import { GuidedSidebar } from '../common/GuidedSidebar';
+import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
+import { ShotSelector } from '../common/ShotSelector';
 import { Field, IconButton, Panel, TextInput } from '../common/Field';
 import { WarningList } from '../common/WarningList';
-import { resolveWorkspaceObjective } from '../../engine/workflow';
-import { WorkspaceWithDrawer } from './WorkspaceShell';
+import { WorkspaceLayout } from './WorkspaceShell';
 
 export function ExportWorkspace() {
   const {
     project,
     selectedShotId,
     selectShot,
+    addCamera,
     updateShot,
     isExportingPackage,
     setExportingPackage,
@@ -38,36 +39,32 @@ export function ExportWorkspace() {
     }
   };
 
-  const objective = resolveWorkspaceObjective({
-    project,
-    workspace: 'export',
-    selectedShotId: selectedShot?.id,
-    shotCameraFlying: false,
-  });
-
   return (
-    <WorkspaceWithDrawer
-      showDrawer
-      project={project}
-      selectedShotId={selectedShot?.id}
-      onSelectShot={selectShot}
+    <WorkspaceLayout
       sidebar={(
-        <GuidedSidebar
-          objective={objective}
-          doThisNext={selectedShot ? (
-            <IconButton onClick={() => void exportShot()} disabled={isExportingPackage} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
-              <Download className="h-4 w-4" />
-              {isExportingPackage ? 'Building Package...' : 'Export Final ZIP'}
-            </IconButton>
-          ) : (
-            <p className="text-sm text-zinc-500">Select a shot in the drawer.</p>
+        <WorkspaceSidebar
+          primary={(
+            <>
+              <ShotSelector
+                project={project}
+                selectedShotId={selectedShot?.id}
+                onSelectShot={selectShot}
+                onAddShot={addCamera}
+              />
+              {selectedShot ? (
+                <IconButton onClick={() => void exportShot()} disabled={isExportingPackage} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
+                  <Download className="h-4 w-4" />
+                  {isExportingPackage ? 'Building Package...' : 'Export Final ZIP'}
+                </IconButton>
+              ) : null}
+            </>
           )}
-          checkYourWork={selectedShot ? (
+          diagnostics={selectedShot ? (
             <WarningList warnings={[...getProjectWarnings(project), ...getShotWarnings(project, selectedShot)]} />
           ) : (
             <p className="text-sm text-zinc-500">No shot selected.</p>
           )}
-          adjustAdvanced={selectedShot && (
+          advanced={selectedShot && (
             <>
               <Panel title="Package Settings">
                 <div className="space-y-3">
@@ -175,6 +172,6 @@ export function ExportWorkspace() {
           </div>
         </div>
       </div>
-    </WorkspaceWithDrawer>
+    </WorkspaceLayout>
   );
 }

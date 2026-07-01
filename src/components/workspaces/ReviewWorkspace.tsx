@@ -6,11 +6,12 @@ import { generateImagePrompt, generateVideoPrompt } from '../../engine/prompts';
 import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
 import { getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
-import { GuidedSidebar } from '../common/GuidedSidebar';
+import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
+import { ShotSelector } from '../common/ShotSelector';
 import { Field, IconButton, Panel, TextArea } from '../common/Field';
 import { WarningList } from '../common/WarningList';
-import { hasAiResultFrame, isAiBriefSent, resolveWorkspaceObjective } from '../../engine/workflow';
-import { WorkspaceWithDrawer } from './WorkspaceShell';
+import { isAiBriefSent } from '../../engine/workflow';
+import { WorkspaceLayout } from './WorkspaceShell';
 
 export function ReviewWorkspace() {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -22,7 +23,7 @@ export function ReviewWorkspace() {
     updateShot,
     attachAiResultFrameToShot,
     markAiBriefSent,
-    setWorkspace,
+    addCamera,
   } = useContinuityStore();
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const selectedShotPano = selectedShot?.linkedPanoId
@@ -51,13 +52,6 @@ export function ReviewWorkspace() {
     }
   };
 
-  const objective = resolveWorkspaceObjective({
-    project,
-    workspace: 'review',
-    selectedShotId: selectedShot?.id,
-    shotCameraFlying: false,
-  });
-
   const importAiResult = async (file?: File) => {
     if (!file || !selectedShot) return;
     const dataUrl = await readFileAsDataUrl(file);
@@ -71,15 +65,18 @@ export function ReviewWorkspace() {
   };
 
   return (
-    <WorkspaceWithDrawer
-      showDrawer
-      project={project}
-      selectedShotId={selectedShot?.id}
-      onSelectShot={selectShot}
+    <WorkspaceLayout
       sidebar={(
-        <GuidedSidebar
-          objective={objective}
-          doThisNext={selectedShot ? (
+        <WorkspaceSidebar
+          primary={(
+            <>
+              <ShotSelector
+                project={project}
+                selectedShotId={selectedShot?.id}
+                onSelectShot={selectShot}
+                onAddShot={addCamera}
+              />
+              {selectedShot ? (
             <div className="space-y-2">
               <input
                 ref={fileRef}
@@ -105,22 +102,16 @@ export function ReviewWorkspace() {
                 <ImagePlus className="h-4 w-4" />
                 Import AI Result Frame
               </IconButton>
-              {hasAiResultFrame(selectedShot) && (
-                <IconButton onClick={() => setWorkspace('export')} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
-                  <CheckCircle2 className="h-4 w-4" />
-                  Continue to Export
-                </IconButton>
-              )}
             </div>
-          ) : (
-            <p className="text-sm text-zinc-500">Select a shot in the drawer.</p>
+              ) : null}
+            </>
           )}
-          checkYourWork={selectedShot ? (
+          diagnostics={selectedShot ? (
             <WarningList warnings={getShotWarnings(project, selectedShot)} />
           ) : (
             <p className="text-sm text-zinc-500">No shot selected.</p>
           )}
-          adjustAdvanced={selectedShot && (
+          advanced={selectedShot && (
             <>
               <Panel title="Review Actions">
                 <div className="grid grid-cols-1 gap-2">
@@ -175,7 +166,7 @@ export function ReviewWorkspace() {
           </div>
         </div>
       </div>
-    </WorkspaceWithDrawer>
+    </WorkspaceLayout>
   );
 }
 

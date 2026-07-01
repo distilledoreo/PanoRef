@@ -30,10 +30,9 @@ import {
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
 import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
-import { GuidedSidebar } from '../common/GuidedSidebar';
+import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
 import { Field, IconButton, Panel, Select, TextInput } from '../common/Field';
 import { Vec3Input } from '../common/Vec3Input';
-import { resolveWorkspaceObjective } from '../../engine/workflow';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { WorkspaceLayout } from './WorkspaceShell';
 
@@ -147,19 +146,11 @@ export function BuildWorkspace() {
     toggleObjectVisibility,
   ]);
 
-  const objective = resolveWorkspaceObjective({
-    project,
-    workspace: 'build',
-    selectedShotId: undefined,
-    shotCameraFlying: false,
-  });
-
   return (
     <WorkspaceLayout
       sidebar={(
-        <GuidedSidebar
-          objective={objective}
-          doThisNext={(
+        <WorkspaceSidebar
+          primary={(
             <>
               <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
                 Place primitives from the toybox tray, drag pieces on the floor, then move the pano origin where the 360 should be captured.
@@ -179,7 +170,7 @@ export function BuildWorkspace() {
               </div>
             </>
           )}
-          checkYourWork={(
+          diagnostics={(
             <>
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
                 Pano origin: {project.scene.panoOrigin.map((item) => item.toFixed(1)).join(', ')}
@@ -198,7 +189,7 @@ export function BuildWorkspace() {
               </p>
             </>
           )}
-          adjustAdvanced={(
+          advanced={(
             <>
           <Panel
             title="Toybox Layers"

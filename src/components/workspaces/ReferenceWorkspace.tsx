@@ -1,14 +1,14 @@
 import React, { useRef, useState } from 'react';
-import { Download, FileDown, ImagePlus, RotateCcw, Sparkles, Star } from 'lucide-react';
+import { FileDown, ImagePlus, RotateCcw, Sparkles, Star } from 'lucide-react';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
 import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
-import { GuidedSidebar } from '../common/GuidedSidebar';
+import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
 import { Field, IconButton, Panel, TextInput } from '../common/Field';
 import { WarningList } from '../common/WarningList';
 import { PanoViewer } from '../viewers/PanoViewer';
-import { isReferenceReady, resolveWorkspaceObjective } from '../../engine/workflow';
+import { isReferenceReady } from '../../engine/workflow';
 import { getProjectWarnings } from '../../engine/warnings';
 import { WorkspaceLayout } from './WorkspaceShell';
 
@@ -27,7 +27,6 @@ export function ReferenceWorkspace() {
     renderGrayboxPano,
     isRenderingGraybox,
     approveGrayboxForReference,
-    setWorkspace,
   } = useContinuityStore();
   const activePano = project.panoRefs.find((pano) => pano.id === activePanoId) ?? project.panoRefs.find((pano) => pano.isCanonical);
   const activeAsset = activePano ? project.assets.assets[activePano.imageAssetId] : undefined;
@@ -95,19 +94,11 @@ export function ReferenceWorkspace() {
     );
   };
 
-  const objective = resolveWorkspaceObjective({
-    project,
-    workspace: 'reference',
-    selectedShotId: undefined,
-    shotCameraFlying: false,
-  });
-
   return (
     <WorkspaceLayout
       sidebar={(
-        <GuidedSidebar
-          objective={objective}
-          doThisNext={(
+        <WorkspaceSidebar
+          primary={(
             <div className="space-y-2">
               <input
                 ref={fileInputRef}
@@ -130,15 +121,9 @@ export function ReferenceWorkspace() {
                   Approve Graybox as Working Reference
                 </IconButton>
               )}
-              {isReferenceReady(project) && (
-                <IconButton onClick={() => setWorkspace('shots')} className="w-full border-teal-500 bg-teal-500 text-white hover:bg-teal-600">
-                  <Download className="h-4 w-4" />
-                  Continue to Shots
-                </IconButton>
-              )}
             </div>
           )}
-          checkYourWork={(
+          diagnostics={(
             <>
               <WarningList warnings={getProjectWarnings(project)} />
               {grayboxPano && (
@@ -148,7 +133,7 @@ export function ReferenceWorkspace() {
               )}
             </>
           )}
-          adjustAdvanced={(
+          advanced={(
             <>
           <Panel title="Pano References">
             <div className="space-y-2">

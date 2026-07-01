@@ -87,6 +87,13 @@ interface ContinuityStore {
   acceptShotFraming: (shotId: string) => void;
   markAiBriefSent: (shotId: string) => void;
   markFinalPackageExported: (shotId: string) => void;
+  dismissedWorkflowAdvanceKeys: string[];
+  seenObjectiveWorkspaces: Workspace[];
+  objectiveModalRequest: number;
+  dismissWorkflowAdvance: (promptKey: string) => void;
+  markObjectiveSeen: (workspace: Workspace) => void;
+  requestObjectiveModal: () => void;
+  resetWorkflowSession: () => void;
 }
 
 const initialProject = createDefaultProject();
@@ -109,6 +116,9 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   isRenderingGraybox: false,
   isExportingPackage: false,
   shotCameraFlying: true,
+  dismissedWorkflowAdvanceKeys: [],
+  seenObjectiveWorkspaces: [],
+  objectiveModalRequest: 0,
 
   setWorkspace: (workspace) => set((state) => {
     if (workspace !== 'shots') {
@@ -136,6 +146,9 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       selectedShotId: linkedProject.shots[0]?.id,
       selectedLandmarkId: linkedProject.landmarks[0]?.id,
       buildMode: 'select',
+      dismissedWorkflowAdvanceKeys: [],
+      seenObjectiveWorkspaces: [],
+      objectiveModalRequest: 0,
     });
   },
   updateProjectInfo: (updates) => set((state) => ({
@@ -552,6 +565,24 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       },
     }),
   })),
+  dismissWorkflowAdvance: (promptKey) => set((state) => ({
+    dismissedWorkflowAdvanceKeys: state.dismissedWorkflowAdvanceKeys.includes(promptKey)
+      ? state.dismissedWorkflowAdvanceKeys
+      : [...state.dismissedWorkflowAdvanceKeys, promptKey],
+  })),
+  markObjectiveSeen: (workspace) => set((state) => ({
+    seenObjectiveWorkspaces: state.seenObjectiveWorkspaces.includes(workspace)
+      ? state.seenObjectiveWorkspaces
+      : [...state.seenObjectiveWorkspaces, workspace],
+  })),
+  requestObjectiveModal: () => set((state) => ({
+    objectiveModalRequest: state.objectiveModalRequest + 1,
+  })),
+  resetWorkflowSession: () => set({
+    dismissedWorkflowAdvanceKeys: [],
+    seenObjectiveWorkspaces: [],
+    objectiveModalRequest: 0,
+  }),
 }));
 
 function touchProject(project: LocationProject): LocationProject {

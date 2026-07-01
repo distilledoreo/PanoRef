@@ -6,7 +6,9 @@ import {
   isReferenceReady,
   isShotFramingAccepted,
   isStepComplete,
+  buildAdvancePromptKey,
   resolveProductionPath,
+  resolveWorkflowAdvancePrompt,
   resolveWorkspaceObjective,
 } from '../src/engine/workflow';
 
@@ -86,6 +88,15 @@ describe('workflow resolver', () => {
     });
     expect(steps.find((step) => step.id === 'build')?.state).toBe('complete');
     expect(steps.find((step) => step.id === 'reference')?.state).toBe('needs_action');
+  });
+
+  it('offers an advance prompt when the active workspace step is complete', () => {
+    const project = withGraybox();
+    const context = { project, workspace: 'build' as const, shotCameraFlying: false };
+    const prompt = resolveWorkflowAdvancePrompt(context);
+    expect(prompt?.nextStep).toBe('reference');
+    expect(prompt?.promptKey).toBe(buildAdvancePromptKey('build', 'reference'));
+    expect(resolveWorkflowAdvancePrompt(context, [prompt!.promptKey])).toBeUndefined();
   });
 
   it('describes workspace objectives with proceed signals', () => {
