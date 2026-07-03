@@ -36,7 +36,8 @@ describe('rendered shot output', () => {
 
     expect(source).toContain('DEFAULT_GRAYBOX_PANO_WIDTH');
     expect(source).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT');
-    expect(storeSource).toContain('renderGrayboxEquirectangularPano(state.project)');
+    expect(storeSource).toMatch(/renderGrayboxEquirectangularPano\(state\.project/);
+    expect(storeSource).toContain('useThemeStore.getState().theme');
     expect(storeSource).not.toContain('renderGrayboxEquirectangularPano(state.project, 2048, 1024)');
   });
 

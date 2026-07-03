@@ -19,8 +19,8 @@ describe('build selection visuals', () => {
 
     expect(selectedFloorMaterial).toBe(resolveObjectMaterial(floor, 'light'));
     expect(selectedBoxMaterial).toBe(resolveObjectMaterial(box, 'light'));
-    expect(selectedFloorMaterial.color.getHex()).toBe(0xd8ddd7);
-    expect(selectedBoxMaterial.color.getHex()).toBe(0xd8ddd7);
+    expect(selectedFloorMaterial.color.getHex()).toBe(0xd8ddd8);
+    expect(selectedBoxMaterial.color.getHex()).toBe(0xc8cdc8);
     expect(selectedFloorMaterial.color.getHex()).not.toBe(0x14b8a6);
   });
 

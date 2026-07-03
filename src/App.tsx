@@ -51,7 +51,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-surface-base text-primary">
-      <header className="relative z-30 flex h-[72px] shrink-0 items-center justify-between gap-4 bg-surface-overlay px-7 shadow-card backdrop-blur">
+      <header className="relative z-30 flex h-[72px] shrink-0 items-center justify-between gap-4 border-b border-subtle bg-surface-header px-7 shadow-card">
         <div className="relative min-w-0">
           <button
             type="button"
@@ -122,7 +122,7 @@ export default function App() {
                   className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${
                     active
                       ? 'border-[var(--accent)] bg-[var(--accent)] text-white shadow-[0_0_22px_var(--accent-glow)]'
-                      : 'border-subtle bg-surface-overlay text-secondary group-hover:border-strong group-hover:text-primary'
+                      : 'border-subtle bg-surface-muted text-secondary group-hover:border-strong group-hover:text-primary'
                   }`}
                 >
                   <Icon className="h-4 w-4" />

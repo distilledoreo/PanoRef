@@ -33,6 +33,8 @@ import {
   multiplyScalar,
 } from '../engine/sync';
 import { renderGrayboxEquirectangularPano } from '../engine/renderers';
+import { downloadDataUrl } from '../engine/projectIO';
+import { useThemeStore } from './useThemeStore';
 import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition } from '../engine/sandbox';
 
 export type BuildMode = 'select' | 'place' | 'pano_origin';
@@ -145,7 +147,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       selectedShotId: shot.id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
       panoView: panoViewFromCamera(shot.camera),
-      shotCameraFlying: false,
+      shotCameraFlying: true,
     };
   }),
   setProject: (project) => {
@@ -304,13 +306,14 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     set({ isRenderingGraybox: true });
     try {
       const state = get();
-      const render = await renderGrayboxEquirectangularPano(state.project);
+      const theme = useThemeStore.getState().theme;
+      const render = await renderGrayboxEquirectangularPano(state.project, undefined, undefined, theme);
       const asset = createPanoAsset({
         name: 'global_graybox.png',
         uri: render.dataUrl,
         width: render.width,
         height: render.height,
-        metadata: { source: 'graybox_scene' },
+        metadata: { source: 'graybox_scene', theme },
       });
       const pano = createPanoReference({
         name: 'Graybox 360',
@@ -342,6 +345,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         })),
         activePanoId: pano.id,
       }));
+      downloadDataUrl(render.dataUrl, asset.name);
       return pano;
     } finally {
       set({ isRenderingGraybox: false });
@@ -418,12 +422,12 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   },
   selectShot: (id) => set((state) => {
     const shot = state.project.shots.find((item) => item.id === id);
-    if (!shot) return { selectedShotId: id, shotCameraFlying: false };
+    if (!shot) return { selectedShotId: id, shotCameraFlying: true };
     return {
       selectedShotId: id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
       panoView: panoViewFromCamera(shot.camera),
-      shotCameraFlying: false,
+      shotCameraFlying: true,
     };
   }),
   setShotCameraFlying: (value) => set((state) => {
@@ -710,7 +714,7 @@ function addShotWithCamera(camera: CameraData, linkedPanoId?: string, name?: str
     }),
     selectedShotId: shot.id,
     workspace: 'shots',
-    shotCameraFlying: false,
+    shotCameraFlying: true,
   }));
 
   return shot;

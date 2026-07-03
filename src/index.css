@@ -4,6 +4,7 @@
 
 :root {
   --surface-base: #f5f3ef;
+  --surface-header: #ffffff;
   --surface-raised: #ffffff;
   --surface-overlay: rgba(255, 255, 255, 0.92);
   --surface-muted: #ebe8e3;
@@ -48,6 +49,7 @@
 
 .dark {
   --surface-base: #0f1419;
+  --surface-header: #151c24;
   --surface-raised: #1a222d;
   --surface-overlay: rgba(26, 34, 45, 0.94);
   --surface-muted: #243040;
@@ -89,6 +91,7 @@ body {
 
 @layer utilities {
   .bg-surface-base { background-color: var(--surface-base); }
+  .bg-surface-header { background-color: var(--surface-header); }
   .bg-surface-raised { background-color: var(--surface-raised); }
   .bg-surface-overlay { background-color: var(--surface-overlay); }
   .bg-surface-muted { background-color: var(--surface-muted); }

@@ -72,6 +72,26 @@ export function ShotsWorkspace() {
   const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
   const [precisionOpen, setPrecisionOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
+  const [flyCameraRevision, setFlyCameraRevision] = useState(0);
+
+  const getEffectiveCamera = useCallback((): CameraData | undefined => {
+    if (!selectedShot) return undefined;
+    return draftCameraRef.current ?? selectedShot.camera;
+  }, [selectedShot]);
+
+  const getPreviewShot = useCallback(() => {
+    if (!selectedShot) return undefined;
+    const camera = getEffectiveCamera();
+    if (!camera) return selectedShot;
+    return {
+      ...selectedShot,
+      camera: {
+        ...camera,
+        position: [...camera.position] as CameraData['position'],
+        target: [...camera.target] as CameraData['target'],
+      },
+    };
+  }, [getEffectiveCamera, selectedShot]);
 
   const exportFrameFileName = selectedShot
     ? `${selectedShot.name.replace(/\s+/g, '_').toLowerCase()}_${selectedShot.exportSettings.width}x${selectedShot.exportSettings.height}.png`
@@ -93,17 +113,20 @@ export function ShotsWorkspace() {
   const supportedMp4MimeType = getSupportedCameraMoveMp4MimeType();
 
   const exportCameraFrame = useCallback(async () => {
-    if (!selectedShot) return;
+    const previewShot = getPreviewShot();
+    if (!previewShot) return;
     setIsExportingFrame(true);
     try {
-      const frame = await renderShotFrame(project, selectedShot);
+      const frame = await renderShotFrame(project, previewShot);
       setFramePreviewUrl(frame.dataUrl);
       downloadDataUrl(frame.dataUrl, exportFrameFileName);
-      updateShot(selectedShot.id, { status: 'exported' });
+      if (!shotCameraFlying) {
+        updateShot(previewShot.id, { status: 'exported' });
+      }
     } finally {
       setIsExportingFrame(false);
     }
-  }, [exportFrameFileName, project, selectedShot, updateShot]);
+  }, [exportFrameFileName, getPreviewShot, project, shotCameraFlying, updateShot]);
 
   const updateCameraMoveKeyframes = useCallback((keyframes: typeof cameraMoveKeyframes) => {
     if (!selectedShot) return;
@@ -120,13 +143,15 @@ export function ShotsWorkspace() {
 
   const captureCameraMoveKeyframe = useCallback((slot: CameraMoveKeyframeSlot) => {
     if (!selectedShot) return;
+    const camera = getEffectiveCamera();
+    if (!camera) return;
     updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
       keyframes: selectedShot.cameraKeyframes,
       slot,
-      camera: selectedShot.camera,
+      camera,
       durationSeconds: cameraMoveDurationSeconds,
     }));
-  }, [cameraMoveDurationSeconds, selectedShot, updateCameraMoveKeyframes]);
+  }, [cameraMoveDurationSeconds, getEffectiveCamera, selectedShot, updateCameraMoveKeyframes]);
 
   const changeCameraMoveDuration = useCallback((durationSeconds: number) => {
     if (!selectedShot) return;
@@ -173,9 +198,9 @@ export function ShotsWorkspace() {
   }, [attachCameraMoveVideoToShot, cameraMoveFileName, project, selectedShot]);
 
   useEffect(() => {
-    if (!selectedShot || !shotCameraFlying) return;
+    if (!selectedShot) return;
     draftCameraRef.current = selectedShot.camera;
-    setFramePreviewUrl(undefined);
+    setFlyCameraRevision((revision) => revision + 1);
   }, [selectedShot?.id, selectedShot?.camera, shotCameraFlying]);
 
   useEffect(() => {
@@ -194,30 +219,31 @@ export function ShotsWorkspace() {
   }, [selectedShot]);
 
   const framePreviewKey = useMemo(() => {
-    if (!selectedShot) return '';
+    const previewShot = getPreviewShot();
+    if (!previewShot) return '';
     return JSON.stringify({
       scene: project.scene,
-      camera: selectedShot.camera,
-      width: selectedShot.exportSettings.width,
-      height: selectedShot.exportSettings.height,
+      camera: previewShot.camera,
+      width: previewShot.exportSettings.width,
+      height: previewShot.exportSettings.height,
+      flyCameraRevision,
     });
   }, [
+    flyCameraRevision,
+    getPreviewShot,
     project.scene,
-    selectedShot?.id,
-    selectedShot?.camera,
-    selectedShot?.exportSettings.width,
     selectedShot?.exportSettings.height,
+    selectedShot?.exportSettings.width,
+    selectedShot?.id,
   ]);
 
   useEffect(() => {
-    if (!selectedShot || shotCameraFlying) {
-      if (shotCameraFlying) setFramePreviewUrl(undefined);
-      return;
-    }
+    const previewShot = getPreviewShot();
+    if (!previewShot) return;
 
     let cancelled = false;
     setIsRenderingFrame(true);
-    void renderShotFrame(project, selectedShot)
+    void renderShotFrame(project, previewShot)
       .then((frame) => {
         if (!cancelled) setFramePreviewUrl(frame.dataUrl);
       })
@@ -228,12 +254,13 @@ export function ShotsWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [framePreviewKey, selectedShot?.id, shotCameraFlying]);
+  }, [framePreviewKey, getPreviewShot, project]);
 
   const handleFramingCameraChange = useCallback((camera: CameraData) => {
     if (!selectedShot) return;
+    draftCameraRef.current = camera;
     if (shotCameraFlying) {
-      draftCameraRef.current = camera;
+      setFlyCameraRevision((revision) => revision + 1);
       return;
     }
     updateShot(selectedShot.id, { camera });
@@ -376,7 +403,7 @@ export function ShotsWorkspace() {
               label={linkedPano?.name ?? 'Linked Pano'}
               matchQuality={panoMatch?.quality}
               matchDistanceMeters={panoMatch?.distanceMeters}
-              disabledReason={shotCameraFlying ? 'Lock the camera to render the pano crop preview.' : undefined}
+              disabledReason={undefined}
             />
           </div>
         )}
@@ -432,7 +459,7 @@ export function ShotsWorkspace() {
                 danger
               />
               {shotCameraFlying && (
-                <span className="hidden px-1 text-xs text-secondary sm:inline">Click viewport or Lock View</span>
+                <span className="hidden px-1 text-xs text-secondary sm:inline">Use Lock View to save camera position</span>
               )}
               {!shotCameraFlying && selectedShot && !framingAccepted && (
                 <button
@@ -450,7 +477,7 @@ export function ShotsWorkspace() {
               label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}
               hint="Preview this shot from the reference."
               onClick={() => void exportCameraFrame()}
-              disabled={!selectedShot || shotCameraFlying || isExportingFrame || isRenderingFrame}
+              disabled={!selectedShot || isExportingFrame || isRenderingFrame}
               highlighted={primaryAction?.id === 'accept-framing' || primaryAction?.id === 'lock-camera'}
               layout="inline"
             />
@@ -538,7 +565,7 @@ export function ShotsWorkspace() {
             <Panel title="Export Frame">
               <IconButton
                 onClick={() => void exportCameraFrame()}
-                disabled={shotCameraFlying || isExportingFrame || isRenderingFrame}
+                disabled={isExportingFrame || isRenderingFrame}
                 className="w-full"
               >
                 <Download className="h-4 w-4" />
@@ -549,11 +576,11 @@ export function ShotsWorkspace() {
             <Panel title="Camera Move MP4">
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
-                  <IconButton onClick={() => captureCameraMoveKeyframe('start')} disabled={shotCameraFlying} className="w-full">
+                  <IconButton onClick={() => captureCameraMoveKeyframe('start')} className="w-full">
                     <KeyRound className="h-4 w-4" />
                     Set Start
                   </IconButton>
-                  <IconButton onClick={() => captureCameraMoveKeyframe('end')} disabled={shotCameraFlying} className="w-full">
+                  <IconButton onClick={() => captureCameraMoveKeyframe('end')} className="w-full">
                     <KeyRound className="h-4 w-4" />
                     Set End
                   </IconButton>

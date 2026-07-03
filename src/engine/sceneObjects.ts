@@ -4,22 +4,31 @@ import { degreesToRadians } from './sync';
 
 export type SceneVisualTheme = 'light' | 'dark';
 
+function createArchitectureMaterial(color: number, roughness: number): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness,
+    metalness: 0.04,
+  });
+}
+
 const materialByTheme: Record<SceneVisualTheme, Record<SceneObject['category'], THREE.MeshStandardMaterial>> = {
   light: {
-    architecture: new THREE.MeshStandardMaterial({ color: 0xd8ddd7, roughness: 0.82 }),
-    environment: new THREE.MeshStandardMaterial({ color: 0x91a78f, roughness: 0.86 }),
-    helper: new THREE.MeshStandardMaterial({ color: 0xc79a48, roughness: 0.76 }),
-    landmark: new THREE.MeshStandardMaterial({ color: 0x5f9b7a, roughness: 0.65 }),
+    architecture: createArchitectureMaterial(0xc8cdc8, 0.74),
+    environment: createArchitectureMaterial(0x9aab96, 0.8),
+    helper: new THREE.MeshStandardMaterial({ color: 0xc79a48, roughness: 0.72, metalness: 0.02 }),
+    landmark: new THREE.MeshStandardMaterial({ color: 0x5f9b7a, roughness: 0.62, metalness: 0.03 }),
   },
   dark: {
-    architecture: new THREE.MeshStandardMaterial({ color: 0xbec4bf, roughness: 0.86 }),
-    environment: new THREE.MeshStandardMaterial({ color: 0x8b9790, roughness: 0.9 }),
-    helper: new THREE.MeshStandardMaterial({ color: 0xb8843a, roughness: 0.78 }),
-    landmark: new THREE.MeshStandardMaterial({ color: 0x4ab49c, roughness: 0.65 }),
+    architecture: createArchitectureMaterial(0xb8c0bc, 0.8),
+    environment: createArchitectureMaterial(0x8d9892, 0.84),
+    helper: new THREE.MeshStandardMaterial({ color: 0xb8843a, roughness: 0.74, metalness: 0.02 }),
+    landmark: new THREE.MeshStandardMaterial({ color: 0x4ab49c, roughness: 0.62, metalness: 0.03 }),
   },
 };
 
-const darkFloorMaterial = new THREE.MeshStandardMaterial({ color: 0x242c32, roughness: 0.92 });
+const lightFloorMaterial = new THREE.MeshStandardMaterial({ color: 0xd8ddd8, roughness: 0.9, metalness: 0.01 });
+const darkFloorMaterial = new THREE.MeshStandardMaterial({ color: 0x242c32, roughness: 0.92, metalness: 0.01 });
 const panoOriginMaterial = new THREE.MeshStandardMaterial({ color: 0xd08a28, emissive: 0x3a2306 });
 const landmarkMaterial = new THREE.MeshStandardMaterial({ color: 0x5f9b7a, emissive: 0x0b2e1e });
 const robeMaterial = new THREE.MeshStandardMaterial({ color: 0xb9a27e, roughness: 0.9 });
@@ -29,6 +38,7 @@ const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x111111 });
 const SHARED_MATERIALS = new Set<THREE.Material>([
   ...Object.values(materialByTheme.light),
   ...Object.values(materialByTheme.dark),
+  lightFloorMaterial,
   darkFloorMaterial,
   panoOriginMaterial,
   landmarkMaterial,
@@ -54,14 +64,37 @@ export function buildScene(
   const theme = options.theme ?? 'light';
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(theme === 'dark' ? 0x0f1419 : 0xf3f6f4);
+  scene.fog = new THREE.Fog(
+    theme === 'dark' ? 0x0f1419 : 0xf3f6f4,
+    18,
+    42,
+  );
   const hiddenTypes = new Set(options.hiddenObjectTypes ?? []);
 
-  const ambient = new THREE.AmbientLight(0xffffff, theme === 'dark' ? 0.82 : 1.45);
+  const hemisphere = new THREE.HemisphereLight(
+    theme === 'dark' ? 0xb8c4d0 : 0xffffff,
+    theme === 'dark' ? 0x1a2228 : 0xd8ddd6,
+    theme === 'dark' ? 0.72 : 0.95,
+  );
+  scene.add(hemisphere);
+
+  const ambient = new THREE.AmbientLight(0xffffff, theme === 'dark' ? 0.28 : 0.42);
   scene.add(ambient);
 
-  const sun = new THREE.DirectionalLight(0xffffff, theme === 'dark' ? 1.35 : 1.9);
-  sun.position.set(4, 6, 3);
-  scene.add(sun);
+  const keyLight = new THREE.DirectionalLight(0xffffff, theme === 'dark' ? 1.15 : 1.35);
+  keyLight.position.set(5.5, 8.5, 4.5);
+  scene.add(keyLight);
+
+  const fillLight = new THREE.DirectionalLight(
+    theme === 'dark' ? 0xa8c0d8 : 0xfff8f0,
+    theme === 'dark' ? 0.42 : 0.55,
+  );
+  fillLight.position.set(-4.5, 3.5, -3);
+  scene.add(fillLight);
+
+  const rimLight = new THREE.DirectionalLight(0xffffff, theme === 'dark' ? 0.22 : 0.28);
+  rimLight.position.set(-2, 2, 6);
+  scene.add(rimLight);
 
   const grid = new THREE.GridHelper(
     14,
@@ -120,7 +153,7 @@ export function resolveObjectMaterial(
   object: SceneObject,
   theme: SceneVisualTheme = 'light',
 ): THREE.MeshStandardMaterial {
-  if (theme === 'dark' && object.type === 'floor') return darkFloorMaterial;
+  if (object.type === 'floor') return theme === 'dark' ? darkFloorMaterial : lightFloorMaterial;
   return materialByTheme[theme][object.category];
 }
 

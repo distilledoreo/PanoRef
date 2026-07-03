@@ -551,9 +551,6 @@ export function SceneViewport({
     const onPointerUp = (event: PointerEvent) => {
       const drag = dragRef.current;
       if (drag.kind === 'shot_framing') {
-        if (!drag.moved) {
-          shotFramingRef.current?.onLockCamera?.();
-        }
         dragRef.current = { kind: 'idle', x: 0, y: 0, moved: false };
         if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
         return;

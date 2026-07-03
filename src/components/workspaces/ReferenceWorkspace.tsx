@@ -225,6 +225,29 @@ export function ReferenceWorkspace() {
               data-reference-bottom-chrome
               className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-end gap-3 px-4 pb-4"
             >
+              {grayboxAsset && grayboxPano && (
+                <div className="pointer-events-auto shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => void downloadPanoImage(
+                      grayboxAsset.uri,
+                      grayboxPano.width,
+                      grayboxPano.height,
+                      grayboxAsset.name || 'global_graybox.png',
+                      {
+                        letterboxEnabled: project.settings.panoLetterboxExports169,
+                        targetWidth: project.settings.defaultShotWidth,
+                        targetHeight: project.settings.defaultShotHeight,
+                      },
+                      downloadDataUrl,
+                    )}
+                    className="inline-flex items-center gap-2 rounded-[18px] border border-subtle bg-surface-raised px-4 py-2.5 text-sm font-medium text-secondary shadow-card transition hover:border-[var(--accent)] hover:text-accent"
+                  >
+                    <FileDown className="h-4 w-4" />
+                    Download Graybox 360
+                  </button>
+                </div>
+              )}
               {activeAsset && project.landmarks.length > 0 && (
                 <div className="pointer-events-auto min-w-0 max-w-[calc(100%-var(--reference-cta-lane))]">
                   <LandmarkStrip
