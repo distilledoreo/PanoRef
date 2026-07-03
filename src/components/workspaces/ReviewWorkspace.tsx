@@ -21,7 +21,7 @@ import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, TextArea } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { ShotThumbnail } from '../common/ShotThumbnail';
-import { StatusGlow } from '../common/StatusBadge';
+import { StatusGlow, StatusIcon } from '../common/StatusBadge';
 import { isAiBriefSent, resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { FullBleedLayout } from './WorkspaceShell';
 
@@ -109,25 +109,25 @@ export function ReviewWorkspace() {
   return (
     <FullBleedLayout>
       <div className="flex h-full min-h-0 flex-col bg-surface-base p-5">
-        <header className="mb-5">
+        <header className="mb-4 shrink-0">
           <h1 className="text-xl font-semibold text-primary">Review Your Shots</h1>
-          <div className="mt-3 flex flex-wrap items-center gap-4">
+          <div className="mt-2 flex flex-wrap items-center gap-3">
             <div className="text-sm text-secondary">
               Approved <span className="font-semibold text-primary">{approvedCount}</span> / {project.shots.length}
             </div>
-            <div className="h-2 w-48 overflow-hidden rounded-full bg-surface-muted">
-              <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${progress * 100}%` }} />
+            <div className="h-2 min-w-[12rem] flex-1 max-w-xs overflow-hidden rounded-full bg-surface-muted">
+              <div className="h-full rounded-full bg-[var(--accent)] transition-all" style={{ width: `${progress * 100}%` }} />
             </div>
           </div>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-2">
               <FilterTab active={filter === 'all'} onClick={() => setFilter('all')} label={`All (${project.shots.length})`} />
               <FilterTab active={filter === 'approved'} onClick={() => setFilter('approved')} label={`Approved (${approvedCount})`} icon={<CheckCircle2 className="h-3.5 w-3.5" />} />
               <FilterTab active={filter === 'needs_work'} onClick={() => setFilter('needs_work')} label={`Needs Work (${needsWorkCount})`} icon={<Clock className="h-3.5 w-3.5" />} warning />
             </div>
-            <div className="flex gap-1 rounded-lg border border-subtle p-1">
-              <ViewToggle active={view === 'grid'} onClick={() => setView('grid')} icon={<Grid3X3 className="h-4 w-4" />} label="Grid" />
-              <ViewToggle active={view === 'list'} onClick={() => setView('list')} icon={<List className="h-4 w-4" />} label="List" />
+            <div className="flex gap-1 rounded-full border border-subtle p-1">
+              <ViewToggle active={view === 'grid'} onClick={() => setView('grid')} icon={<Grid3X3 className="h-4 w-4" />} label="Grid View" />
+              <ViewToggle active={view === 'list'} onClick={() => setView('list')} icon={<List className="h-4 w-4" />} label="List View" />
             </div>
           </div>
         </header>
@@ -139,7 +139,7 @@ export function ReviewWorkspace() {
               : 'space-y-2'
           }`}
           style={view === 'grid'
-            ? { gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 360px))' }
+            ? { gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 320px))' }
             : undefined}
         >
           {filteredShots.map((shot) => (
@@ -158,7 +158,7 @@ export function ReviewWorkspace() {
           ))}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-subtle pt-4">
+        <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2 border-t border-subtle pt-3">
           <ActionBarButton icon={<Grid3X3 className="h-4 w-4" />} label="Compare" onClick={() => setPrecisionOpen(true)} />
           <ActionBarButton
             icon={<CheckCircle2 className="h-4 w-4" />}
@@ -287,7 +287,7 @@ function ShotReviewCard({
         </StatusGlow>
         <div className="min-w-0 flex-1">
           <div className="font-medium text-primary">{shot.shotNumber} {shot.name}</div>
-          <div className="text-xs text-secondary">{shot.status}</div>
+          <div className="text-xs text-secondary">{formatShotStatus(shot.status, warnings.length)}</div>
         </div>
       </button>
     );
@@ -301,26 +301,28 @@ function ShotReviewCard({
         selected ? 'border-[var(--accent)] bg-accent-soft shadow-card' : 'border-subtle bg-surface-raised hover:border-strong'
       }`}
     >
-      <div className="flex items-center justify-between gap-3 px-3 py-2">
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
         <div className="min-w-0">
-          <div className="truncate text-xs font-semibold text-primary">{shot.shotNumber}</div>
-          <div className="truncate text-[11px] text-secondary">{shot.name}</div>
+          <div className="truncate text-xs font-semibold text-primary">{shot.shotNumber} {shot.name}</div>
         </div>
-        <span className="text-muted">...</span>
+        <StatusIcon level={level} />
       </div>
-      <StatusGlow level={level}>
+      <StatusGlow level={level} showIcon={false}>
         <ShotThumbnail project={project} shot={shot} className="aspect-video w-full rounded-none border-y border-subtle" />
       </StatusGlow>
-      <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
-        <span className="truncate text-secondary">{formatShotStatus(shot.status)}</span>
-        {warnings.length > 0 && <span className="shrink-0 text-amber-600">{warnings.length} issue{warnings.length === 1 ? '' : 's'}</span>}
+      <div className="px-3 py-2 text-xs font-medium text-secondary">
+        {formatShotStatus(shot.status, warnings.length)}
       </div>
     </button>
   );
 }
 
-function formatShotStatus(status: ShotStatus) {
-  return status.replace('_', ' ');
+function formatShotStatus(status: ShotStatus, warningCount: number) {
+  if (status === 'approved') return 'Approved';
+  if (status === 'needs_fix' || warningCount > 0) return 'Needs Work';
+  if (status === 'rejected') return 'Rejected';
+  if (status === 'exported') return 'Exported';
+  return 'Planned';
 }
 
 function FilterTab({
@@ -342,10 +344,10 @@ function FilterTab({
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
         active
-          ? 'bg-[var(--accent)] text-white'
+          ? 'bg-[var(--accent)] text-white shadow-sm'
           : warning
-            ? 'border border-amber-200 text-amber-700 hover:bg-amber-50'
-            : 'border border-subtle text-secondary hover:border-strong'
+            ? 'border border-amber-300/70 text-amber-700 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-300 dark:hover:bg-amber-950/30'
+            : 'border border-subtle bg-surface-raised text-secondary hover:border-strong'
       }`}
     >
       {icon}
@@ -369,8 +371,8 @@ function ViewToggle({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
-        active ? 'bg-accent-soft text-accent' : 'text-secondary hover:text-primary'
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+        active ? 'bg-[var(--accent)] text-white' : 'text-secondary hover:bg-surface-muted hover:text-primary'
       }`}
     >
       {icon}

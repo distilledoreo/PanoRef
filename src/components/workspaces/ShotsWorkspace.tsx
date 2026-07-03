@@ -6,10 +6,7 @@ import {
   Film,
   Frame,
   KeyRound,
-  MoreHorizontal,
-  Move3D,
   Plus,
-  Ruler,
   Trash2,
 } from 'lucide-react';
 import { CameraData, ShotStatus } from '../../domain/types';
@@ -30,13 +27,12 @@ import { downloadDataUrl } from '../../engine/projectIO';
 import { getSupportedCameraMoveMp4MimeType, renderShotCameraMoveMp4, renderShotFrame } from '../../engine/renderers';
 import { isShotFramingAccepted, resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
-import { getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
-import { ContextualPanel } from '../common/ContextualPanel';
 import { Field, IconButton, Panel, Select, TextArea, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
 import { ShotFilmstrip } from '../common/ShotFilmstrip';
+import { ShotInfoCard } from '../common/ShotInfoCard';
 import { ShotThumbnail } from '../common/ShotThumbnail';
 import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
@@ -49,18 +45,18 @@ export function ShotsWorkspace() {
   const {
     project,
     selectedShotId,
-    selectedObjectId,
     addCamera,
     selectShot,
     updateShot,
     removeShot,
     toggleShotLandmark,
-    selectObject,
     shotCameraFlying,
     setShotCameraFlying,
     lockShotCamera,
     acceptShotFraming,
     attachCameraMoveVideoToShot,
+    setWorkspace,
+    setActivePano,
   } = useContinuityStore();
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
@@ -74,7 +70,6 @@ export function ShotsWorkspace() {
   const [cameraMoveProgress, setCameraMoveProgress] = useState(0);
   const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
   const [precisionOpen, setPrecisionOpen] = useState(false);
-  const [shotMenuOpen, setShotMenuOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
 
   const exportFrameFileName = selectedShot
@@ -291,7 +286,6 @@ export function ShotsWorkspace() {
     }),
     [project, selectedShot?.id, shotCameraFlying],
   );
-  const shotWarnings = selectedShot ? getShotWarnings(project, selectedShot) : [];
   const lensMm = project.settings.defaultCameraLensMm ?? DEFAULT_CAMERA_LENS_MM;
   const cameraHeight = selectedShot?.camera.position[1] ?? DEFAULT_CAMERA_HEIGHT_METERS;
 
@@ -318,98 +312,72 @@ export function ShotsWorkspace() {
     });
   }, [addCamera, selectedShot, updateShot]);
 
+  const openLinkedPanoIn360 = useCallback(() => {
+    if (!linkedPano) return;
+    setActivePano(linkedPano.id);
+    setWorkspace('reference');
+  }, [linkedPano, setActivePano, setWorkspace]);
+
+  const handleShotMenuAction = useCallback((action: string) => {
+    if (!selectedShot) return;
+    if (action === 'fly') startFlyCamera();
+    if (action === 'accept-framing') acceptShotFraming(selectedShot.id);
+    if (action === 'precision') setPrecisionOpen(true);
+  }, [acceptShotFraming, selectedShot, startFlyCamera]);
+
   return (
     <FullBleedLayout>
       <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto]">
-        <div className="relative min-h-0">
-          <SceneViewport
-            project={project}
-            selectedObjectId={selectedObjectId}
-            selectedShotId={selectedShot?.id}
-            shotFraming={shotFraming}
-            onSelectObject={selectObject}
-            minHeightClassName="min-h-0"
-          />
+        <div className="grid min-h-0 grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
+          {selectedShot ? (
+            <ShotInfoCard
+              project={project}
+              shot={selectedShot}
+              lensMm={lensMm}
+              cameraHeight={cameraHeight}
+              previewSrc={framePreviewUrl}
+              onOpenPrecision={() => setPrecisionOpen(true)}
+              onOpenMenuAction={handleShotMenuAction}
+              onOpenIn360={linkedPano ? openLinkedPanoIn360 : undefined}
+              menuItems={[
+                { id: 'fly', label: 'Fly Camera' },
+                {
+                  id: 'accept-framing',
+                  label: 'Accept Framing',
+                  disabled: framingAccepted || shotCameraFlying,
+                },
+                { id: 'precision', label: 'Camera Settings' },
+              ]}
+            />
+          ) : (
+            <aside className="flex items-center justify-center border-r border-subtle bg-surface-raised px-4 text-sm text-secondary">
+              Add a shot to begin framing.
+            </aside>
+          )}
 
-          {showCompare && selectedShot && (
-            <div className="absolute inset-y-0 right-0 z-10 w-80 border-l border-subtle bg-surface-raised shadow-soft">
-              <ShotPanoCropPreview
-                imageUrl={linkedAsset?.uri}
-                crop={selectedShot.panoCrop}
-                panoRotation={linkedPano?.rotation}
-                label={linkedPano?.name ?? 'Linked Pano'}
-                matchQuality={panoMatch?.quality}
-                matchDistanceMeters={panoMatch?.distanceMeters}
-                disabledReason={shotCameraFlying ? 'Lock the camera to render the pano crop preview.' : undefined}
+          <div className="relative min-h-0 bg-surface-base">
+            <div className="absolute inset-3 overflow-hidden rounded-[var(--radius-card)] border border-subtle shadow-[inset_0_0_48px_rgba(0,0,0,0.12)] dark:shadow-[inset_0_0_48px_rgba(0,0,0,0.45)]">
+              <SceneViewport
+                project={project}
+                selectedShotId={selectedShot?.id}
+                shotFraming={shotFraming}
+                minHeightClassName="min-h-0"
               />
             </div>
-          )}
 
-          {selectedShot && (
-            <div className="pointer-events-none absolute left-5 top-5 z-10">
-              <ContextualPanel>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-primary">Shot {selectedShot.shotNumber}</div>
-                    <div className="text-xs text-secondary">{selectedShot.name}</div>
-                  </div>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setShotMenuOpen((open) => !open)}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-subtle text-secondary hover:text-primary"
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </button>
-                    {shotMenuOpen && (
-                      <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-subtle bg-surface-raised py-1 shadow-soft">
-                        <MenuItem onClick={startFlyCamera}>Fly Camera</MenuItem>
-                        {!framingAccepted && !shotCameraFlying && (
-                          <MenuItem onClick={() => acceptShotFraming(selectedShot.id)}>Accept Framing</MenuItem>
-                        )}
-                        <MenuItem onClick={() => setPrecisionOpen(true)}>Camera Settings</MenuItem>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <dl className="mt-3 space-y-1 text-xs text-secondary">
-                  <div className="flex justify-between gap-4"><dt>Lens</dt><dd className="text-primary">{lensMm}mm</dd></div>
-                  <div className="flex justify-between gap-4"><dt>Height</dt><dd className="text-primary">{cameraHeight.toFixed(1)}m</dd></div>
-                  <div className="flex justify-between gap-4"><dt>FOV</dt><dd className="text-primary">{selectedShot.camera.fovDegrees.toFixed(1)}°</dd></div>
-                  {selectedShot.description && (
-                    <div className="pt-1 text-primary">{selectedShot.description}</div>
-                  )}
-                </dl>
-                {shotWarnings.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setPrecisionOpen(true)}
-                    className="mt-2 text-xs text-amber-600"
-                  >
-                    {shotWarnings.length} issue{shotWarnings.length === 1 ? '' : 's'} — tap to review
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setPrecisionOpen(true)}
-                  className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-accent"
-                >
-                  <Ruler className="h-3.5 w-3.5" />
-                  Open precision drawer
-                </button>
-              </ContextualPanel>
-            </div>
-          )}
-
-          <div className="pointer-events-none absolute bottom-6 right-6 z-10">
-            <PrimaryCTA
-              icon={<Film className="h-5 w-5" />}
-              label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}
-              hint="Preview this shot from the reference."
-              onClick={() => void exportCameraFrame()}
-              disabled={!selectedShot || shotCameraFlying || isExportingFrame || isRenderingFrame}
-              highlighted={primaryAction?.id === 'accept-framing' || primaryAction?.id === 'lock-camera'}
-            />
+            {showCompare && selectedShot && (
+              <div className="absolute inset-y-3 right-3 z-10 w-72 overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised shadow-soft">
+                <ShotPanoCropPreview
+                  imageUrl={linkedAsset?.uri}
+                  crop={selectedShot.panoCrop}
+                  panoRotation={linkedPano?.rotation}
+                  label={linkedPano?.name ?? 'Linked Pano'}
+                  matchQuality={panoMatch?.quality}
+                  matchDistanceMeters={panoMatch?.distanceMeters}
+                  disabledReason={shotCameraFlying ? 'Lock the camera to render the pano crop preview.' : undefined}
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -424,7 +392,7 @@ export function ShotsWorkspace() {
               ) : undefined
             )}
           />
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-end gap-3">
             <ToolbarButton icon={<Plus className="h-4 w-4" />} label="Add Shot" onClick={addCamera} />
             <ToolbarButton
               icon={<Copy className="h-4 w-4" />}
@@ -447,18 +415,30 @@ export function ShotsWorkspace() {
               danger
             />
             {shotCameraFlying && (
-              <span className="ml-auto text-xs text-secondary">Click viewport to lock camera</span>
+              <span className="text-xs text-secondary">Click viewport to lock camera</span>
             )}
             {!shotCameraFlying && selectedShot && !framingAccepted && (
               <button
                 type="button"
                 onClick={() => acceptShotFraming(selectedShot.id)}
-                className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent"
               >
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 Accept Framing
               </button>
             )}
+            <div className="ml-auto">
+              <PrimaryCTA
+                icon={<Film className="h-5 w-5" />}
+                label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}
+                hint="Preview this shot from the reference."
+                onClick={() => void exportCameraFrame()}
+                disabled={!selectedShot || shotCameraFlying || isExportingFrame || isRenderingFrame}
+                highlighted={primaryAction?.id === 'accept-framing' || primaryAction?.id === 'lock-camera'}
+                tone="success"
+                layout="inline"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -644,18 +624,6 @@ function ToolbarButton({
     >
       {icon}
       {label}
-    </button>
-  );
-}
-
-function MenuItem({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="block w-full px-3 py-1.5 text-left text-xs text-secondary hover:bg-surface-muted hover:text-primary"
-    >
-      {children}
     </button>
   );
 }

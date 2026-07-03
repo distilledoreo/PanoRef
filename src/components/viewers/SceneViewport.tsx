@@ -293,6 +293,8 @@ export function SceneViewport({
         return;
       }
 
+      if (framing) return;
+
       if (event.button === 1 || event.button === 2 || (event.button === 0 && event.shiftKey)) {
         event.preventDefault();
         beginOrbitDrag(event, true);
@@ -550,9 +552,10 @@ export function SceneViewport({
     previewMeshRef.current = null;
     if (sceneRef.current) disposeScene(sceneRef.current);
     sceneRef.current = buildScene(project, {
-      selectedObjectId,
+      selectedObjectId: shotFraming ? undefined : selectedObjectId,
       selectedShotId,
       hideShotFrustums: Boolean(shotFraming),
+      showHelpers: !shotFraming,
       theme,
     });
     if (previewPointRef.current && placementTypeRef.current) {
@@ -580,20 +583,12 @@ export function SceneViewport({
       ref={containerRef}
     >
       {shotFraming && (
-        <>
-          <ShotViewfinderOverlay
-            containerRef={containerRef}
-            aspectRatio={shotFraming.frameAspectRatio}
-            fovDegrees={shotFraming.camera.fovDegrees}
-            resolutionLabel={shotFraming.frameResolutionLabel}
-          />
-          <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
-            <div className="h-5 w-5">
-              <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/90 shadow-sm" />
-              <span className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/90 shadow-sm" />
-            </div>
-          </div>
-        </>
+        <ShotViewfinderOverlay
+          containerRef={containerRef}
+          aspectRatio={shotFraming.frameAspectRatio}
+          fovDegrees={shotFraming.camera.fovDegrees}
+          resolutionLabel={shotFraming.frameResolutionLabel}
+        />
       )}
     </div>
   );

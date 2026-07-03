@@ -19,9 +19,13 @@ describe('workflow guidance UI', () => {
     const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
     const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
     const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
+    const shotInfoCard = readFileSync(new URL('../src/components/common/ShotInfoCard.tsx', import.meta.url), 'utf8');
     expect(shots).toContain('ShotFilmstrip');
+    expect(shots).toContain('ShotInfoCard');
     expect(shots).toContain('ShotThumbnail');
+    expect(shotInfoCard).toContain('Open in 360');
     expect(shots).toContain('PrecisionDrawer');
+    expect(shots).toContain('tone="success"');
     expect(shots).toContain('Accept Framing');
     expect(shots).toContain('Camera Move MP4');
     expect(shots).toContain('Export MP4');
