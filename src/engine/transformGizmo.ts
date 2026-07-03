@@ -102,10 +102,16 @@ function createRotateAxis(axis: GizmoAxis): THREE.Group {
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.018, 8, 48), material);
   if (axis === 'x') ring.rotation.y = Math.PI / 2;
   else if (axis === 'y') ring.rotation.x = Math.PI / 2;
-  ring.userData.gizmoAxis = axis;
-  ring.userData.gizmoKind = 'rotate';
-  ring.userData.isGizmoHandle = true;
-  group.add(ring);
+  const hitRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.82, 0.06, 10, 48),
+    new THREE.MeshBasicMaterial({ visible: false, depthTest: false }),
+  );
+  hitRing.rotation.copy(ring.rotation);
+  hitRing.userData.gizmoAxis = axis;
+  hitRing.userData.gizmoKind = 'rotate';
+  hitRing.userData.isGizmoHandle = true;
+  hitRing.userData.gizmoHitPriority = 8;
+  group.add(ring, hitRing);
   return group;
 }
 
@@ -123,7 +129,7 @@ function createScaleAxis(axis: GizmoAxis): THREE.Group {
     opacity: 0.9,
   });
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, length, 8), material);
-  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), material);
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.09), material);
   if (axis === 'x') {
     shaft.rotation.z = -Math.PI / 2;
     shaft.position.x = length / 2;
@@ -136,21 +142,27 @@ function createScaleAxis(axis: GizmoAxis): THREE.Group {
     shaft.position.z = length / 2;
     handle.position.z = length + 0.05;
   }
+  shaft.userData.gizmoAxis = axis;
+  shaft.userData.gizmoKind = 'scale';
+  shaft.userData.isGizmoHandle = true;
+  shaft.userData.gizmoHitPriority = 7;
   handle.userData.gizmoAxis = axis;
   handle.userData.gizmoKind = 'scale';
   handle.userData.isGizmoHandle = true;
+  handle.userData.gizmoHitPriority = 8;
   group.add(shaft, handle);
   return group;
 }
 
 function createUniformScaleHandle(): THREE.Mesh {
   const handle = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.12, 0.12),
+    new THREE.BoxGeometry(0.09, 0.09, 0.09),
     new THREE.MeshBasicMaterial({ color: 0xf8fafc, depthTest: false, transparent: true, opacity: 0.95 }),
   );
   handle.userData.gizmoAxis = 'uniform';
   handle.userData.gizmoKind = 'scale';
   handle.userData.isGizmoHandle = true;
+  handle.userData.gizmoHitPriority = 0;
   return handle;
 }
 
@@ -217,11 +229,35 @@ export function findGizmoHit(
 ): GizmoHit | undefined {
   if (!gizmo) return undefined;
   const hits = raycaster.intersectObject(gizmo, true);
+  const candidates: Array<{ hit: GizmoHit; distance: number; priority: number }> = [];
   for (const hit of hits) {
     const resolved = resolveGizmoHit(hit.object, mode);
-    if (resolved) return resolved;
+    if (!resolved) continue;
+    candidates.push({
+      hit: resolved,
+      distance: hit.distance,
+      priority: gizmoHitPriority(hit.object, resolved),
+    });
   }
-  return undefined;
+  candidates.sort((left, right) => (
+    right.priority - left.priority
+    || left.distance - right.distance
+  ));
+  return candidates[0]?.hit;
+}
+
+export function gizmoHitPriority(object: THREE.Object3D, hit: GizmoHit): number {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (typeof current.userData.gizmoHitPriority === 'number') {
+      return current.userData.gizmoHitPriority;
+    }
+    current = current.parent;
+  }
+  if (hit.kind === 'scale' && hit.axis === 'uniform') return 1;
+  if (object.userData.isGizmoHandle) return 8;
+  if (hit.kind === 'rotate') return 6;
+  return 3;
 }
 
 /** @deprecated Use findGizmoHit */
@@ -257,13 +293,58 @@ function isAxis(value: unknown): value is GizmoAxis {
   return value === 'x' || value === 'y' || value === 'z';
 }
 
+export function getGizmoWorldPosition(gizmo: THREE.Object3D, target = new THREE.Vector3()): THREE.Vector3 {
+  gizmo.updateMatrixWorld(true);
+  return gizmo.getWorldPosition(target);
+}
+
 export function axisWorldVector(axis: GizmoAxis, gizmo: THREE.Object3D): THREE.Vector3 {
+  gizmo.updateMatrixWorld(true);
   const local = new THREE.Vector3(
     axis === 'x' ? 1 : 0,
     axis === 'y' ? 1 : 0,
     axis === 'z' ? 1 : 0,
   );
-  return local.applyQuaternion(gizmo.quaternion).normalize();
+  return local.transformDirection(gizmo.matrixWorld).normalize();
+}
+
+export function computeScreenAxisDragDelta(
+  axis: GizmoAxis,
+  gizmo: THREE.Object3D,
+  camera: THREE.PerspectiveCamera,
+  canvas: HTMLElement,
+  startClientX: number,
+  startClientY: number,
+  currentClientX: number,
+  currentClientY: number,
+): number {
+  const worldPosition = getGizmoWorldPosition(gizmo);
+  const axisDirection = axisWorldVector(axis, gizmo);
+  const axisEnd = worldPosition.clone().add(axisDirection);
+
+  const projectToClient = (point: THREE.Vector3) => {
+    const projected = point.clone().project(camera);
+    const rect = canvas.getBoundingClientRect();
+    return new THREE.Vector2(
+      (projected.x * 0.5 + 0.5) * rect.width + rect.left,
+      (-projected.y * 0.5 + 0.5) * rect.height + rect.top,
+    );
+  };
+
+  const originScreen = projectToClient(worldPosition);
+  const endScreen = projectToClient(axisEnd);
+  const axisScreen = endScreen.clone().sub(originScreen);
+  if (axisScreen.lengthSq() < 1e-4) return 0;
+  axisScreen.normalize();
+
+  const pointerDelta = new THREE.Vector2(
+    currentClientX - startClientX,
+    currentClientY - startClientY,
+  );
+  const distance = camera.position.distanceTo(worldPosition);
+  const rect = canvas.getBoundingClientRect();
+  const worldUnitsPerPixel = (distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 2) / Math.max(rect.height, 1);
+  return pointerDelta.dot(axisScreen) * worldUnitsPerPixel;
 }
 
 export function intersectAxisDragPlane(
@@ -295,16 +376,25 @@ export function angleInAxisPlane(
   axisOrigin: THREE.Vector3,
   axisDirection: THREE.Vector3,
 ): number | undefined {
-  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(axisDirection.clone().normalize(), axisOrigin);
+  const normal = axisDirection.clone().normalize();
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, axisOrigin);
   const hit = new THREE.Vector3();
   if (!raycaster.ray.intersectPlane(plane, hit)) return undefined;
+  return angleOnAxisPlane(axisOrigin, normal, hit);
+}
 
-  const reference = Math.abs(axisDirection.dot(new THREE.Vector3(0, 1, 0))) > 0.85
+export function angleOnAxisPlane(
+  axisOrigin: THREE.Vector3,
+  axisDirection: THREE.Vector3,
+  point: THREE.Vector3,
+): number {
+  const normal = axisDirection.clone().normalize();
+  const reference = Math.abs(normal.dot(new THREE.Vector3(0, 1, 0))) > 0.85
     ? new THREE.Vector3(1, 0, 0)
     : new THREE.Vector3(0, 1, 0);
-  const tangent = new THREE.Vector3().crossVectors(axisDirection, reference).normalize();
-  const bitangent = new THREE.Vector3().crossVectors(axisDirection, tangent).normalize();
-  const offset = hit.clone().sub(axisOrigin);
+  const tangent = new THREE.Vector3().crossVectors(normal, reference).normalize();
+  const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
+  const offset = point.clone().sub(axisOrigin);
   return Math.atan2(offset.dot(bitangent), offset.dot(tangent));
 }
 

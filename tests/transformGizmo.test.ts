@@ -5,9 +5,11 @@ import { createObject3D, resolveObjectMaterial } from '../src/engine/sceneObject
 import {
   GIZMO_SCALE_MAX,
   GIZMO_SCALE_MIN,
+  applyAxisScaleDelta,
   computeGizmoAnchor,
   computeGizmoScale,
   createGizmoGroup,
+  gizmoHitPriority,
 } from '../src/engine/transformGizmo';
 
 describe('build selection visuals', () => {
@@ -34,6 +36,23 @@ describe('build selection visuals', () => {
     expect(boxScale).toBeGreaterThanOrEqual(GIZMO_SCALE_MIN);
     expect(boxScale).toBeLessThan(GIZMO_SCALE_MAX);
     expect(tinyScale).toBe(GIZMO_SCALE_MIN);
+  });
+
+  it('prefers axis scale handles over the uniform center cube', () => {
+    const axisHandle = new THREE.Object3D();
+    axisHandle.userData.isGizmoHandle = true;
+    const uniformHandle = new THREE.Object3D();
+    uniformHandle.userData.isGizmoHandle = true;
+    expect(gizmoHitPriority(axisHandle, { kind: 'scale', axis: 'y' })).toBeGreaterThan(
+      gizmoHitPriority(uniformHandle, { kind: 'scale', axis: 'uniform' }),
+    );
+  });
+
+  it('changes only the targeted dimension for single-axis scale drags', () => {
+    const next = applyAxisScaleDelta([1.4, 1.75, 1.4], 'y', 0.4);
+    expect(next).toEqual([1.4, 2.29, 1.4]);
+    const uniform = applyAxisScaleDelta([1.4, 1.75, 1.4], 'uniform', 0.4);
+    expect(uniform).toEqual([1.94, 2.29, 1.94]);
   });
 
   it('creates translate, rotate, and scale gizmo groups with mode metadata', () => {

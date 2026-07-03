@@ -10,7 +10,9 @@ import {
   applyAxisRotationDelta,
   applyAxisScaleDelta,
   axisWorldVector,
+  computeScreenAxisDragDelta,
   createGizmoGroup,
+  getGizmoWorldPosition,
   createSelectionOutline,
   disposeGizmoNodes,
   findGizmoHit,
@@ -56,6 +58,8 @@ interface DragState {
   gizmoAxisStartPoint?: THREE.Vector3;
   gizmoRotateStartAngle?: number;
   gizmoUniformStartDistance?: number;
+  gizmoScreenStartX?: number;
+  gizmoScreenStartY?: number;
   pendingSelectId?: string;
 }
 
@@ -407,10 +411,11 @@ export function SceneViewport({
       onSelectObject?.(object.id);
 
       if (gizmoHit.kind === 'translate' && onMoveObjectInSpace) {
+        const axisOrigin = getGizmoWorldPosition(gizmo);
         const axisDirection = axisWorldVector(gizmoHit.axis, gizmo);
         const axisStartPoint = intersectAxisDragPlane(
           pointer.raycaster,
-          gizmo.position.clone(),
+          axisOrigin,
           axisDirection,
           camera,
         );
@@ -430,8 +435,9 @@ export function SceneViewport({
       }
 
       if (gizmoHit.kind === 'rotate' && onRotateObject) {
+        const axisOrigin = getGizmoWorldPosition(gizmo);
         const axisDirection = axisWorldVector(gizmoHit.axis, gizmo);
-        const startAngle = angleInAxisPlane(pointer.raycaster, gizmo.position.clone(), axisDirection);
+        const startAngle = angleInAxisPlane(pointer.raycaster, axisOrigin, axisDirection);
         if (startAngle === undefined) return false;
         dragRef.current = {
           kind: 'gizmo_rotate',
@@ -462,14 +468,6 @@ export function SceneViewport({
           canvas.setPointerCapture(event.pointerId);
           return true;
         }
-        const axisDirection = axisWorldVector(gizmoHit.axis, gizmo);
-        const axisStartPoint = intersectAxisDragPlane(
-          pointer.raycaster,
-          gizmo.position.clone(),
-          axisDirection,
-          camera,
-        );
-        if (!axisStartPoint) return false;
         dragRef.current = {
           kind: 'gizmo_scale',
           x: event.clientX,
@@ -479,7 +477,8 @@ export function SceneViewport({
           gizmoAxis: gizmoHit.axis,
           gizmoScaleAxis: gizmoHit.axis,
           gizmoStartDimensions: [...object.dimensions] as Vec3,
-          gizmoAxisStartPoint: axisStartPoint,
+          gizmoScreenStartX: event.clientX,
+          gizmoScreenStartY: event.clientY,
         };
         canvas.setPointerCapture(event.pointerId);
         return true;
@@ -641,10 +640,11 @@ export function SceneViewport({
         && pointer
         && onMoveObjectInSpace
       ) {
+        const axisOrigin = getGizmoWorldPosition(gizmoRef.current);
         const axisDirection = axisWorldVector(drag.gizmoAxis, gizmoRef.current);
         const intersection = intersectAxisDragPlane(
           pointer.raycaster,
-          gizmoRef.current.position,
+          axisOrigin,
           axisDirection,
           cameraRef.current,
         );
@@ -668,10 +668,11 @@ export function SceneViewport({
         && pointer
         && onRotateObject
       ) {
+        const axisOrigin = getGizmoWorldPosition(gizmoRef.current);
         const axisDirection = axisWorldVector(drag.gizmoAxis, gizmoRef.current);
         const currentAngle = angleInAxisPlane(
           pointer.raycaster,
-          gizmoRef.current.position,
+          axisOrigin,
           axisDirection,
         );
         if (currentAngle !== undefined) {
@@ -700,26 +701,28 @@ export function SceneViewport({
         }
         if (
           drag.gizmoAxis
-          && drag.gizmoAxisStartPoint
+          && drag.gizmoScaleAxis
+          && drag.gizmoScaleAxis !== 'uniform'
+          && drag.gizmoScreenStartX !== undefined
+          && drag.gizmoScreenStartY !== undefined
           && gizmoRef.current
           && cameraRef.current
-          && pointer
         ) {
-          const axisDirection = axisWorldVector(drag.gizmoAxis, gizmoRef.current);
-          const intersection = intersectAxisDragPlane(
-            pointer.raycaster,
-            gizmoRef.current.position,
-            axisDirection,
+          const delta = computeScreenAxisDragDelta(
+            drag.gizmoAxis,
+            gizmoRef.current,
             cameraRef.current,
+            canvas,
+            drag.gizmoScreenStartX,
+            drag.gizmoScreenStartY,
+            event.clientX,
+            event.clientY,
           );
-          if (intersection) {
-            const delta = intersection.clone().sub(drag.gizmoAxisStartPoint).dot(axisDirection);
-            onScaleObject(
-              drag.objectId,
-              applyAxisScaleDelta(drag.gizmoStartDimensions, drag.gizmoScaleAxis, delta),
-            );
-            syncTransformGizmo();
-          }
+          onScaleObject(
+            drag.objectId,
+            applyAxisScaleDelta(drag.gizmoStartDimensions, drag.gizmoScaleAxis, delta),
+          );
+          syncTransformGizmo();
         }
         return;
       }
