@@ -88,54 +88,56 @@ export function ExportWorkspace() {
     { name: 'manifest.json', description: 'Package manifest' },
   ];
 
+  const fitsCompactShotList = project.shots.length > 0 && project.shots.length <= 6;
+
   return (
     <FullBleedLayout>
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-base p-5">
-        <header className="mb-3 shrink-0">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-base p-4">
+        <header className="mb-2 shrink-0">
           <h1 className="text-xl font-semibold text-primary">Export Your Shots</h1>
-          <p className="mt-1 text-sm text-secondary">Choose what to export. Each shot is packaged individually.</p>
+          <p className="mt-0.5 text-sm text-secondary">Choose what to export. Each shot is packaged individually.</p>
         </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
-          <div className="flex min-h-0 flex-col items-center justify-center overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-4 shadow-card">
-            <div className="mb-4 flex items-end gap-3">
-              <div className="flex h-16 w-20 items-center justify-center rounded-xl bg-[var(--accent)] text-white shadow-card">
-                <FolderArchive className="h-9 w-9" />
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+          <div className="flex min-h-0 flex-col items-start justify-start overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-3 shadow-card">
+            <div className="mb-2 flex items-end gap-2">
+              <div className="flex h-12 w-14 items-center justify-center rounded-lg bg-[var(--accent)] text-white shadow-card">
+                <FolderArchive className="h-7 w-7" />
               </div>
-              <div className="rounded-lg bg-surface-muted px-3 py-2 text-xs font-bold uppercase tracking-wider text-secondary">
+              <div className="rounded-md bg-surface-muted px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-secondary">
                 ZIP
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(true)}
-              className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-secondary transition hover:text-accent"
-            >
-              <Settings className="h-4 w-4" />
-              Export Settings
-            </button>
-            <ul className="w-full max-w-sm space-y-1.5">
+            <ul className="w-full space-y-1">
               {packageContents.map((item) => (
-                <li key={item.name} className="flex items-start gap-3 rounded-lg border border-subtle px-3 py-2">
-                  <Archive className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-                  <div>
-                    <div className="font-mono text-sm font-medium text-primary">{item.name}</div>
-                    <div className="text-xs text-secondary">{item.description}</div>
+                <li key={item.name} className="flex items-start gap-2 rounded-lg border border-subtle px-2.5 py-1.5">
+                  <Archive className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
+                  <div className="min-w-0">
+                    <div className="font-mono text-xs font-medium text-primary">{item.name}</div>
+                    <div className="text-[11px] text-secondary">{item.description}</div>
                   </div>
                 </li>
               ))}
             </ul>
             {manifest && (
-              <div className="mt-4 max-h-14 w-full max-w-sm space-y-1 overflow-hidden">
+              <div className="mt-2 max-h-12 w-full space-y-0.5 overflow-hidden">
                 {manifest.files.slice(0, 6).map((file) => (
                   <div key={file.path} className="truncate font-mono text-[10px] text-muted">{file.path}</div>
                 ))}
               </div>
             )}
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-secondary transition hover:text-accent"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Export Settings
+            </button>
             {lastExport.length > 0 && (
-              <div className="mt-4 w-full max-w-sm">
-                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-primary">
-                  <Check className="h-4 w-4 text-emerald-500" />
+              <div className="mt-2 w-full">
+                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-primary">
+                  <Check className="h-3.5 w-3.5 text-emerald-500" />
                   Last Export
                 </div>
                 {lastExport.map((path) => (
@@ -146,11 +148,15 @@ export function ExportWorkspace() {
           </div>
 
           <div className="flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised shadow-card">
-            <div className="shrink-0 border-b border-subtle px-4 py-3">
+            <div className="shrink-0 border-b border-subtle px-3 py-2">
               <h2 className="text-sm font-semibold text-primary">Select Shots to Export</h2>
-              <p className="text-xs text-secondary">{selectedShotIds.size} shot{selectedShotIds.size === 1 ? '' : 's'} selected</p>
+              <p className="text-[11px] text-secondary">{selectedShotIds.size} shot{selectedShotIds.size === 1 ? '' : 's'} selected</p>
             </div>
-            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
+            <div
+              className={`min-h-0 flex-1 space-y-1 p-2 ${
+                fitsCompactShotList ? 'overflow-hidden' : 'overflow-y-auto'
+              }`}
+            >
               {project.shots.map((shot) => {
                 const warnings = [...getProjectWarnings(project), ...getShotWarnings(project, shot)];
                 const checked = selectedShotIds.has(shot.id);
@@ -158,7 +164,7 @@ export function ExportWorkspace() {
                 return (
                   <div
                     key={shot.id}
-                    className={`flex items-center gap-3 rounded-xl border px-3 py-2 transition ${
+                    className={`flex items-center gap-2 rounded-lg border px-2 py-1 transition ${
                       checked ? 'border-[var(--accent)] bg-accent-soft shadow-[0_0_0_1px_var(--accent-glow)]' : 'border-subtle hover:border-strong'
                     } ${active ? 'ring-1 ring-[var(--accent)]' : ''}`}
                   >
@@ -172,16 +178,16 @@ export function ExportWorkspace() {
                     <button
                       type="button"
                       onClick={() => selectShot(shot.id)}
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
                     >
-                      <ShotThumbnail project={project} shot={shot} className="h-14 w-24 shrink-0" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium text-primary">Shot {shot.shotNumber}</span>
-                        <span className="block truncate text-xs text-secondary">{shot.name}</span>
+                      <ShotThumbnail project={project} shot={shot} compact className="h-9 w-16 shrink-0" />
+                      <span className="min-w-0 flex-1 leading-tight">
+                        <span className="block text-xs font-medium text-primary">Shot {shot.shotNumber}</span>
+                        <span className="block truncate text-[11px] text-secondary">{shot.name}</span>
                       </span>
                     </button>
                     {warnings.length > 0 && (
-                      <span className="shrink-0 text-[10px] text-amber-600">{warnings.length}</span>
+                      <span className="shrink-0 text-[10px] text-amber-600 dark:text-amber-400">{warnings.length}</span>
                     )}
                     {exportingShotId === shot.id && (
                       <span className="shrink-0 text-[10px] text-accent">Exporting...</span>
@@ -193,9 +199,9 @@ export function ExportWorkspace() {
                 <p className="text-sm text-secondary">No shots yet.</p>
               )}
             </div>
-            <div className="shrink-0 border-t border-subtle p-3">
+            <div className="shrink-0 border-t border-subtle px-2 py-2">
               <PrimaryCTA
-                icon={<Download className="h-5 w-5" />}
+                icon={<Download className="h-4 w-4" />}
                 label={isExportingPackage ? 'Building Package...' : 'Export Selected Shots'}
                 hint="Create ZIP packages for each selected shot."
                 onClick={() => void exportSelectedShots()}

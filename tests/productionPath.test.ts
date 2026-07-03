@@ -39,7 +39,7 @@ describe('workflow guidance UI', () => {
     expect(exportWorkspace).toContain('Export Settings');
     expect(exportWorkspace).toContain('aria-label={`Export Shot');
     expect(review).toContain('ShotThumbnail');
-    expect(review).toContain('gridTemplateColumns');
+    expect(review).toContain('lg:grid-cols-3');
     expect(shotThumbnail).toContain('resolveShotThumbnail');
     expect(shell).toContain('FullBleedLayout');
     expect(shell).not.toContain('ShotDrawer');

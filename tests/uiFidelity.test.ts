@@ -69,6 +69,57 @@ describe('ui revamp fidelity surfaces', () => {
     expect(gizmo).toContain('0x14b8a6');
   });
 
+  it('fits review grid as a compact 3x2 layout above the action bar', () => {
+    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
+    expect(review).toContain('fitsCompactGrid');
+    expect(review).toContain('lg:grid-cols-3');
+    expect(review).toContain('lg:grid-rows-2');
+    expect(review).toContain('lg:overflow-hidden');
+    expect(review).toContain('compactGrid');
+    expect(review).not.toContain('gridTemplateColumns');
+  });
+
+  it('keeps export shot rows and package summary compact with a docked CTA footer', () => {
+    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
+    expect(exportWorkspace).toContain('fitsCompactShotList');
+    expect(exportWorkspace).toContain('h-9 w-16 shrink-0');
+    expect(exportWorkspace).toContain('items-start justify-start');
+    expect(exportWorkspace).toContain('shrink-0 border-t border-subtle');
+    expect(exportWorkspace).toContain('layout="inline"');
+  });
+
+  it('renders polished theme-aware shot thumbnail fallbacks for missing media', () => {
+    const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
+    const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+    expect(shotThumbnail).toContain('data-shot-thumbnail-fallback');
+    expect(shotThumbnail).toContain('ShotThumbnailFallback');
+    expect(shotThumbnail).toContain('No preview');
+    expect(shotThumbnail).not.toContain('ImageIcon');
+    expect(styles).toContain('--thumbnail-fallback-sky');
+    expect(styles).toContain('--thumbnail-fallback-block-a');
+  });
+
+  it('keeps review compact-grid thumbnails stretched through StatusGlow', () => {
+    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
+    const statusBadge = readFileSync(new URL('../src/components/common/StatusBadge.tsx', import.meta.url), 'utf8');
+    const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
+    expect(statusBadge).toContain('className?: string');
+    expect(review).toContain('min-h-0 flex-1');
+    expect(review).toContain('className={compactGrid ? \'h-full min-h-0 w-full\' : \'w-full\'}');
+    expect(review).toContain('compactGrid ? \'h-full min-h-0\' : \'aspect-video\'');
+    expect(shotThumbnail).toContain('data-shot-thumbnail-fallback');
+  });
+
+  it('uses compact shot thumbnail fallbacks without cramped labels in export rows', () => {
+    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
+    const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
+    expect(exportWorkspace).toContain('compact className="h-9 w-16 shrink-0"');
+    expect(shotThumbnail).toContain('compact?: boolean');
+    expect(shotThumbnail).toContain('data-shot-thumbnail-compact');
+    expect(shotThumbnail).toContain('{!compact && (');
+    expect(shotThumbnail).toContain('thumbnail-fallback-block-a');
+  });
+
   it('uses theme-aware pano viewer colors and build tray glow tokens', () => {
     const panoViewer = readFileSync(new URL('../src/components/viewers/PanoViewer.tsx', import.meta.url), 'utf8');
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');

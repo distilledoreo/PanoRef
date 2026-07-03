@@ -27,6 +27,14 @@
   --cta-glow: 0 8px 28px var(--accent-glow);
   --radius-card: 14px;
   --radius-pill: 999px;
+  --thumbnail-fallback-sky: #e8e4de;
+  --thumbnail-fallback-mid: #ddd8d0;
+  --thumbnail-fallback-ground: #d4cec4;
+  --thumbnail-fallback-horizon: rgba(120, 113, 108, 0.28);
+  --thumbnail-fallback-block-a: rgba(168, 162, 158, 0.55);
+  --thumbnail-fallback-block-b: rgba(120, 113, 108, 0.42);
+  --thumbnail-fallback-block-c: rgba(214, 211, 209, 0.65);
+  --thumbnail-fallback-label: #78716c;
 }
 
 .dark {
@@ -52,6 +60,14 @@
   --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.35);
   --tray-glow: 0 12px 40px rgba(45, 212, 191, 0.18), 0 4px 16px rgba(0, 0, 0, 0.5);
   --cta-glow: 0 0 28px var(--accent-glow), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --thumbnail-fallback-sky: #2a3544;
+  --thumbnail-fallback-mid: #1f2833;
+  --thumbnail-fallback-ground: #171e28;
+  --thumbnail-fallback-horizon: rgba(148, 163, 184, 0.22);
+  --thumbnail-fallback-block-a: rgba(58, 74, 92, 0.85);
+  --thumbnail-fallback-block-b: rgba(42, 53, 68, 0.9);
+  --thumbnail-fallback-block-c: rgba(74, 90, 108, 0.55);
+  --thumbnail-fallback-label: #94a3b8;
 }
 
 body {

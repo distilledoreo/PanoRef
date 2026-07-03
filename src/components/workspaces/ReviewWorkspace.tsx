@@ -106,20 +106,22 @@ export function ReviewWorkspace() {
     return true;
   });
 
+  const fitsCompactGrid = view === 'grid' && filteredShots.length > 0 && filteredShots.length <= 6;
+
   return (
     <FullBleedLayout>
-      <div className="flex h-full min-h-0 flex-col bg-surface-base p-5">
-        <header className="mb-4 shrink-0">
+      <div className="flex h-full min-h-0 flex-col bg-surface-base p-4">
+        <header className="mb-2 shrink-0">
           <h1 className="text-xl font-semibold text-primary">Review Your Shots</h1>
-          <div className="mt-2 flex flex-wrap items-center gap-3">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <div className="text-sm text-secondary">
               Approved <span className="font-semibold text-primary">{approvedCount}</span> / {project.shots.length}
             </div>
-            <div className="h-2 min-w-[12rem] flex-1 max-w-xs overflow-hidden rounded-full bg-surface-muted">
+            <div className="h-1.5 min-w-[10rem] flex-1 max-w-xs overflow-hidden rounded-full bg-surface-muted">
               <div className="h-full rounded-full bg-[var(--accent)] transition-all" style={{ width: `${progress * 100}%` }} />
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap gap-2">
               <FilterTab active={filter === 'all'} onClick={() => setFilter('all')} label={`All (${project.shots.length})`} />
               <FilterTab active={filter === 'approved'} onClick={() => setFilter('approved')} label={`Approved (${approvedCount})`} icon={<CheckCircle2 className="h-3.5 w-3.5" />} />
@@ -133,21 +135,21 @@ export function ReviewWorkspace() {
         </header>
 
         <div
-          className={`min-h-0 flex-1 overflow-y-auto ${
+          className={
             view === 'grid'
-              ? 'grid auto-rows-min content-start gap-4'
-              : 'space-y-2'
-          }`}
-          style={view === 'grid'
-            ? { gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 320px))' }
-            : undefined}
+              ? `grid min-h-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 ${
+                  fitsCompactGrid ? 'lg:grid-rows-2 lg:overflow-hidden' : 'auto-rows-min overflow-y-auto'
+                }`
+              : 'min-h-0 flex-1 space-y-1.5 overflow-y-auto'
+          }
         >
           {filteredShots.map((shot) => (
-            <div key={shot.id}>
+            <div key={shot.id} className={fitsCompactGrid ? 'h-full min-h-0' : ''}>
               <ShotReviewCard
                 shot={shot}
                 project={project}
                 view={view}
+                compactGrid={fitsCompactGrid}
                 selected={shot.id === detailShot?.id}
                 onSelect={() => {
                   setSelectedDetailShotId(shot.id);
@@ -158,7 +160,7 @@ export function ReviewWorkspace() {
           ))}
         </div>
 
-        <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2 border-t border-subtle pt-3">
+        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-1.5 border-t border-subtle pt-2">
           <ActionBarButton icon={<Grid3X3 className="h-4 w-4" />} label="Compare" onClick={() => setPrecisionOpen(true)} />
           <ActionBarButton
             icon={<CheckCircle2 className="h-4 w-4" />}
@@ -257,12 +259,14 @@ function ShotReviewCard({
   shot,
   project,
   view,
+  compactGrid,
   selected,
   onSelect,
 }: {
   shot: Shot;
   project: Parameters<typeof getShotWarnings>[0];
   view: ReviewView;
+  compactGrid?: boolean;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -278,16 +282,16 @@ function ShotReviewCard({
       <button
         type="button"
         onClick={onSelect}
-        className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition ${
+        className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2 text-left transition ${
           selected ? 'border-[var(--accent)] bg-accent-soft' : 'border-subtle bg-surface-raised hover:border-strong'
         }`}
       >
         <StatusGlow level={level}>
-          <ShotThumbnail project={project} shot={shot} className="h-14 w-24 shrink-0" />
+          <ShotThumbnail project={project} shot={shot} className="h-11 w-20 shrink-0" />
         </StatusGlow>
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-primary">{shot.shotNumber} {shot.name}</div>
-          <div className="text-xs text-secondary">{formatShotStatus(shot.status, warnings.length)}</div>
+          <div className="text-sm font-medium text-primary">{shot.shotNumber} {shot.name}</div>
+          <div className="text-[11px] text-secondary">{formatShotStatus(shot.status, warnings.length)}</div>
         </div>
       </button>
     );
@@ -297,20 +301,34 @@ function ShotReviewCard({
     <button
       type="button"
       onClick={onSelect}
-      className={`flex h-full w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border text-left transition ${
+      className={`flex w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border text-left transition ${
+        compactGrid ? 'h-full min-h-0' : ''
+      } ${
         selected ? 'border-[var(--accent)] bg-accent-soft shadow-card' : 'border-subtle bg-surface-raised hover:border-strong'
       }`}
     >
-      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-1.5">
         <div className="min-w-0">
-          <div className="truncate text-xs font-semibold text-primary">{shot.shotNumber} {shot.name}</div>
+          <div className="truncate text-[11px] font-semibold text-primary">{shot.shotNumber} {shot.name}</div>
         </div>
-        <StatusIcon level={level} />
+        <StatusIcon level={level} className="!h-4 !w-4 [&_svg]:!h-3 [&_svg]:!w-3" />
       </div>
-      <StatusGlow level={level} showIcon={false}>
-        <ShotThumbnail project={project} shot={shot} className="aspect-video w-full rounded-none border-y border-subtle" />
-      </StatusGlow>
-      <div className="px-3 py-2 text-xs font-medium text-secondary">
+      <div className={compactGrid ? 'min-h-0 flex-1' : ''}>
+        <StatusGlow
+          level={level}
+          showIcon={false}
+          className={compactGrid ? 'h-full min-h-0 w-full' : 'w-full'}
+        >
+          <ShotThumbnail
+            project={project}
+            shot={shot}
+            className={`w-full rounded-none border-y border-subtle ${
+              compactGrid ? 'h-full min-h-0' : 'aspect-video'
+            }`}
+          />
+        </StatusGlow>
+      </div>
+      <div className="shrink-0 px-2.5 py-1 text-[11px] font-medium text-secondary">
         {formatShotStatus(shot.status, warnings.length)}
       </div>
     </button>
@@ -396,7 +414,7 @@ function ActionBarButton({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition ${
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
         highlighted
           ? 'border-[var(--accent)] bg-[var(--accent)] text-white'
           : 'border-subtle text-secondary hover:border-strong hover:text-primary'

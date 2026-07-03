@@ -16,13 +16,15 @@ export function StatusGlow({
   level,
   children,
   showIcon = true,
+  className,
 }: {
   level: StatusLevel;
   children: React.ReactNode;
   showIcon?: boolean;
+  className?: string;
 }) {
   return (
-    <div className={`relative rounded-xl transition ${toneMap[level]}`}>
+    <div className={`relative rounded-xl transition ${toneMap[level]} ${className ?? ''}`}>
       {children}
       {showIcon && level !== 'ready' && (
         <StatusIcon level={level} className="absolute -right-1 -top-1" />

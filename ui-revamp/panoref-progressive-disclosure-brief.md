@@ -52,3 +52,15 @@ Applies to `ReferenceAlignmentPanel.tsx` and the Shots readiness score in Image 
 3. Every field/setting present in the current sidebar or in the Image 4 reference is still reachable in 2 clicks or fewer from the relevant selection.
 4. No panel is permanently docked except the stage rail and the object tray.
 5. Deselecting anything returns the screen to the Image 1 baseline state.
+
+## Implementation Notes — 2026-07-03
+Current branch progress:
+- Build now includes the visible transform gadget layer expected by the reference direction: selected objects expose translate/rotate/scale mode controls and an on-canvas gizmo instead of relying only on hidden precision fields.
+- Review uses a compact 3x2 grid for six-shot review so the full card set and bottom action bar remain visible at 1280x720.
+- Export uses compact selected-shot rows so six shots and the export CTA remain visible without losing the selection workflow.
+- Missing-media shot thumbnails use a theme-aware clay fallback instead of a broken icon-style placeholder.
+
+Remaining fidelity gaps:
+- The Export package summary is functionally compact but still reads as a large sparse panel; the reference uses a tighter composed package card with stronger visual hierarchy.
+- The Shots workspace still needs a closer pass on the floating shot-info card and filmstrip rhythm shown in the reference.
+- The default template media does not need to match the reference, but UI chrome, density, and action placement should continue moving toward the supplied light/dark images.
