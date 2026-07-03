@@ -12,6 +12,7 @@ import {
   type CameraMoveCubemapFaceId,
 } from './cameraMoveCubemap';
 import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH } from '../domain/defaults';
+import { ensureHumanMannequinModel } from './humanMannequinModel';
 import { buildScene, disposeScene, type SceneVisualTheme } from './sceneObjects';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 
@@ -65,6 +66,7 @@ export async function renderGrayboxEquirectangularPano(
   height = DEFAULT_GRAYBOX_PANO_HEIGHT,
   theme: SceneVisualTheme = 'light',
 ): Promise<ImageRenderResult> {
+  await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
   const scene = buildScene(project, {
     showHelpers: false,
@@ -154,6 +156,7 @@ export async function renderShotCameraMoveMp4(
   const durationSeconds = getCameraMoveDurationSeconds(keyframes);
   const width = shot.exportSettings.width;
   const height = shot.exportSettings.height;
+  await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
   const scene = buildScene(project, { showHelpers: false, hiddenObjectTypes: ['sun_marker'] });
   const camera = new THREE.PerspectiveCamera(
@@ -283,6 +286,7 @@ export async function renderViewportClay(
   width: number,
   height: number,
 ): Promise<ImageRenderResult> {
+  await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
   const scene = buildScene(project, { showHelpers: false, hiddenObjectTypes: ['sun_marker'] });
   const camera = new THREE.PerspectiveCamera(

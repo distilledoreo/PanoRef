@@ -1,0 +1,11 @@
+Human Mannequin Model
+
+Asset: Animated Human
+Author: Quaternius (https://quaternius.com)
+Source: https://poly.pizza/m/c3Ibh9I3udk
+Format: glTF Binary (.glb)
+
+License: CC0 1.0 Universal (Public Domain)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Bundled for Continuity Stage graybox scale-reference figures.

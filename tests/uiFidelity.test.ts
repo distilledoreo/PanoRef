@@ -225,6 +225,14 @@ describe('ui revamp fidelity surfaces', () => {
     expect(primaryCta).toContain('leading-[var(--shots-cta-hint-block,1.125rem)]');
   });
 
+  it('bundles a CC0 human mannequin glb for person scale references', () => {
+    const license = readFileSync(new URL('../public/models/human-mannequin.license.txt', import.meta.url), 'utf8');
+    const model = readFileSync(new URL('../public/models/human-mannequin.glb', import.meta.url));
+    expect(license).toContain('Quaternius');
+    expect(license).toContain('CC0');
+    expect(model.subarray(0, 4).toString()).toBe('glTF');
+  });
+
   it('shows build drag guidance near the gizmo when an object is selected', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
     expect(build).toContain('data-build-drag-guidance');

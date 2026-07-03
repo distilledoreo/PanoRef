@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Landmark, LocationProject, SceneObject, SceneObjectType } from '../domain/types';
+import { createHumanMannequinObject } from './humanMannequinModel';
 import { degreesToRadians } from './sync';
 
 export type SceneVisualTheme = 'light' | 'dark';
@@ -35,11 +36,6 @@ const mannequinMaterialByTheme: Record<SceneVisualTheme, THREE.MeshStandardMater
   light: new THREE.MeshStandardMaterial({ color: 0xb8c0c8, roughness: 0.72, metalness: 0.04 }),
   dark: new THREE.MeshStandardMaterial({ color: 0x9aa5b0, roughness: 0.76, metalness: 0.05 }),
 };
-const mannequinJointMaterialByTheme: Record<SceneVisualTheme, THREE.MeshStandardMaterial> = {
-  light: new THREE.MeshStandardMaterial({ color: 0x98a3ad, roughness: 0.68, metalness: 0.06 }),
-  dark: new THREE.MeshStandardMaterial({ color: 0x7f8b96, roughness: 0.7, metalness: 0.07 }),
-};
-
 const SHARED_MATERIALS = new Set<THREE.Material>([
   ...Object.values(materialByTheme.light),
   ...Object.values(materialByTheme.dark),
@@ -48,7 +44,6 @@ const SHARED_MATERIALS = new Set<THREE.Material>([
   panoOriginMaterial,
   landmarkMaterial,
   ...Object.values(mannequinMaterialByTheme),
-  ...Object.values(mannequinJointMaterialByTheme),
 ]);
 
 export function buildScene(
@@ -192,7 +187,7 @@ export function createObject3D(object: SceneObject, _selected = false, theme: Sc
       node = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), material);
       break;
     case 'human_dummy':
-      node = createHumanDummy(object, theme);
+      node = createHumanMannequinObject(object, mannequinMaterialByTheme[theme]);
       break;
     case 'sun_marker':
       node = createSunMarker(object, theme);
@@ -201,6 +196,7 @@ export function createObject3D(object: SceneObject, _selected = false, theme: Sc
       node = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
   }
 
+  const preservesProceduralScale = ['arch', 'doorway', 'stairs', 'tree_blob', 'human_dummy', 'sun_marker'].includes(object.type);
   node.name = object.name;
   node.position.fromArray(object.transform.position);
   node.rotation.set(
@@ -208,9 +204,8 @@ export function createObject3D(object: SceneObject, _selected = false, theme: Sc
     degreesToRadians(object.transform.rotation[1]),
     degreesToRadians(object.transform.rotation[2]),
   );
-  node.scale.fromArray(object.transform.scale);
-  if (!['arch', 'doorway', 'stairs', 'tree_blob', 'human_dummy', 'sun_marker'].includes(object.type)) {
-    node.scale.multiply(new THREE.Vector3(1, 1, 1));
+  if (!preservesProceduralScale) {
+    node.scale.fromArray(object.transform.scale);
   }
   return node;
 }
@@ -272,56 +267,6 @@ function createTreeBlob(object: SceneObject, theme: SceneVisualTheme): THREE.Gro
   crown.scale.y = 0.85;
   crown.position.y = h * 0.18;
   group.add(trunk, crown);
-  return group;
-}
-
-function createHumanDummy(object: SceneObject, theme: SceneVisualTheme): THREE.Group {
-  const [, h] = object.dimensions;
-  const group = new THREE.Group();
-  const bodyMat = mannequinMaterialByTheme[theme];
-  const jointMat = mannequinJointMaterialByTheme[theme];
-  const unit = h / 1.75;
-
-  const addPart = (
-    geometry: THREE.BufferGeometry,
-    position: [number, number, number],
-    rotation: [number, number, number] = [0, 0, 0],
-    material: THREE.Material = bodyMat,
-  ) => {
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(position[0] * unit, position[1] * unit, position[2] * unit);
-    mesh.rotation.set(rotation[0], rotation[1], rotation[2]);
-    group.add(mesh);
-    return mesh;
-  };
-
-  const addJoint = (position: [number, number, number]) => {
-    addPart(new THREE.SphereGeometry(0.05 * unit, 12, 10), position, [0, 0, 0], jointMat);
-  };
-
-  addPart(new THREE.SphereGeometry(0.1 * unit, 16, 14), [0, 0.72, 0]);
-  addPart(new THREE.CylinderGeometry(0.032 * unit, 0.038 * unit, 0.07 * unit, 10), [0, 0.61, 0]);
-  addPart(new THREE.CapsuleGeometry(0.13 * unit, 0.34 * unit, 6, 12), [0, 0.36, 0]);
-  addPart(new THREE.CapsuleGeometry(0.1 * unit, 0.1 * unit, 6, 10), [0, 0.1, 0]);
-
-  addJoint([-0.16, 0.5, 0]);
-  addJoint([0.16, 0.5, 0]);
-  addPart(new THREE.CapsuleGeometry(0.042 * unit, 0.34 * unit, 5, 10), [-0.2, 0.34, 0], [0.12, 0, 0.72]);
-  addPart(new THREE.CapsuleGeometry(0.042 * unit, 0.34 * unit, 5, 10), [0.2, 0.34, 0], [0.12, 0, -0.72]);
-
-  addJoint([-0.08, 0.02, 0]);
-  addJoint([0.08, 0.02, 0]);
-  addPart(new THREE.CapsuleGeometry(0.058 * unit, 0.4 * unit, 6, 12), [-0.08, -0.3, 0]);
-  addPart(new THREE.BoxGeometry(0.07 * unit, 0.035 * unit, 0.15 * unit), [-0.08, -0.56, 0.04]);
-  addPart(new THREE.CapsuleGeometry(0.058 * unit, 0.4 * unit, 6, 12), [0.08, -0.3, 0]);
-  addPart(new THREE.BoxGeometry(0.07 * unit, 0.035 * unit, 0.15 * unit), [0.08, -0.56, 0.04]);
-
-  const bounds = new THREE.Box3().setFromObject(group);
-  const center = bounds.getCenter(new THREE.Vector3());
-  group.children.forEach((child) => {
-    child.position.sub(center);
-  });
-
   return group;
 }
 

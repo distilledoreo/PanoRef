@@ -12,6 +12,7 @@ import { buildShotMetadata, createShotPackageManifest } from './exportManifest';
 import { generateImagePrompt, generateVideoPrompt } from './prompts';
 import { preparePanoExportDataUrl } from './panoImage';
 import { stitchCubemapFacesCrossAsync, stitchCubemapVisibleFacesAsync } from './cubemapStitch';
+import { ensureHumanMannequinModel } from './humanMannequinModel';
 import { renderPanoCubemapFaces, renderPanoPerspectiveCrop, renderShotFrame, renderViewportClay } from './renderers';
 
 export interface ShotPackageResult {
@@ -75,6 +76,7 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
     addDataUrl(zip, `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, clay.dataUrl);
   }
 
+  await ensureHumanMannequinModel();
   const cameraMoveCubemapVisibility = linkedPano && linkedPanoAsset && cameraMoveReferenceFrames.length > 0
     ? addCameraMoveCubemapCropPaths(buildCameraMoveCubemapVisibility(
       project,

@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { objectDisplayName } from '../../domain/defaults';
 import { CameraData, LocationProject, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import { createPlacedSceneObject, resolveStampPoint, snapBuildPoint } from '../../engine/sandbox';
+import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
 import { buildScene, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
 import {
   angleInAxisPlane,
@@ -107,6 +108,7 @@ export function SceneViewport({
   minHeightClassName?: string;
 }) {
   const theme = useThemeStore((state) => state.theme);
+  const [mannequinRevision, setMannequinRevision] = useState(getHumanMannequinRevision);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -843,6 +845,12 @@ export function SceneViewport({
   }, [clearTransformGizmo, emitFramingCamera, syncTransformGizmo, theme]);
 
   useEffect(() => {
+    return subscribeHumanMannequinReady(() => {
+      setMannequinRevision(getHumanMannequinRevision());
+    });
+  }, []);
+
+  useEffect(() => {
     if (!shotFraming?.flyActive) {
       flyKeysRef.current.clear();
     }
@@ -896,6 +904,7 @@ export function SceneViewport({
     syncTransformGizmo,
     theme,
     updatePreviewMesh,
+    mannequinRevision,
   ]);
 
   useEffect(() => {
