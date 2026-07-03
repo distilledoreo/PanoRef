@@ -24,6 +24,7 @@ import {
   type GizmoHit,
   type GizmoMode,
 } from '../../engine/transformGizmo';
+import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
 import {
   cameraFromFlyState,
@@ -32,7 +33,6 @@ import {
   type FlyCameraState,
 } from '../../engine/sync';
 import { computeFullCssRendererRect, type CssRendererRect } from '../../engine/viewport';
-import { useContinuityStore } from '../../state/useContinuityStore';
 import { useThemeStore } from '../../state/useThemeStore';
 import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 
@@ -142,6 +142,7 @@ export function SceneViewport({
     pitchDegrees: 0,
   });
   const flyKeysRef = useRef(new Set<string>());
+  const flyBoundsRef = useRef(computeSceneFlyBounds(project.scene));
   const lastFrameTimeRef = useRef(performance.now());
   const flyDirtyRef = useRef(false);
   const gizmoRef = useRef<THREE.Group | null>(null);
@@ -153,6 +154,7 @@ export function SceneViewport({
 
   selectedObjectIdRef.current = selectedObjectId;
   projectRef.current = project;
+  flyBoundsRef.current = computeSceneFlyBounds(project.scene);
   snapToGridRef.current = snapToGrid;
   placementTypeRef.current = placementType;
   shotFramingRef.current = shotFraming;
@@ -248,7 +250,7 @@ export function SceneViewport({
       previewMeshRef.current = null;
     }
 
-    const activePlacementType = placementTypeRef.current ?? getBuildInteractionState().placementType;
+    const activePlacementType = placementTypeRef.current;
     if (!activePlacementType || !point) return;
 
     const count = projectRef.current.scene.objects.filter((object) => object.type === activePlacementType).length + 1;
@@ -322,11 +324,14 @@ export function SceneViewport({
       const sprinting = keys.has('ControlLeft') || keys.has('ControlRight');
       const speed = FLY_SPEED * (sprinting ? FLY_SPRINT_MULTIPLIER : 1);
       const step = (speed * deltaSeconds) / length;
-      fly.position = [
-        fly.position[0] + moveX * step,
-        fly.position[1] + moveY * step,
-        fly.position[2] + moveZ * step,
-      ];
+      fly.position = clampFlyCameraPosition(
+        [
+          fly.position[0] + moveX * step,
+          fly.position[1] + moveY * step,
+          fly.position[2] + moveZ * step,
+        ],
+        flyBoundsRef.current,
+      );
       flyDirtyRef.current = true;
     };
 
@@ -503,11 +508,19 @@ export function SceneViewport({
 
       if (event.button !== 0) return;
 
-      const pointer = getPointerState(event, canvas, cameraRef.current, orbitRef.current, sceneRef.current);
+      const pointer = getPointerState(
+        event,
+        canvas,
+        cameraRef.current,
+        orbitRef.current,
+        sceneRef.current,
+        snapToGridRef.current,
+      );
       if (!pointer) return;
       const floorPoint = pointer.floorPoint;
       const hit = getSceneHit(pointer.raycaster, sceneRef.current);
-      const { placementType: activePlacementType, originPlacementActive: originPlacement } = getBuildInteractionState();
+      const activePlacementType = placementTypeRef.current;
+      const originPlacement = originPlacementActiveRef.current;
       const { onMoveObject, onMovePanoOrigin, onSelectObject } = callbacksRef.current;
       const activeProject = projectRef.current;
       const activeSnapToGrid = snapToGridRef.current;
@@ -568,8 +581,15 @@ export function SceneViewport({
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      const pointer = getPointerState(event, canvas, cameraRef.current, orbitRef.current, sceneRef.current);
-      if (getBuildInteractionState().placementType && pointer?.floorPoint) {
+      const pointer = getPointerState(
+        event,
+        canvas,
+        cameraRef.current,
+        orbitRef.current,
+        sceneRef.current,
+        snapToGridRef.current,
+      );
+      if (placementTypeRef.current && pointer?.floorPoint) {
         lastFloorPointRef.current = pointer.floorPoint;
         updatePreviewMesh(pointer.floorPoint);
       }
@@ -726,15 +746,22 @@ export function SceneViewport({
 
       if (event.button !== 0) return;
 
-      const pointer = getPointerState(event, canvas, cameraRef.current, orbitRef.current, sceneRef.current);
+      const pointer = getPointerState(
+        event,
+        canvas,
+        cameraRef.current,
+        orbitRef.current,
+        sceneRef.current,
+        snapToGridRef.current,
+      );
       const { onPlaceObject, onSelectObject } = callbacksRef.current;
       if (drag.kind === 'place') {
-        const { placementType: activePlacementType } = getBuildInteractionState();
+        const activePlacementType = placementTypeRef.current;
         const floorPoint = pointer?.floorPoint ?? lastFloorPointRef.current;
         if (activePlacementType && floorPoint) {
           onPlaceObject?.(activePlacementType, floorPoint);
         }
-        if (!getBuildInteractionState().placementType) {
+        if (!placementTypeRef.current) {
           lastFloorPointRef.current = undefined;
           clearPreviewMesh();
         } else if (lastFloorPointRef.current) {
@@ -940,6 +967,7 @@ function getPointerState(
   camera: THREE.PerspectiveCamera | null,
   orbit: { yaw: number; pitch: number; distance: number; target: THREE.Vector3 },
   scene: THREE.Scene | null,
+  snapToGrid: boolean,
 ) {
   if (!camera) return undefined;
   updateCamera(camera, orbit);
@@ -955,20 +983,12 @@ function getPointerState(
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(pointer, camera);
   const floorPoint = resolveStampPoint(raycaster, {
-    snapToGrid: useContinuityStore.getState().gridSnap,
+    snapToGrid,
     scene,
   });
   return {
     raycaster,
     floorPoint,
-  };
-}
-
-function getBuildInteractionState() {
-  const { buildMode, activePrimitive } = useContinuityStore.getState();
-  return {
-    placementType: buildMode === 'place' ? activePrimitive : undefined,
-    originPlacementActive: buildMode === 'pano_origin',
   };
 }
 

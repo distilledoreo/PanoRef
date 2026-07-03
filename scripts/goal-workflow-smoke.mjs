@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 const downloadDir = resolve(repoRoot, 'artifacts/ai-brief-smoke');
-const appUrl = process.env.CONTINUITY_STAGE_URL ?? 'http://127.0.0.1:3000';
+const appUrl = await resolveAppUrl();
+console.error(`[goal:smoke] Using ${appUrl}`);
 const chromePath = process.env.CHROME_PATH ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const debugPort = Number(process.env.CHROME_DEBUG_PORT ?? 9331);
 const profileDir = resolve(repoRoot, '.tmp-goal-chrome-profile');
@@ -41,13 +42,7 @@ try {
   await clickButton(client, 'Render 360 Reference');
   await waitFor(client, 'document.body.textContent.includes("Build is ready")', 'graybox pano');
   await clickButton(client, 'Continue to Reference');
-
-  await clickButton(client, 'Reference');
-  await clickButton(client, 'Use Attached Reference');
-  await waitFor(client, 'document.body.textContent.includes("Check pano alignment")', 'attached reference alignment');
-  await clickOptionalButton(client, 'Start checking');
-  await clickButton(client, 'Approve as Reference');
-  await waitFor(client, 'document.body.textContent.includes("Reference is ready")', 'approved reference');
+  await completeReferenceStep(client);
   await clickButton(client, 'Continue to Shots');
 
   await clickButton(client, 'Shots');
@@ -67,7 +62,9 @@ try {
     'imported AI result frame',
   );
 
-  await clickButton(client, 'Export');
+  if (!(await clickOptionalButton(client, 'Continue to Export'))) {
+    await clickWorkspaceTab(client, 'Export');
+  }
   await clickButton(client, 'Export Selected Shots');
   await waitFor(client, 'document.body.textContent.includes("shot_001/outputs/ai_result_frame.png")', 'final package export with AI result');
 
@@ -82,6 +79,30 @@ try {
   await client.close();
 } finally {
   chrome.kill();
+}
+
+async function resolveAppUrl() {
+  if (process.env.CONTINUITY_STAGE_URL) {
+    return process.env.CONTINUITY_STAGE_URL;
+  }
+
+  const ports = Array.from({ length: 11 }, (_, index) => 3000 + index);
+  for (const port of ports) {
+    const candidate = `http://127.0.0.1:${port}`;
+    try {
+      const response = await fetch(candidate, { signal: AbortSignal.timeout(1500) });
+      if (!response.ok) continue;
+      const html = await response.text();
+      if (html.includes('Continuity Stage')) return candidate;
+    } catch {
+      // Try the next dev-server port.
+    }
+  }
+
+  throw new Error(
+    'No Continuity Stage dev server found on ports 3000-3010. '
+    + 'Start one with `npm run dev`, or set CONTINUITY_STAGE_URL.',
+  );
 }
 
 async function waitForPageSocket(port) {
@@ -146,13 +167,31 @@ async function importAiResultFrame(client) {
   if (!imported) throw new Error('Could not find the AI result file input.');
 }
 
-async function clickButton(client, text, timeout = 20000) {
+function buttonMatchExpression(text, { exact = false } = {}) {
+  const label = JSON.stringify(text);
+  if (exact) {
+    return `(candidate) => candidate.textContent?.trim() === ${label}`;
+  }
+  return `(candidate) => candidate.textContent?.includes(${label})`;
+}
+
+async function isButtonEnabled(client, text, { exact = false } = {}) {
+  return evaluate(client, `
+    (() => {
+      const match = ${buttonMatchExpression(text, { exact })};
+      const button = [...document.querySelectorAll('button')].find(match);
+      return Boolean(button && !button.disabled);
+    })()
+  `);
+}
+
+async function clickButton(client, text, timeout = 20000, { exact = false } = {}) {
   const start = Date.now();
+  const match = buttonMatchExpression(text, { exact });
   while (Date.now() - start < timeout) {
     const clicked = await evaluate(client, `
       (() => {
-        const button = [...document.querySelectorAll('button')]
-          .find((candidate) => candidate.textContent?.includes(${JSON.stringify(text)}));
+        const button = [...document.querySelectorAll('button')].find(${match});
         if (!button || button.disabled) return false;
         button.click();
         return true;
@@ -166,6 +205,52 @@ async function clickButton(client, text, timeout = 20000) {
   }
   const available = await evaluate(client, '[...document.querySelectorAll("button")].map((button) => button.textContent?.trim()).join(" | ")');
   throw new Error(`Could not find enabled button: ${text}. Available: ${available}`);
+}
+
+async function completeReferenceStep(client) {
+  await clickOptionalButton(client, 'Got it');
+
+  if (await isButtonEnabled(client, 'Use Attached Reference')) {
+    await clickButton(client, 'Use Attached Reference');
+    await waitFor(client, 'document.body.textContent.includes("Check pano alignment")', 'attached reference alignment');
+  } else {
+    await waitFor(
+      client,
+      `(() => {
+        const body = document.body.textContent ?? '';
+        return body.includes('Check pano alignment')
+          || body.includes('Approve as Reference')
+          || body.includes('Start checking');
+      })()`,
+      'reference candidate ready',
+    );
+  }
+
+  await clickOptionalButton(client, 'Start checking');
+  await clickButton(client, 'Approve as Reference');
+  await waitFor(client, 'document.body.textContent.includes("Reference is ready")', 'approved reference');
+}
+
+async function clickWorkspaceTab(client, label, timeout = 20000) {
+  const start = Date.now();
+  const tabLabel = JSON.stringify(label);
+  while (Date.now() - start < timeout) {
+    const clicked = await evaluate(client, `
+      (() => {
+        const button = [...document.querySelectorAll('header nav button')]
+          .find((candidate) => candidate.textContent?.trim() === ${tabLabel});
+        if (!button || button.disabled) return false;
+        button.click();
+        return true;
+      })()
+    `);
+    if (clicked) {
+      await delay(300);
+      return;
+    }
+    await delay(200);
+  }
+  throw new Error(`Could not find workspace tab: ${label}`);
 }
 
 async function clickOptionalButton(client, text, timeout = 3000) {

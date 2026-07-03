@@ -71,6 +71,9 @@ Current branch progress:
 - Review shot cards use a tighter thumbnail-first 3×2 layout with the footer actions kept visible below the grid.
 - Export selected-shot rows use a quieter active state and a more compact package visual so the checklist and CTA read closer to the reference screen.
 - The app shell now declares Continuity Stage favicon assets; browser console verification should stay free of favicon 404 noise.
+- Shots fly camera no longer spawns per-frame `renderShotFrame` preview exports while movement is active; the live viewport keeps rendering and the floating card/filmstrip keep the last stable preview until Lock View.
+- Shots fly camera movement is clamped to a navigable stage volume: floor footprint for lateral travel (inset by margin), vertical range from stage objects, and a forward cap before central front walls/arches so sustained WASD travel cannot pass behind the graybox set into blank space.
+- Build object stamping and pano-origin placement are opt-in via explicit `SceneViewport` props from `BuildWorkspace` only; the Shots viewport never reads global build mode, so placement preview meshes and stamp clicks cannot leak into shot framing.
 
 Remaining fidelity gaps:
 - Filmstrip three-dot markers are decorative only; a dedicated per-shot overflow menu can be added if reference parity requires it.

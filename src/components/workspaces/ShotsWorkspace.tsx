@@ -72,7 +72,6 @@ export function ShotsWorkspace() {
   const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
   const [precisionOpen, setPrecisionOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
-  const [flyCameraRevision, setFlyCameraRevision] = useState(0);
 
   const getEffectiveCamera = useCallback((): CameraData | undefined => {
     if (!selectedShot) return undefined;
@@ -200,7 +199,6 @@ export function ShotsWorkspace() {
   useEffect(() => {
     if (!selectedShot) return;
     draftCameraRef.current = selectedShot.camera;
-    setFlyCameraRevision((revision) => revision + 1);
   }, [selectedShot?.id, selectedShot?.camera, shotCameraFlying]);
 
   useEffect(() => {
@@ -226,10 +224,8 @@ export function ShotsWorkspace() {
       camera: previewShot.camera,
       width: previewShot.exportSettings.width,
       height: previewShot.exportSettings.height,
-      flyCameraRevision,
     });
   }, [
-    flyCameraRevision,
     getPreviewShot,
     project.scene,
     selectedShot?.exportSettings.height,
@@ -238,6 +234,8 @@ export function ShotsWorkspace() {
   ]);
 
   useEffect(() => {
+    if (shotCameraFlying) return;
+
     const previewShot = getPreviewShot();
     if (!previewShot) return;
 
@@ -254,21 +252,17 @@ export function ShotsWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [framePreviewKey, getPreviewShot, project]);
+  }, [framePreviewKey, getPreviewShot, project, shotCameraFlying]);
 
   const handleFramingCameraChange = useCallback((camera: CameraData) => {
     if (!selectedShot) return;
     draftCameraRef.current = camera;
-    if (shotCameraFlying) {
-      setFlyCameraRevision((revision) => revision + 1);
-      return;
-    }
+    if (shotCameraFlying) return;
     updateShot(selectedShot.id, { camera });
   }, [selectedShot?.id, shotCameraFlying, updateShot]);
 
   const startFlyCamera = useCallback(() => {
     if (selectedShot) draftCameraRef.current = selectedShot.camera;
-    setFramePreviewUrl(undefined);
     setShotCameraFlying(true);
   }, [selectedShot?.camera, setShotCameraFlying]);
 

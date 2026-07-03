@@ -67,6 +67,15 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).not.toContain('label="Frame"');
   });
 
+  it('pauses automatic shot frame preview renders while fly camera is active', () => {
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    expect(shots).not.toContain('flyCameraRevision');
+    expect(shots).toMatch(/useEffect\(\(\) => \{[\s\S]*if \(shotCameraFlying\) return;[\s\S]*renderShotFrame\(project, previewShot\)/);
+    expect(shots).toMatch(/handleFramingCameraChange[\s\S]*if \(shotCameraFlying\) return;/);
+    expect(shots).not.toMatch(/handleFramingCameraChange[\s\S]*setFlyCameraRevision/);
+    expect(shots).not.toMatch(/startFlyCamera[\s\S]*setFramePreviewUrl\(undefined\)/);
+  });
+
   it('keeps filmstrip overlay dots decorative instead of misleading option buttons', () => {
     const filmstrip = readFileSync(new URL('../src/components/common/ShotFilmstrip.tsx', import.meta.url), 'utf8');
     expect(filmstrip).toContain('aria-hidden');
@@ -129,6 +138,26 @@ describe('ui revamp fidelity surfaces', () => {
     expect(viewport).toContain('selectedObjectId: shotFraming ? undefined : selectedObjectId');
     expect(viewport).toContain('showSceneGuides: shotFraming ? false : showSceneGuides');
     expect(viewport).toContain('if (framing) return;');
+  });
+
+  it('isolates build placement to explicit SceneViewport props instead of global build mode', () => {
+    const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    expect(viewport).not.toContain('getBuildInteractionState');
+    expect(viewport).not.toContain('useContinuityStore');
+    expect(viewport).not.toContain('buildMode');
+    expect(viewport).not.toContain('activePrimitive');
+    expect(viewport).toContain('placementTypeRef.current');
+    expect(viewport).toContain('originPlacementActiveRef.current');
+    expect(viewport).toContain('snapToGridRef.current');
+    expect(shots).not.toContain('placementType');
+    expect(shots).not.toContain('originPlacementActive');
+    expect(shots).not.toContain('onPlaceObject');
+    expect(shots).not.toContain('onMovePanoOrigin');
+    expect(build).toContain('placementType={buildMode === \'place\' ? activePrimitive : undefined}');
+    expect(build).toContain('originPlacementActive={buildMode === \'pano_origin\'}');
+    expect(build).toContain('onPlaceObject={placeObject}');
   });
 
   it('adds filmstrip scroll affordances', () => {
