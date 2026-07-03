@@ -35,7 +35,7 @@ import {
 import { renderGrayboxEquirectangularPano } from '../engine/renderers';
 import { downloadDataUrl } from '../engine/projectIO';
 import { useThemeStore } from './useThemeStore';
-import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition } from '../engine/sandbox';
+import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition, snapBuildPoint } from '../engine/sandbox';
 
 export type BuildMode = 'select' | 'place' | 'pano_origin';
 
@@ -65,6 +65,7 @@ interface ContinuityStore {
   selectObject: (id?: string) => void;
   updateObject: (id: string, updates: Partial<SceneObject>) => void;
   moveObjectToGroundPoint: (id: string, point: Vec3) => void;
+  moveObjectPosition: (id: string, point: Vec3) => void;
   duplicateObject: (id: string) => SceneObject | undefined;
   toggleObjectVisibility: (id: string) => void;
   toggleObjectLocked: (id: string) => void;
@@ -240,6 +241,24 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
           ...state.project.scene,
           objects: state.project.scene.objects.map((item) => item.id === id
             ? { ...item, transform: { ...item.transform, position } }
+            : item),
+        },
+      }),
+    };
+  }),
+  moveObjectPosition: (id, point) => set((state) => {
+    const object = state.project.scene.objects.find((item) => item.id === id);
+    if (!object || object.locked) return state;
+    const snapped = state.gridSnap
+      ? [snapBuildPoint(point, true)[0], point[1], snapBuildPoint(point, true)[2]] as Vec3
+      : point;
+    return {
+      project: touchProject({
+        ...state.project,
+        scene: {
+          ...state.project.scene,
+          objects: state.project.scene.objects.map((item) => item.id === id
+            ? { ...item, transform: { ...item.transform, position: snapped } }
             : item),
         },
       }),

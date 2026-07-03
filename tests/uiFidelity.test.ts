@@ -2,6 +2,15 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('ui revamp fidelity surfaces', () => {
+  it('floats the stage rail over a full-bleed workspace instead of a separate header strip', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    expect(app).toContain('<main className="absolute inset-0">');
+    expect(app).toContain('pointer-events-none absolute inset-x-0 top-0 z-40');
+    expect(app).toContain('bg-surface-overlay/75');
+    expect(app).not.toContain('border-b border-subtle bg-surface-header');
+    expect(app).not.toContain('flex h-screen w-full flex-col');
+  });
+
   it('declares Continuity Stage favicon assets in the app shell', () => {
     const shell = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
     const faviconSvg = readFileSync(new URL('../public/favicon.svg', import.meta.url), 'utf8');
@@ -134,7 +143,9 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain('showTransformGizmo');
     expect(build).toContain('RotateCw');
     expect(build).toContain('ZoomIn');
-    expect(viewport).toContain('createTransformGizmoGroup');
+    expect(viewport).toContain('createGizmoGroup');
+    expect(viewport).toContain('gizmoMode');
+    expect(viewport).toContain('onMoveObjectInSpace');
     expect(viewport).toContain('showSceneGuides');
     expect(gizmo).toContain('0x14b8a6');
   });
@@ -218,6 +229,8 @@ describe('ui revamp fidelity surfaces', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
     expect(build).toContain('data-build-drag-guidance');
     expect(build).toContain('Drag arrows to move');
+    expect(build).toContain('Drag rings to rotate');
+    expect(build).toContain('Drag handles to scale');
     expect(build).toContain('buildMode === \'select\'');
     expect(build).toContain('showTransformGizmo');
   });

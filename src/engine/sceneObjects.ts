@@ -31,9 +31,14 @@ const lightFloorMaterial = new THREE.MeshStandardMaterial({ color: 0xd8ddd8, rou
 const darkFloorMaterial = new THREE.MeshStandardMaterial({ color: 0x242c32, roughness: 0.92, metalness: 0.01 });
 const panoOriginMaterial = new THREE.MeshStandardMaterial({ color: 0xd08a28, emissive: 0x3a2306 });
 const landmarkMaterial = new THREE.MeshStandardMaterial({ color: 0x5f9b7a, emissive: 0x0b2e1e });
-const robeMaterial = new THREE.MeshStandardMaterial({ color: 0xb9a27e, roughness: 0.9 });
-const skinMaterial = new THREE.MeshStandardMaterial({ color: 0x9a6a4a, roughness: 0.7 });
-const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x111111 });
+const mannequinMaterialByTheme: Record<SceneVisualTheme, THREE.MeshStandardMaterial> = {
+  light: new THREE.MeshStandardMaterial({ color: 0xb8c0c8, roughness: 0.72, metalness: 0.04 }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x9aa5b0, roughness: 0.76, metalness: 0.05 }),
+};
+const mannequinJointMaterialByTheme: Record<SceneVisualTheme, THREE.MeshStandardMaterial> = {
+  light: new THREE.MeshStandardMaterial({ color: 0x98a3ad, roughness: 0.68, metalness: 0.06 }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x7f8b96, roughness: 0.7, metalness: 0.07 }),
+};
 
 const SHARED_MATERIALS = new Set<THREE.Material>([
   ...Object.values(materialByTheme.light),
@@ -42,9 +47,8 @@ const SHARED_MATERIALS = new Set<THREE.Material>([
   darkFloorMaterial,
   panoOriginMaterial,
   landmarkMaterial,
-  robeMaterial,
-  skinMaterial,
-  eyeMaterial,
+  ...Object.values(mannequinMaterialByTheme),
+  ...Object.values(mannequinJointMaterialByTheme),
 ]);
 
 export function buildScene(
@@ -274,23 +278,53 @@ function createTreeBlob(object: SceneObject, theme: SceneVisualTheme): THREE.Gro
 function createHumanDummy(object: SceneObject, theme: SceneVisualTheme): THREE.Group {
   const [, h] = object.dimensions;
   const group = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.23, h * 0.62, 16),
-    robeMaterial,
-  );
-  body.position.y = -h * 0.08;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), skinMaterial);
-  head.position.y = h * 0.32;
-  const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), eyeMaterial);
-  leftEye.position.set(-0.06, h * 0.35, -0.155);
-  const rightEye = leftEye.clone();
-  rightEye.position.x = 0.06;
-  const robeFold = new THREE.Mesh(
-    new THREE.BoxGeometry(0.05, h * 0.54, 0.02),
-    new THREE.MeshStandardMaterial({ color: theme === 'dark' ? 0x6b5848 : 0x80664c, roughness: 0.9 }),
-  );
-  robeFold.position.set(0, -h * 0.1, -0.21);
-  group.add(body, head, leftEye, rightEye, robeFold);
+  const bodyMat = mannequinMaterialByTheme[theme];
+  const jointMat = mannequinJointMaterialByTheme[theme];
+  const unit = h / 1.75;
+
+  const addPart = (
+    geometry: THREE.BufferGeometry,
+    position: [number, number, number],
+    rotation: [number, number, number] = [0, 0, 0],
+    material: THREE.Material = bodyMat,
+  ) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(position[0] * unit, position[1] * unit, position[2] * unit);
+    mesh.rotation.set(rotation[0], rotation[1], rotation[2]);
+    group.add(mesh);
+    return mesh;
+  };
+
+  const addJoint = (position: [number, number, number]) => {
+    addPart(new THREE.SphereGeometry(0.055 * unit, 12, 10), position, [0, 0, 0], jointMat);
+  };
+
+  addPart(new THREE.SphereGeometry(0.11 * unit, 16, 14), [0, 0.79, 0]);
+  addPart(new THREE.CylinderGeometry(0.035 * unit, 0.04 * unit, 0.08 * unit, 12), [0, 0.68, 0]);
+  addPart(new THREE.CapsuleGeometry(0.13 * unit, 0.28 * unit, 6, 12), [0, 0.43, 0]);
+  addPart(new THREE.CapsuleGeometry(0.11 * unit, 0.12 * unit, 6, 12), [0, 0.18, 0]);
+
+  addJoint([0, 0.58, 0]);
+  addPart(new THREE.CapsuleGeometry(0.05 * unit, 0.24 * unit, 5, 10), [-0.2, 0.47, 0], [0, 0, 0.35]);
+  addPart(new THREE.CapsuleGeometry(0.045 * unit, 0.22 * unit, 5, 10), [-0.34, 0.28, 0.02], [0.15, 0, 0.55]);
+  addPart(new THREE.CapsuleGeometry(0.05 * unit, 0.24 * unit, 5, 10), [0.2, 0.47, 0], [0, 0, -0.35]);
+  addPart(new THREE.CapsuleGeometry(0.045 * unit, 0.22 * unit, 5, 10), [0.34, 0.28, 0.02], [0.15, 0, -0.55]);
+
+  addJoint([-0.1, 0.1, 0]);
+  addJoint([0.1, 0.1, 0]);
+  addPart(new THREE.CapsuleGeometry(0.065 * unit, 0.34 * unit, 6, 12), [-0.1, -0.2, 0]);
+  addPart(new THREE.CapsuleGeometry(0.055 * unit, 0.32 * unit, 6, 12), [-0.1, -0.56, 0.03], [0.08, 0, 0]);
+  addPart(new THREE.BoxGeometry(0.08 * unit, 0.04 * unit, 0.18 * unit), [-0.1, -0.78, 0.05]);
+  addPart(new THREE.CapsuleGeometry(0.065 * unit, 0.34 * unit, 6, 12), [0.1, -0.2, 0]);
+  addPart(new THREE.CapsuleGeometry(0.055 * unit, 0.32 * unit, 6, 12), [0.1, -0.56, 0.03], [0.08, 0, 0]);
+  addPart(new THREE.BoxGeometry(0.08 * unit, 0.04 * unit, 0.18 * unit), [0.1, -0.78, 0.05]);
+
+  const bounds = new THREE.Box3().setFromObject(group);
+  const center = bounds.getCenter(new THREE.Vector3());
+  group.children.forEach((child) => {
+    child.position.sub(center);
+  });
+
   return group;
 }
 

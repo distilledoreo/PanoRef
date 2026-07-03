@@ -122,6 +122,20 @@ describe('sandbox build interactions', () => {
     expect(moved?.transform.position).toEqual([4, 0.04, 3]);
   });
 
+  it('preserves vertical position when moving objects in space via the translate gizmo', () => {
+    const project = createDefaultProject();
+    const object = project.scene.objects[2];
+    const originalY = object.transform.position[1];
+    useContinuityStore.setState({ project, gridSnap: true, selectedObjectId: object.id });
+
+    useContinuityStore.getState().moveObjectPosition(object.id, [2.4, originalY + 1.25, -1.8]);
+
+    const moved = useContinuityStore.getState().project.scene.objects[2];
+    expect(moved.transform.position[0]).toBe(2.5);
+    expect(moved.transform.position[1]).toBeCloseTo(originalY + 1.25);
+    expect(moved.transform.position[2]).toBe(-2);
+  });
+
   it('does not drag locked objects through the sandbox move action', () => {
     const project = createDefaultProject();
     const object = { ...project.scene.objects[1], locked: true };

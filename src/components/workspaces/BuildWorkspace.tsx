@@ -29,6 +29,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
+import type { GizmoMode } from '../../engine/transformGizmo';
 import { objectDisplayName } from '../../domain/defaults';
 import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
 import {
@@ -76,6 +77,7 @@ export function BuildWorkspace() {
   const [precisionOpen, setPrecisionOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [showSceneGuides, setShowSceneGuides] = useState(false);
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>('translate');
   const {
     project,
     selectedObjectId,
@@ -89,6 +91,7 @@ export function BuildWorkspace() {
     selectObject,
     updateObject,
     moveObjectToGroundPoint,
+    moveObjectPosition,
     duplicateObject,
     toggleObjectLocked,
     toggleObjectVisibility,
@@ -145,6 +148,18 @@ export function BuildWorkspace() {
         setGridSnap(!gridSnap);
         return;
       }
+      if (command.kind === 'gizmo-translate') {
+        setGizmoMode('translate');
+        return;
+      }
+      if (command.kind === 'gizmo-rotate') {
+        setGizmoMode('rotate');
+        return;
+      }
+      if (command.kind === 'gizmo-scale') {
+        setGizmoMode('scale');
+        return;
+      }
 
       if (!selectedObject) return;
       if (command.kind === 'duplicate') duplicateObject(selectedObject.id);
@@ -193,10 +208,18 @@ export function BuildWorkspace() {
           originPlacementActive={buildMode === 'pano_origin'}
           showSceneGuides={showSceneGuides}
           showTransformGizmo={Boolean(selectedObject && buildMode === 'select')}
+          gizmoMode={gizmoMode}
           snapToGrid={gridSnap}
           onSelectObject={selectObject}
           onPlaceObject={placeObject}
           onMoveObject={moveObjectToGroundPoint}
+          onMoveObjectInSpace={moveObjectPosition}
+          onRotateObject={(id, rotation) => {
+            const object = project.scene.objects.find((item) => item.id === id);
+            if (!object) return;
+            updateObject(id, { transform: { ...object.transform, rotation } });
+          }}
+          onScaleObject={(id, dimensions) => updateObject(id, { dimensions })}
           onMovePanoOrigin={setPanoOrigin}
         />
 
@@ -221,14 +244,30 @@ export function BuildWorkspace() {
             className="pointer-events-none absolute left-[58%] top-[54%] z-10 -translate-x-1/2"
           >
             <div className="rounded-full border border-subtle/70 bg-surface-overlay/80 px-3 py-1.5 text-center text-xs font-medium text-secondary shadow-soft backdrop-blur-sm">
-              <Move3D className="mr-1 inline h-3.5 w-3.5 text-accent" />
-              Drag arrows to move
+              {gizmoMode === 'translate' && (
+                <>
+                  <Move3D className="mr-1 inline h-3.5 w-3.5 text-accent" />
+                  Drag arrows to move
+                </>
+              )}
+              {gizmoMode === 'rotate' && (
+                <>
+                  <RotateCw className="mr-1 inline h-3.5 w-3.5 text-accent" />
+                  Drag rings to rotate
+                </>
+              )}
+              {gizmoMode === 'scale' && (
+                <>
+                  <ZoomIn className="mr-1 inline h-3.5 w-3.5 text-accent" />
+                  Drag handles to scale
+                </>
+              )}
             </div>
           </div>
         )}
 
         {selectedObject && (
-          <div className="pointer-events-none absolute right-5 top-14 z-10">
+          <div className="pointer-events-none absolute right-5 top-20 z-10">
             <ContextualPanel>
               <div className="flex items-center gap-2">
                 <TextInput
@@ -253,6 +292,17 @@ export function BuildWorkspace() {
                 >
                   <Layers className="h-4 w-4" />
                 </button>
+              </div>
+              <div className="mt-2 flex items-center gap-1">
+                <GizmoModeButton active={gizmoMode === 'translate'} label="Move (T)" onClick={() => setGizmoMode('translate')}>
+                  <Move3D className="h-3.5 w-3.5" />
+                </GizmoModeButton>
+                <GizmoModeButton active={gizmoMode === 'rotate'} label="Rotate (E)" onClick={() => setGizmoMode('rotate')}>
+                  <RotateCw className="h-3.5 w-3.5" />
+                </GizmoModeButton>
+                <GizmoModeButton active={gizmoMode === 'scale'} label="Scale (S)" onClick={() => setGizmoMode('scale')}>
+                  <ZoomIn className="h-3.5 w-3.5" />
+                </GizmoModeButton>
               </div>
               <div className="mt-2 flex flex-wrap gap-1">
                 <QuickAction title="Rotate left (Shift+R)" onClick={() => rotateSelected(-15)}><RotateCcw className="h-3.5 w-3.5" /></QuickAction>
@@ -484,6 +534,34 @@ function TrayButton({
     >
       {children}
       <span className="text-[10px] font-medium">{label}</span>
+    </button>
+  );
+}
+
+function GizmoModeButton({
+  active,
+  label,
+  children,
+  onClick,
+}: {
+  active?: boolean;
+  label: string;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      onClick={onClick}
+      className={`inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-lg border px-2 text-xs font-medium transition ${
+        active
+          ? 'border-[var(--accent)] bg-accent-soft text-accent'
+          : 'border-subtle text-secondary hover:border-accent hover:text-accent'
+      }`}
+    >
+      {children}
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 }

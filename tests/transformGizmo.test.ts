@@ -7,9 +7,21 @@ import {
   GIZMO_SCALE_MIN,
   computeGizmoAnchor,
   computeGizmoScale,
+  createGizmoGroup,
 } from '../src/engine/transformGizmo';
 
 describe('build selection visuals', () => {
+  it('centers human mannequin geometry on its local origin', () => {
+    const person = createSceneObject('human_dummy', 1);
+    person.transform.position = [0, 0, 0];
+    const mesh = createObject3D(person, false, 'light');
+    const bounds = new THREE.Box3().setFromObject(mesh);
+    const center = bounds.getCenter(new THREE.Vector3());
+    expect(center.x).toBeCloseTo(0, 2);
+    expect(center.y).toBeCloseTo(0, 2);
+    expect(center.z).toBeCloseTo(0, 2);
+  });
+
   it('keeps selected objects on their category material instead of a teal fill', () => {
     const floor = createSceneObject('floor', 1);
     const box = createSceneObject('box', 2);
@@ -33,6 +45,12 @@ describe('build selection visuals', () => {
     expect(boxScale).toBeGreaterThanOrEqual(GIZMO_SCALE_MIN);
     expect(boxScale).toBeLessThan(GIZMO_SCALE_MAX);
     expect(tinyScale).toBe(GIZMO_SCALE_MIN);
+  });
+
+  it('creates translate, rotate, and scale gizmo groups with mode metadata', () => {
+    expect(createGizmoGroup('translate').userData.gizmoMode).toBe('translate');
+    expect(createGizmoGroup('rotate').userData.gizmoMode).toBe('rotate');
+    expect(createGizmoGroup('scale').userData.gizmoMode).toBe('scale');
   });
 
   it('anchors floor gizmos to the slab top while keeping regular objects centered', () => {
