@@ -1,32 +1,43 @@
 import React, { useRef } from 'react';
-import { Boxes, Download, FileJson, FolderOpen, Image, Package, Route, Video } from 'lucide-react';
+import {
+  Boxes,
+  Camera,
+  Clapperboard,
+  FileJson,
+  FolderOpen,
+  Moon,
+  Package,
+  Sun,
+  Upload,
+  Users,
+} from 'lucide-react';
 import { Workspace } from './domain/types';
 import { downloadProject, parseProject, readFileAsText } from './engine/projectIO';
 import { useContinuityStore } from './state/useContinuityStore';
+import { useThemeStore } from './state/useThemeStore';
 import { BuildWorkspace } from './components/workspaces/BuildWorkspace';
 import { ReferenceWorkspace } from './components/workspaces/ReferenceWorkspace';
 import { ShotsWorkspace } from './components/workspaces/ShotsWorkspace';
 import { ReviewWorkspace } from './components/workspaces/ReviewWorkspace';
 import { ExportWorkspace } from './components/workspaces/ExportWorkspace';
-import { TextInput } from './components/common/Field';
 import { ObjectiveHelpButton, WorkflowGuidance } from './components/common/WorkflowGuidance';
 
 const workspaceItems: Array<{ id: Workspace; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'build', label: 'Build', icon: Boxes },
-  { id: 'reference', label: 'Reference', icon: Image },
-  { id: 'shots', label: 'Shots', icon: Route },
-  { id: 'review', label: 'Review', icon: Video },
-  { id: 'export', label: 'Export', icon: Package },
+  { id: 'reference', label: 'Reference', icon: Camera },
+  { id: 'shots', label: 'Shots', icon: Clapperboard },
+  { id: 'review', label: 'Review', icon: Users },
+  { id: 'export', label: 'Export', icon: Upload },
 ];
 
 export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
+  const { theme, toggleTheme } = useThemeStore();
   const {
     project,
     workspace,
     setWorkspace,
     setProject,
-    updateProjectInfo,
   } = useContinuityStore();
 
   const importProject = async (file?: File) => {
@@ -36,24 +47,51 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-zinc-100 text-zinc-900">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3 shadow-sm">
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-surface-base text-primary">
+      <header className="relative z-30 flex shrink-0 items-center justify-between gap-4 border-b border-subtle bg-surface-raised px-5 py-3 shadow-card">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-teal-500 text-white shadow-sm">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent)] text-white shadow-card">
             <Boxes className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-wide text-teal-700">Continuity Stage</div>
-            <TextInput
-              value={project.name}
-              onChange={(event) => updateProjectInfo({ name: event.target.value })}
-              className="mt-1 h-7 border-transparent bg-transparent px-0 py-0 text-base font-semibold shadow-none focus:border-transparent focus:ring-0"
-              aria-label="Project name"
-            />
+            <div className="truncate text-sm font-semibold text-primary">Continuity Stage</div>
+            <div className="truncate text-xs text-secondary">{project.name}</div>
           </div>
         </div>
 
-        <nav className="flex max-w-full items-center gap-1 overflow-x-auto rounded-md border border-zinc-200 bg-zinc-50 p-1">
+        <nav className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-6 md:flex">
+          {workspaceItems.map((item, index) => {
+            const Icon = item.icon;
+            const active = workspace === item.id;
+            return (
+              <React.Fragment key={item.id}>
+                <button
+                  onClick={() => setWorkspace(item.id)}
+                  className="group flex flex-col items-center gap-1.5"
+                  aria-current={active ? 'page' : undefined}
+                >
+                  <span
+                    className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${
+                      active
+                        ? 'border-[var(--accent)] bg-[var(--accent)] text-white shadow-[0_0_16px_var(--accent-glow)]'
+                        : 'border-subtle bg-surface-muted text-secondary group-hover:border-strong group-hover:text-primary'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className={`text-[11px] font-medium ${active ? 'text-accent' : 'text-secondary'}`}>
+                    {item.label}
+                  </span>
+                </button>
+                {index < workspaceItems.length - 1 && (
+                  <span className="mb-5 h-px w-8 bg-border-subtle" aria-hidden />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </nav>
+
+        <nav className="flex max-w-[42vw] items-center gap-1 overflow-x-auto md:hidden">
           {workspaceItems.map((item) => {
             const Icon = item.icon;
             const active = workspace === item.id;
@@ -61,20 +99,18 @@ export default function App() {
               <button
                 key={item.id}
                 onClick={() => setWorkspace(item.id)}
-                className={`inline-flex min-w-20 shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${
-                  active
-                    ? 'bg-teal-500 text-white shadow-sm'
-                    : 'text-zinc-500 hover:bg-white hover:text-zinc-900'
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  active ? 'bg-[var(--accent)] text-white' : 'text-secondary'
                 }`}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-3.5 w-3.5" />
                 {item.label}
               </button>
             );
           })}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <ObjectiveHelpButton />
           <input
             ref={fileRef}
@@ -83,27 +119,18 @@ export default function App() {
             className="hidden"
             onChange={(event) => void importProject(event.target.files?.[0])}
           />
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-teal-300 hover:text-teal-700"
-          >
+          <IconHeaderButton onClick={() => fileRef.current?.click()} title="Open project">
             <FolderOpen className="h-4 w-4" />
-            Open
-          </button>
-          <button
-            onClick={() => downloadProject(project)}
-            className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-teal-300 hover:text-teal-700"
-          >
+          </IconHeaderButton>
+          <IconHeaderButton onClick={() => downloadProject(project)} title="Save project">
             <FileJson className="h-4 w-4" />
-            Save
-          </button>
-          <button
-            onClick={() => setWorkspace('export')}
-            className="inline-flex items-center gap-2 rounded-md bg-teal-500 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-600"
-          >
-            <Download className="h-4 w-4" />
-            Package
-          </button>
+          </IconHeaderButton>
+          <IconHeaderButton onClick={() => setWorkspace('export')} title="Package export">
+            <Package className="h-4 w-4" />
+          </IconHeaderButton>
+          <IconHeaderButton onClick={toggleTheme} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>
+            {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          </IconHeaderButton>
         </div>
       </header>
 
@@ -117,5 +144,26 @@ export default function App() {
 
       <WorkflowGuidance />
     </div>
+  );
+}
+
+function IconHeaderButton({
+  children,
+  title,
+  onClick,
+}: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-subtle bg-surface-raised text-secondary transition hover:border-strong hover:text-primary"
+    >
+      {children}
+    </button>
   );
 }

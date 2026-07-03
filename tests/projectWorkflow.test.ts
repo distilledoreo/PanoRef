@@ -14,7 +14,7 @@ describe('project workflow logic', () => {
     const project = createDefaultProject();
     expect(project.schemaVersion).toBe('0.1');
     expect(project.scene.objects.length).toBeGreaterThan(0);
-    expect(project.scene.panoOrigin).toEqual([0, 1.6, 0]);
+    expect(project.scene.panoOrigin).toEqual([0, 1.65, 0]);
     expect(project.scene.objects.find((object) => object.name === 'Main Temple Gate')?.transform.position[2]).toBeGreaterThan(0);
     expect(project.scene.objects.find((object) => object.name === 'Man Facing Camera')?.transform.position[2]).toBeGreaterThan(0);
     expect(project.landmarks[0].promptCritical).toBe(true);

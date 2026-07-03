@@ -1,1 +1,72 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --surface-base: #f5f3ef;
+  --surface-raised: #ffffff;
+  --surface-overlay: rgba(255, 255, 255, 0.92);
+  --surface-muted: #ebe8e3;
+  --border-subtle: #e4e0d9;
+  --border-strong: #d4cfc6;
+  --text-primary: #1c1917;
+  --text-secondary: #78716c;
+  --text-muted: #a8a29e;
+  --accent: #0d9488;
+  --accent-hover: #0f766e;
+  --accent-soft: #ccfbf1;
+  --accent-glow: rgba(13, 148, 136, 0.35);
+  --success: #16a34a;
+  --success-soft: #dcfce7;
+  --warning: #ea580c;
+  --warning-soft: #ffedd5;
+  --danger: #dc2626;
+  --shadow-soft: 0 4px 24px rgba(28, 25, 23, 0.08);
+  --shadow-card: 0 2px 12px rgba(28, 25, 23, 0.06);
+  --radius-card: 14px;
+  --radius-pill: 999px;
+}
+
+.dark {
+  --surface-base: #0f1419;
+  --surface-raised: #1a222d;
+  --surface-overlay: rgba(26, 34, 45, 0.94);
+  --surface-muted: #243040;
+  --border-subtle: #2a3544;
+  --border-strong: #3a4a5c;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-soft: rgba(45, 212, 191, 0.12);
+  --accent-glow: rgba(45, 212, 191, 0.4);
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.12);
+  --warning: #fb923c;
+  --warning-soft: rgba(251, 146, 60, 0.12);
+  --danger: #f87171;
+  --shadow-soft: 0 4px 32px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.35);
+}
+
+body {
+  background: var(--surface-base);
+  color: var(--text-primary);
+}
+
+@layer utilities {
+  .bg-surface-base { background-color: var(--surface-base); }
+  .bg-surface-raised { background-color: var(--surface-raised); }
+  .bg-surface-overlay { background-color: var(--surface-overlay); }
+  .bg-surface-muted { background-color: var(--surface-muted); }
+  .bg-accent-soft { background-color: var(--accent-soft); }
+  .text-primary { color: var(--text-primary); }
+  .text-secondary { color: var(--text-secondary); }
+  .text-muted { color: var(--text-muted); }
+  .text-accent { color: var(--accent); }
+  .border-subtle { border-color: var(--border-subtle); }
+  .border-strong { border-color: var(--border-strong); }
+  .shadow-soft { box-shadow: var(--shadow-soft); }
+  .shadow-card { box-shadow: var(--shadow-card); }
+}

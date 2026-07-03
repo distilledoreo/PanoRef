@@ -34,10 +34,17 @@ const primitiveDefaults: Record<SceneObjectType, { dimensions: Vec3; category: S
   sun_marker: { dimensions: [0.8, 0.8, 0.8], category: 'helper' },
 };
 
+export const DEFAULT_CAMERA_LENS_MM = 35;
+export const DEFAULT_CAMERA_FOV_DEGREES = 54.4;
+export const DEFAULT_CAMERA_HEIGHT_METERS = 1.65;
+export const DEFAULT_CAMERA_ASPECT_RATIO = 16 / 9;
+
 export const defaultProjectSettings = {
   defaultShotWidth: 1920,
   defaultShotHeight: 1080,
-  defaultShotFovDegrees: 55,
+  defaultShotFovDegrees: DEFAULT_CAMERA_FOV_DEGREES,
+  defaultCameraLensMm: DEFAULT_CAMERA_LENS_MM,
+  defaultCameraHeightMeters: DEFAULT_CAMERA_HEIGHT_METERS,
   panoGoodMatchMeters: 1.5,
   panoModerateMatchMeters: 4,
   panoLetterboxExports169: true,
@@ -157,7 +164,7 @@ export function createOriginShot(
     [origin[0], origin[1], origin[2] + 10],
     project.settings.defaultShotFovDegrees,
   );
-  camera.aspectRatio = project.settings.defaultShotWidth / project.settings.defaultShotHeight;
+  camera.aspectRatio = DEFAULT_CAMERA_ASPECT_RATIO;
   const shot = createShot({ index, camera });
   shot.name = `Camera ${String(index).padStart(3, '0')}`;
   return shot;
@@ -319,7 +326,7 @@ export function createDefaultProject(): LocationProject {
   const scene = {
     worldUp: 'Y' as const,
     objects: starterObjects,
-    panoOrigin: [0, 1.6, 0] as Vec3,
+    panoOrigin: [0, DEFAULT_CAMERA_HEIGHT_METERS, 0] as Vec3,
     panoRotation: [0, 0, 0] as Vec3,
   };
 
