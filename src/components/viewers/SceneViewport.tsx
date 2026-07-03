@@ -31,12 +31,12 @@ import {
   horizontalFlyDirections,
   type FlyCameraState,
 } from '../../engine/sync';
-import { computeCenteredFrameRendererRects, computeFullCssRendererRect, type CssRendererRect } from '../../engine/viewport';
+import { computeFullCssRendererRect, type CssRendererRect } from '../../engine/viewport';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { useThemeStore } from '../../state/useThemeStore';
 import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 
-type DragKind = 'idle' | 'orbit' | 'object' | 'gizmo_translate' | 'gizmo_rotate' | 'gizmo_scale' | 'pano_origin' | 'place' | 'shot_framing';
+type DragKind = 'idle' | 'orbit' | 'gizmo_translate' | 'gizmo_rotate' | 'gizmo_scale' | 'pano_origin' | 'place' | 'shot_framing';
 
 const FLY_SPEED = 6;
 const FLY_SPRINT_MULTIPLIER = 2.4;
@@ -48,8 +48,6 @@ interface DragState {
   y: number;
   moved: boolean;
   forceOrbit?: boolean;
-  objectId?: string;
-  objectOffset?: Vec3;
   gizmoAxis?: GizmoAxis;
   gizmoScaleAxis?: GizmoAxis | 'uniform';
   gizmoStartPosition?: Vec3;
@@ -358,16 +356,11 @@ export function SceneViewport({
           framing.frameAspectRatio,
         );
 
-        const { clear, frame } = computeCenteredFrameRendererRects(cssWidth, cssHeight, framing.frameAspectRatio);
-        activeRenderer.setScissorTest(true);
-        activeRenderer.setClearColor(theme === 'dark' ? 0x0f1419 : 0xf3f6f4, 1);
-        setRendererRect(activeRenderer, 'viewport', clear);
-        setRendererRect(activeRenderer, 'scissor', clear);
-        activeRenderer.clear();
-        setRendererRect(activeRenderer, 'viewport', frame);
-        setRendererRect(activeRenderer, 'scissor', frame);
-        activeRenderer.render(activeScene, activeCamera);
+        const viewport = computeFullCssRendererRect(cssWidth, cssHeight);
+        setRendererRect(activeRenderer, 'viewport', viewport);
+        setRendererRect(activeRenderer, 'scissor', viewport);
         activeRenderer.setScissorTest(false);
+        activeRenderer.render(activeScene, activeCamera);
       } else {
         const viewport = computeFullCssRendererRect(cssWidth, cssHeight);
         setRendererRect(activeRenderer, 'viewport', viewport);
@@ -566,28 +559,8 @@ export function SceneViewport({
           return;
         }
       }
-      if (
-        inSelectMode
-        && hitObject
-        && !hitObject.locked
-        && floorPoint
-        && onMoveObject
-      ) {
+      if (inSelectMode && hitObject && !hitObject.locked) {
         onSelectObject?.(hitObject.id);
-        dragRef.current = {
-          kind: 'object',
-          x: event.clientX,
-          y: event.clientY,
-          moved: false,
-          objectId: hitObject.id,
-          objectOffset: [
-            hitObject.transform.position[0] - floorPoint[0],
-            hitObject.transform.position[1],
-            hitObject.transform.position[2] - floorPoint[2],
-          ],
-        };
-        canvas.setPointerCapture(event.pointerId);
-        return;
       }
 
       beginOrbitDrag(event);
@@ -609,19 +582,9 @@ export function SceneViewport({
       drag.x = event.clientX;
       drag.y = event.clientY;
 
-      const { onMoveObject, onMovePanoOrigin } = callbacksRef.current;
+      const { onMovePanoOrigin } = callbacksRef.current;
       const activeProject = projectRef.current;
       const activeSnapToGrid = snapToGridRef.current;
-
-      if (drag.kind === 'object' && drag.objectId && drag.objectOffset && pointer?.floorPoint && onMoveObject) {
-        onMoveObject(drag.objectId, [
-          pointer.floorPoint[0] + drag.objectOffset[0],
-          drag.objectOffset[1],
-          pointer.floorPoint[2] + drag.objectOffset[2],
-        ]);
-        syncTransformGizmo();
-        return;
-      }
 
       const {
         onMoveObjectInSpace,
@@ -939,7 +902,7 @@ export function SceneViewport({
           aspectRatio={shotFraming.frameAspectRatio}
           fovDegrees={shotFraming.camera.fovDegrees}
           resolutionLabel={shotFraming.frameResolutionLabel}
-          variant="compact"
+          variant="full"
         />
       )}
     </div>

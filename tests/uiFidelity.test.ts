@@ -31,9 +31,10 @@ describe('ui revamp fidelity surfaces', () => {
     expect(overlay).not.toContain('border-teal-500');
   });
 
-  it('uses compact shot viewfinder framing in the shots viewport', () => {
+  it('uses full-bleed shot viewfinder framing in the shots viewport', () => {
     const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
-    expect(viewport).toContain('variant="compact"');
+    expect(viewport).toContain('variant="full"');
+    expect(viewport).not.toContain('computeCenteredFrameRendererRects');
   });
 
   it('keeps empty pano viewer materials theme-aware in dark mode', () => {
@@ -61,6 +62,8 @@ describe('ui revamp fidelity surfaces', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
     const defaults = readFileSync(new URL('../src/domain/defaults.ts', import.meta.url), 'utf8');
     expect(build).toContain('Download Graybox 360');
+    expect(build).toContain('grayboxDownloadPrompt');
+    expect(build).toContain('Not now');
     expect(build).toContain('letterboxEnabled: false');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT = 2048');

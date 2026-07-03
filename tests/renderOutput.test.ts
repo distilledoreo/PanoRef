@@ -39,6 +39,7 @@ describe('rendered shot output', () => {
     expect(storeSource).toMatch(/renderGrayboxEquirectangularPano\(state\.project/);
     expect(storeSource).toContain('useThemeStore.getState().theme');
     expect(storeSource).not.toContain('renderGrayboxEquirectangularPano(state.project, 2048, 1024)');
+    expect(storeSource).not.toMatch(/renderGrayboxPano:[\s\S]*downloadDataUrl/);
   });
 
   it('applies linked pano rotation to local reference exports', () => {

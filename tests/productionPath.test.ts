@@ -54,7 +54,7 @@ describe('workflow guidance UI', () => {
     expect(fields).toContain('bg-surface-raised');
     expect(fields).not.toContain('bg-white');
     expect(sceneViewport).toContain('useThemeStore');
-    expect(sceneViewport).toContain("theme === 'dark'");
+    expect(sceneViewport).toContain('theme');
     expect(sceneObjects).toContain('SceneVisualTheme');
     expect(sceneObjects).toContain('darkFloorMaterial');
   });

@@ -33,7 +33,7 @@ import {
   multiplyScalar,
 } from '../engine/sync';
 import { renderGrayboxEquirectangularPano } from '../engine/renderers';
-import { downloadDataUrl } from '../engine/projectIO';
+
 import { useThemeStore } from './useThemeStore';
 import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition, snapBuildPoint } from '../engine/sandbox';
 
@@ -364,7 +364,6 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         })),
         activePanoId: pano.id,
       }));
-      downloadDataUrl(render.dataUrl, asset.name);
       return pano;
     } finally {
       set({ isRenderingGraybox: false });
