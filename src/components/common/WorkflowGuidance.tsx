@@ -82,6 +82,7 @@ export function WorkflowGuidance() {
     selectedShotId,
     shotCameraFlying,
     dismissedWorkflowAdvanceKeys,
+    seenObjectiveWorkspaces,
     objectiveModalRequest,
     alignmentIntroRequest,
     alignmentRetryModalRequest,
@@ -153,6 +154,20 @@ export function WorkflowGuidance() {
     }
   }, [objectiveModalRequest, alignmentPending]);
 
+  useEffect(() => {
+    if (workspace !== 'reference' || !showReferencePromptBuilder) return;
+    if (seenObjectiveWorkspaces.includes('reference')) return;
+    if (advanceOpen && advancePrompt) return;
+    setObjectiveOpen(true);
+    setAlignmentIntroOpen(false);
+  }, [
+    workspace,
+    showReferencePromptBuilder,
+    seenObjectiveWorkspaces,
+    advanceOpen,
+    advancePrompt?.promptKey,
+  ]);
+
   const closeObjective = () => {
     setObjectiveOpen(false);
     markObjectiveSeen(workspace);
@@ -167,9 +182,18 @@ export function WorkflowGuidance() {
 
   const handleAdvanceNext = () => {
     if (!advancePrompt) return;
-    dismissWorkflowAdvance(advancePrompt.promptKey);
+    const { nextStep, promptKey } = advancePrompt;
+    const shouldOpenReferenceObjective = nextStep === 'reference'
+      && hasGrayboxPano(project)
+      && !hasStyledCanonicalPano(project)
+      && !seenObjectiveWorkspaces.includes('reference');
+    dismissWorkflowAdvance(promptKey);
     setAdvanceOpen(false);
-    setWorkspace(advancePrompt.nextStep);
+    setWorkspace(nextStep);
+    if (shouldOpenReferenceObjective) {
+      setObjectiveOpen(true);
+      setAlignmentIntroOpen(false);
+    }
   };
 
   const handleAdvanceDismiss = () => {

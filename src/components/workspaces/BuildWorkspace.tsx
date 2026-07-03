@@ -78,7 +78,6 @@ export function BuildWorkspace() {
   const [layersOpen, setLayersOpen] = useState(false);
   const [showSceneGuides, setShowSceneGuides] = useState(false);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('translate');
-  const [grayboxDownloadPrompt, setGrayboxDownloadPrompt] = useState(false);
   const {
     project,
     selectedObjectId,
@@ -350,46 +349,10 @@ export function BuildWorkspace() {
         />
 
         <div className="pointer-events-none absolute bottom-6 right-6 z-10 flex flex-col items-end gap-2">
-          {grayboxDownloadPrompt && grayboxAsset && grayboxPano && (
-            <ContextualPanel className="pointer-events-auto max-w-xs text-sm">
-              <p className="text-secondary">Graybox 360 rendered. Download the PNG now?</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void downloadPanoImage(
-                    grayboxAsset.uri,
-                    grayboxPano.width,
-                    grayboxPano.height,
-                    grayboxAsset.name || 'global_graybox.png',
-                    {
-                      letterboxEnabled: false,
-                      targetWidth: project.settings.defaultShotWidth,
-                      targetHeight: project.settings.defaultShotHeight,
-                    },
-                    downloadDataUrl,
-                  )}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-accent-soft px-3 py-1.5 text-xs font-medium text-accent transition hover:opacity-90"
-                >
-                  <FileDown className="h-3.5 w-3.5" />
-                  Download PNG
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGrayboxDownloadPrompt(false)}
-                  className="rounded-lg border border-subtle px-3 py-1.5 text-xs font-medium text-secondary transition hover:text-primary"
-                >
-                  Not now
-                </button>
-              </div>
-            </ContextualPanel>
-          )}
           <PrimaryCTA
             icon={<Globe className="h-5 w-5" />}
             label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
-            onClick={() => {
-              setGrayboxDownloadPrompt(false);
-              void renderGrayboxPano().then(() => setGrayboxDownloadPrompt(true));
-            }}
+            onClick={() => void renderGrayboxPano()}
             disabled={isRenderingGraybox}
             highlighted={primaryAction?.id === 'render-graybox'}
             appearance={theme === 'dark' ? 'glow-outline' : 'solid'}

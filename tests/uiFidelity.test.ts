@@ -58,13 +58,18 @@ describe('ui revamp fidelity surfaces', () => {
     expect(filmstrip).not.toContain('Shot ${shot.shotNumber} options');
   });
 
-  it('shows a visible native graybox 360 download action in build', () => {
+  it('keeps native graybox download in build and surfaces it in the reference starting modal', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    const guidance = readFileSync(new URL('../src/components/common/WorkflowGuidance.tsx', import.meta.url), 'utf8');
+    const referenceGuide = readFileSync(new URL('../src/components/common/GrayboxReferenceGuide.tsx', import.meta.url), 'utf8');
     const defaults = readFileSync(new URL('../src/domain/defaults.ts', import.meta.url), 'utf8');
     expect(build).toContain('Download Graybox 360');
-    expect(build).toContain('grayboxDownloadPrompt');
-    expect(build).toContain('Not now');
+    expect(build).not.toContain('grayboxDownloadPrompt');
     expect(build).toContain('letterboxEnabled: false');
+    expect(guidance).toContain('showReferencePromptBuilder');
+    expect(guidance).toContain('seenObjectiveWorkspaces.includes(\'reference\')');
+    expect(referenceGuide).toContain('Your graybox 360 is ready');
+    expect(referenceGuide).toContain('Download the graybox image.');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT = 2048');
   });

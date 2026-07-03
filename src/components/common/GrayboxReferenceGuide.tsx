@@ -120,6 +120,10 @@ export function GrayboxReferencePromptBuilder({
 }) {
   return (
     <div className="space-y-6">
+      <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-[15px] leading-relaxed text-teal-900">
+        Your graybox 360 is ready. Download the PNG below, then use the prompt with your image AI.
+      </div>
+
       <p className="text-[15px] leading-relaxed text-zinc-700">
         Turn the graybox into a finished 360 pano using any image AI you like.
       </p>
