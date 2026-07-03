@@ -22,6 +22,7 @@ import {
   TreeDeciduous,
   Unlock,
   User,
+  Wrench,
 } from 'lucide-react';
 import { SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import { objectDisplayName } from '../../domain/defaults';
@@ -62,6 +63,8 @@ const trayItems: Array<{ type: SceneObjectType; label: string; icon: React.Compo
   { type: 'background_card', label: 'Backdrop', icon: Columns3 },
   { type: 'human_dummy', label: 'Person', icon: User },
 ];
+const primaryTrayItems = trayItems.slice(0, 8);
+const overflowTrayItems = trayItems.slice(8);
 
 export function BuildWorkspace() {
   const [precisionOpen, setPrecisionOpen] = useState(false);
@@ -268,7 +271,6 @@ export function BuildWorkspace() {
           <PrimaryCTA
             icon={<Globe className="h-5 w-5" />}
             label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
-            hint={grayboxPano ? 'Graybox ready — open Reference to approve.' : 'Capture the graybox pano for Reference.'}
             onClick={() => void renderGrayboxPano()}
             disabled={isRenderingGraybox}
             highlighted={primaryAction?.id === 'render-graybox'}
@@ -348,33 +350,42 @@ function BuildObjectTray({
   onPrimitiveChange: (type: SceneObjectType) => void;
   onGridSnapChange: (value: boolean) => void;
 }) {
+  const [toolsOpen, setToolsOpen] = useState(false);
+
   return (
-    <div className="pointer-events-none absolute bottom-6 left-1/2 z-10 w-[min(920px,calc(100%-2rem))] -translate-x-1/2">
-      <div className="pointer-events-auto rounded-[var(--radius-pill)] border border-subtle bg-surface-overlay px-4 py-3 shadow-soft backdrop-blur">
-        <div className="flex items-center gap-1 overflow-x-auto">
-          <TrayButton
-            active={buildMode === 'select'}
-            label="Select"
-            onClick={() => onModeChange('select')}
-          >
-            <Move3D className="h-5 w-5" />
-          </TrayButton>
-          <TrayButton
-            active={buildMode === 'pano_origin'}
-            label="Origin"
-            onClick={() => onModeChange('pano_origin')}
-          >
-            <Grid3X3 className="h-5 w-5" />
-          </TrayButton>
-          <TrayButton
-            active={gridSnap}
-            label="Snap"
-            onClick={() => onGridSnapChange(!gridSnap)}
-          >
-            <Grid3X3 className="h-5 w-5" />
-          </TrayButton>
-          <span className="mx-1 h-8 w-px shrink-0 bg-border-subtle" />
-          {trayItems.map(({ type, label, icon: Icon }) => (
+    <div className="pointer-events-none absolute bottom-6 left-6 z-10 max-w-[calc(100%-2rem)]">
+      {toolsOpen && (
+        <div className="pointer-events-auto mb-2 w-72 rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-3 shadow-soft backdrop-blur">
+          <div className="mb-2 grid grid-cols-3 gap-2">
+            <TrayButton active={buildMode === 'select'} label="Select" compact onClick={() => onModeChange('select')}>
+              <Move3D className="h-4 w-4" />
+            </TrayButton>
+            <TrayButton active={buildMode === 'pano_origin'} label="Origin" compact onClick={() => onModeChange('pano_origin')}>
+              <Grid3X3 className="h-4 w-4" />
+            </TrayButton>
+            <TrayButton active={gridSnap} label="Snap" compact onClick={() => onGridSnapChange(!gridSnap)}>
+              <Grid3X3 className="h-4 w-4" />
+            </TrayButton>
+          </div>
+          <div className="grid grid-cols-2 gap-2 border-t border-subtle pt-2">
+            {overflowTrayItems.map(({ type, label, icon: Icon }) => (
+              <div key={type}>
+                <TrayButton
+                  active={buildMode === 'place' && activePrimitive === type}
+                  label={label}
+                  compact
+                  onClick={() => onPrimitiveChange(type)}
+                >
+                  <Icon className="h-4 w-4" />
+                </TrayButton>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="pointer-events-auto rounded-[22px] border border-subtle bg-surface-overlay px-3 py-2.5 shadow-soft backdrop-blur">
+        <div className="flex items-center gap-1">
+          {primaryTrayItems.map(({ type, label, icon: Icon }) => (
             <div key={type}>
               <TrayButton
                 active={buildMode === 'place' && activePrimitive === type}
@@ -385,6 +396,9 @@ function BuildObjectTray({
               </TrayButton>
             </div>
           ))}
+          <TrayButton active={toolsOpen} label="More" onClick={() => setToolsOpen((open) => !open)}>
+            <Wrench className="h-5 w-5" />
+          </TrayButton>
         </div>
       </div>
     </div>
@@ -394,11 +408,13 @@ function BuildObjectTray({
 function TrayButton({
   active,
   label,
+  compact,
   children,
   onClick,
 }: {
   active?: boolean;
   label: string;
+  compact?: boolean;
   children: React.ReactNode;
   onClick: () => void;
 }) {
@@ -406,7 +422,9 @@ function TrayButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-16 shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition ${
+      className={`flex shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition ${
+        compact ? 'w-full' : 'w-16'
+      } ${
         active ? 'bg-accent-soft text-accent' : 'text-secondary hover:bg-surface-muted hover:text-primary'
       }`}
     >

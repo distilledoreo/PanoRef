@@ -2,14 +2,25 @@ import * as THREE from 'three';
 import { Landmark, LocationProject, SceneObject, SceneObjectType } from '../domain/types';
 import { degreesToRadians } from './sync';
 
-const materialByCategory: Record<SceneObject['category'], THREE.MeshStandardMaterial> = {
-  architecture: new THREE.MeshStandardMaterial({ color: 0xd8ddd7, roughness: 0.82 }),
-  environment: new THREE.MeshStandardMaterial({ color: 0x91a78f, roughness: 0.86 }),
-  helper: new THREE.MeshStandardMaterial({ color: 0xc79a48, roughness: 0.76 }),
-  landmark: new THREE.MeshStandardMaterial({ color: 0x5f9b7a, roughness: 0.65 }),
+export type SceneVisualTheme = 'light' | 'dark';
+
+const materialByTheme: Record<SceneVisualTheme, Record<SceneObject['category'], THREE.MeshStandardMaterial>> = {
+  light: {
+    architecture: new THREE.MeshStandardMaterial({ color: 0xd8ddd7, roughness: 0.82 }),
+    environment: new THREE.MeshStandardMaterial({ color: 0x91a78f, roughness: 0.86 }),
+    helper: new THREE.MeshStandardMaterial({ color: 0xc79a48, roughness: 0.76 }),
+    landmark: new THREE.MeshStandardMaterial({ color: 0x5f9b7a, roughness: 0.65 }),
+  },
+  dark: {
+    architecture: new THREE.MeshStandardMaterial({ color: 0xbec4bf, roughness: 0.86 }),
+    environment: new THREE.MeshStandardMaterial({ color: 0x8b9790, roughness: 0.9 }),
+    helper: new THREE.MeshStandardMaterial({ color: 0xb8843a, roughness: 0.78 }),
+    landmark: new THREE.MeshStandardMaterial({ color: 0x4ab49c, roughness: 0.65 }),
+  },
 };
 
 const selectedMaterial = new THREE.MeshStandardMaterial({ color: 0x14b8a6, roughness: 0.52 });
+const darkFloorMaterial = new THREE.MeshStandardMaterial({ color: 0x242c32, roughness: 0.92 });
 const panoOriginMaterial = new THREE.MeshStandardMaterial({ color: 0xd08a28, emissive: 0x3a2306 });
 const landmarkMaterial = new THREE.MeshStandardMaterial({ color: 0x5f9b7a, emissive: 0x0b2e1e });
 const robeMaterial = new THREE.MeshStandardMaterial({ color: 0xb9a27e, roughness: 0.9 });
@@ -17,8 +28,10 @@ const skinMaterial = new THREE.MeshStandardMaterial({ color: 0x9a6a4a, roughness
 const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x111111 });
 
 const SHARED_MATERIALS = new Set<THREE.Material>([
-  ...Object.values(materialByCategory),
+  ...Object.values(materialByTheme.light),
+  ...Object.values(materialByTheme.dark),
   selectedMaterial,
+  darkFloorMaterial,
   panoOriginMaterial,
   landmarkMaterial,
   robeMaterial,
@@ -35,27 +48,34 @@ export function buildScene(
     showHelpers?: boolean;
     hiddenObjectTypes?: SceneObjectType[];
     previewObject?: SceneObject;
+    theme?: SceneVisualTheme;
   } = {},
 ) {
+  const theme = options.theme ?? 'light';
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf3f6f4);
+  scene.background = new THREE.Color(theme === 'dark' ? 0x0f1419 : 0xf3f6f4);
   const hiddenTypes = new Set(options.hiddenObjectTypes ?? []);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 1.45);
+  const ambient = new THREE.AmbientLight(0xffffff, theme === 'dark' ? 0.82 : 1.45);
   scene.add(ambient);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 1.9);
+  const sun = new THREE.DirectionalLight(0xffffff, theme === 'dark' ? 1.35 : 1.9);
   sun.position.set(4, 6, 3);
   scene.add(sun);
 
-  const grid = new THREE.GridHelper(14, 14, 0x9aa7a2, 0xd7dedb);
+  const grid = new THREE.GridHelper(
+    14,
+    14,
+    theme === 'dark' ? 0x2f3a44 : 0x9aa7a2,
+    theme === 'dark' ? 0x1b252d : 0xd7dedb,
+  );
   grid.position.y = 0.002;
   scene.add(grid);
 
   for (const object of project.scene.objects) {
     if (!object.visible) continue;
     if (hiddenTypes.has(object.type)) continue;
-    const mesh = createObject3D(object, object.id === options.selectedObjectId);
+    const mesh = createObject3D(object, object.id === options.selectedObjectId, theme);
     mesh.userData.sceneObjectId = object.id;
     scene.add(mesh);
   }
@@ -91,9 +111,13 @@ export function buildScene(
   return scene;
 }
 
-export function createObject3D(object: SceneObject, selected = false): THREE.Object3D {
+export function createObject3D(object: SceneObject, selected = false, theme: SceneVisualTheme = 'light'): THREE.Object3D {
   let node: THREE.Object3D;
-  const material = selected ? selectedMaterial : materialByCategory[object.category];
+  const material = selected
+    ? selectedMaterial
+    : theme === 'dark' && object.type === 'floor'
+      ? darkFloorMaterial
+      : materialByTheme[theme][object.category];
   const [w, h, d] = object.dimensions;
 
   switch (object.type) {
@@ -116,16 +140,16 @@ export function createObject3D(object: SceneObject, selected = false): THREE.Obj
       node = createStairs(object, material);
       break;
     case 'tree_blob':
-      node = createTreeBlob(object);
+      node = createTreeBlob(object, theme);
       break;
     case 'terrain_mass':
       node = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), material);
       break;
     case 'human_dummy':
-      node = createHumanDummy(object);
+      node = createHumanDummy(object, theme);
       break;
     case 'sun_marker':
-      node = createSunMarker(object);
+      node = createSunMarker(object, theme);
       break;
     default:
       node = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -187,17 +211,17 @@ function createStairs(object: SceneObject, material: THREE.Material): THREE.Grou
   return group;
 }
 
-function createTreeBlob(object: SceneObject): THREE.Group {
+function createTreeBlob(object: SceneObject, theme: SceneVisualTheme): THREE.Group {
   const [w, h, d] = object.dimensions;
   const group = new THREE.Group();
   const trunk = new THREE.Mesh(
     new THREE.CylinderGeometry(w * 0.12, w * 0.16, h * 0.45, 12),
-    new THREE.MeshStandardMaterial({ color: 0x7c5a3a, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({ color: theme === 'dark' ? 0x6f5b47 : 0x7c5a3a, roughness: 0.9 }),
   );
   trunk.position.y = -h * 0.18;
   const crown = new THREE.Mesh(
     new THREE.SphereGeometry(Math.max(w, d) * 0.48, 20, 14),
-    new THREE.MeshStandardMaterial({ color: 0x6fa36c, roughness: 0.85 }),
+    new THREE.MeshStandardMaterial({ color: theme === 'dark' ? 0x7f8d84 : 0x6fa36c, roughness: 0.85 }),
   );
   crown.scale.y = 0.85;
   crown.position.y = h * 0.18;
@@ -205,7 +229,7 @@ function createTreeBlob(object: SceneObject): THREE.Group {
   return group;
 }
 
-function createHumanDummy(object: SceneObject): THREE.Group {
+function createHumanDummy(object: SceneObject, theme: SceneVisualTheme): THREE.Group {
   const [, h] = object.dimensions;
   const group = new THREE.Group();
   const body = new THREE.Mesh(
@@ -221,17 +245,17 @@ function createHumanDummy(object: SceneObject): THREE.Group {
   rightEye.position.x = 0.06;
   const robeFold = new THREE.Mesh(
     new THREE.BoxGeometry(0.05, h * 0.54, 0.02),
-    new THREE.MeshStandardMaterial({ color: 0x80664c, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({ color: theme === 'dark' ? 0x6b5848 : 0x80664c, roughness: 0.9 }),
   );
   robeFold.position.set(0, -h * 0.1, -0.21);
   group.add(body, head, leftEye, rightEye, robeFold);
   return group;
 }
 
-function createSunMarker(_object: SceneObject): THREE.Group {
+function createSunMarker(_object: SceneObject, theme: SceneVisualTheme): THREE.Group {
   const group = new THREE.Group();
-  const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), materialByCategory.helper);
-  const ray = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.4, 8), materialByCategory.helper);
+  const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), materialByTheme[theme].helper);
+  const ray = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.4, 8), materialByTheme[theme].helper);
   ray.rotation.z = Math.PI / 2;
   ray.position.x = -0.65;
   group.add(sphere, ray);
@@ -266,8 +290,8 @@ function createLandmarkMarker(landmark: Landmark) {
   return group;
 }
 
-export function createPreviewMesh(object: SceneObject): THREE.Object3D {
-  const preview = createObject3D(object);
+export function createPreviewMesh(object: SceneObject, theme: SceneVisualTheme = 'light'): THREE.Object3D {
+  const preview = createObject3D(object, false, theme);
   preview.name = 'Placement Preview';
   preview.userData.previewObject = true;
   applyPreviewMaterial(preview);

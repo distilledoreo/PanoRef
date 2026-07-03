@@ -89,25 +89,25 @@ export function ExportWorkspace() {
 
   return (
     <FullBleedLayout>
-      <div className="flex h-full min-h-0 flex-col bg-surface-base p-6">
-        <header className="mb-6">
-          <h1 className="text-2xl font-semibold text-primary">Export Your Shots</h1>
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-base p-5">
+        <header className="mb-4 shrink-0">
+          <h1 className="text-xl font-semibold text-primary">Export Your Shots</h1>
           <p className="mt-1 text-sm text-secondary">Choose what to export. Each shot is packaged individually.</p>
         </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
-          <div className="flex flex-col items-center justify-center rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-8 shadow-card">
-            <div className="mb-6 flex items-end gap-3">
-              <div className="flex h-20 w-24 items-center justify-center rounded-xl bg-[var(--accent)] text-white shadow-card">
-                <FolderArchive className="h-10 w-10" />
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
+          <div className="flex min-h-0 flex-col items-center justify-center overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-5 shadow-card">
+            <div className="mb-4 flex items-end gap-3">
+              <div className="flex h-16 w-20 items-center justify-center rounded-xl bg-[var(--accent)] text-white shadow-card">
+                <FolderArchive className="h-9 w-9" />
               </div>
               <div className="rounded-lg bg-surface-muted px-3 py-2 text-xs font-bold uppercase tracking-wider text-secondary">
                 ZIP
               </div>
             </div>
-            <ul className="w-full max-w-sm space-y-3">
+            <ul className="w-full max-w-sm space-y-2">
               {packageContents.map((item) => (
-                <li key={item.name} className="flex items-start gap-3 rounded-lg border border-subtle px-4 py-3">
+                <li key={item.name} className="flex items-start gap-3 rounded-lg border border-subtle px-3 py-2">
                   <Archive className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
                   <div>
                     <div className="font-mono text-sm font-medium text-primary">{item.name}</div>
@@ -117,7 +117,7 @@ export function ExportWorkspace() {
               ))}
             </ul>
             {manifest && (
-              <div className="mt-6 w-full max-w-sm space-y-1">
+              <div className="mt-4 max-h-14 w-full max-w-sm space-y-1 overflow-hidden">
                 {manifest.files.slice(0, 6).map((file) => (
                   <div key={file.path} className="truncate font-mono text-[10px] text-muted">{file.path}</div>
                 ))}
@@ -136,8 +136,8 @@ export function ExportWorkspace() {
             )}
           </div>
 
-          <div className="flex min-h-0 flex-col rounded-[var(--radius-card)] border border-subtle bg-surface-raised shadow-card">
-            <div className="border-b border-subtle px-5 py-4">
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised shadow-card">
+            <div className="shrink-0 border-b border-subtle px-5 py-4">
               <h2 className="font-semibold text-primary">Select Shots to Export</h2>
               <p className="text-xs text-secondary">{selectedShotIds.size} shot{selectedShotIds.size === 1 ? '' : 's'} selected</p>
             </div>
@@ -148,7 +148,7 @@ export function ExportWorkspace() {
                 return (
                   <label
                     key={shot.id}
-                    className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition ${
+                    className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
                       checked ? 'border-[var(--accent)] bg-accent-soft' : 'border-subtle hover:border-strong'
                     }`}
                   >
@@ -179,7 +179,7 @@ export function ExportWorkspace() {
                 <p className="text-sm text-secondary">No shots yet.</p>
               )}
             </div>
-            <div className="border-t border-subtle p-4">
+            <div className="shrink-0 border-t border-subtle p-3">
               <button
                 type="button"
                 onClick={() => setSettingsOpen(true)}

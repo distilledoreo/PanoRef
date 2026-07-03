@@ -124,7 +124,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   gridSnap: true,
   isRenderingGraybox: false,
   isExportingPackage: false,
-  shotCameraFlying: true,
+  shotCameraFlying: false,
   dismissedWorkflowAdvanceKeys: [],
   seenObjectiveWorkspaces: [],
   objectiveModalRequest: 0,
@@ -145,7 +145,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       selectedShotId: shot.id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
       panoView: panoViewFromCamera(shot.camera),
-      shotCameraFlying: true,
+      shotCameraFlying: false,
     };
   }),
   setProject: (project) => {
@@ -423,7 +423,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       selectedShotId: id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
       panoView: panoViewFromCamera(shot.camera),
-      shotCameraFlying: true,
+      shotCameraFlying: false,
     };
   }),
   setShotCameraFlying: (value) => set((state) => {
@@ -710,7 +710,7 @@ function addShotWithCamera(camera: CameraData, linkedPanoId?: string, name?: str
     }),
     selectedShotId: shot.id,
     workspace: 'shots',
-    shotCameraFlying: true,
+    shotCameraFlying: false,
   }));
 
   return shot;

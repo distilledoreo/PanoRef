@@ -190,26 +190,12 @@ export function PanoViewer({
   }, [onViewChange]);
 
   return (
-    <div className="relative h-full min-h-0 overflow-hidden bg-zinc-50" ref={containerRef}>
+    <div className="relative h-full min-h-0 overflow-hidden bg-surface-base" ref={containerRef}>
       {!imageUrl && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-zinc-50 text-zinc-500">
+        <div className="pointer-events-none absolute inset-0 z-0 flex flex-col items-center justify-center bg-surface-base text-secondary">
           <p className="text-sm font-medium">No panorama selected</p>
           <p className="mt-1 text-xs">Render a graybox pano or import a styled pano.</p>
         </div>
-      )}
-      <div className="pointer-events-none absolute left-4 top-4 rounded-md border border-white/70 bg-white/90 px-3 py-2 text-xs text-zinc-700 shadow-sm backdrop-blur">
-        {label ?? 'Panorama Reference'}
-      </div>
-      {imageUrl && (
-        <>
-          <div className="pointer-events-none absolute left-1/2 top-1/2 h-[52%] max-h-[70vh] w-[52%] max-w-[80vw] -translate-x-1/2 -translate-y-1/2 border border-teal-500/80 shadow-[0_0_0_9999px_rgba(244,246,244,0.18)]" />
-          <div className="pointer-events-none absolute bottom-4 right-4 flex flex-wrap gap-3 rounded-md border border-white/70 bg-white/90 px-3 py-2 font-mono text-xs text-zinc-700 shadow-sm backdrop-blur">
-            <span>YAW {normalizeYaw(view.yawDegrees).toFixed(1)}</span>
-            <span>PITCH {view.pitchDegrees.toFixed(1)}</span>
-            <span>FOV {view.fovDegrees.toFixed(1)}</span>
-            {compareImageUrl && <span>OPACITY {Math.round(clamp01(compareOpacity) * 100)}%</span>}
-          </div>
-        </>
       )}
     </div>
   );

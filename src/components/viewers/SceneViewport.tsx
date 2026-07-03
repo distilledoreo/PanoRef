@@ -13,6 +13,7 @@ import {
 } from '../../engine/sync';
 import { computeCenteredFrameRendererRects, computeFullCssRendererRect, type CssRendererRect } from '../../engine/viewport';
 import { useContinuityStore } from '../../state/useContinuityStore';
+import { useThemeStore } from '../../state/useThemeStore';
 import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 
 type DragKind = 'idle' | 'orbit' | 'object' | 'pano_origin' | 'place' | 'shot_framing';
@@ -68,12 +69,13 @@ export function SceneViewport({
   onMovePanoOrigin?: (origin: Vec3) => void;
   minHeightClassName?: string;
 }) {
+  const theme = useThemeStore((state) => state.theme);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const frameRef = useRef<number>(0);
-  const orbitRef = useRef({ yaw: -35, pitch: 22, distance: 11, target: new THREE.Vector3(0, 1.2, 0) });
+  const orbitRef = useRef({ yaw: -34, pitch: 28, distance: 15.5, target: new THREE.Vector3(0, 1.15, 1.25) });
   const dragRef = useRef<DragState>({ kind: 'idle', x: 0, y: 0, moved: false });
   const lastFloorPointRef = useRef<Vec3 | undefined>();
   const selectedObjectIdRef = useRef(selectedObjectId);
@@ -146,10 +148,10 @@ export function SceneViewport({
       point,
       snapToGrid: snapToGridRef.current,
     });
-    const preview = createPreviewMesh(previewObject);
+    const preview = createPreviewMesh(previewObject, theme);
     scene.add(preview);
     previewMeshRef.current = preview;
-  }, []);
+  }, [theme]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -246,7 +248,7 @@ export function SceneViewport({
 
         const { clear, frame } = computeCenteredFrameRendererRects(cssWidth, cssHeight, framing.frameAspectRatio);
         activeRenderer.setScissorTest(true);
-        activeRenderer.setClearColor(0xf3f6f4, 1);
+        activeRenderer.setClearColor(theme === 'dark' ? 0x0f1419 : 0xf3f6f4, 1);
         setRendererRect(activeRenderer, 'viewport', clear);
         setRendererRect(activeRenderer, 'scissor', clear);
         activeRenderer.clear();
@@ -516,7 +518,7 @@ export function SceneViewport({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [emitFramingCamera]);
+  }, [emitFramingCamera, theme]);
 
   useEffect(() => {
     if (!shotFraming?.flyActive) {
@@ -551,26 +553,18 @@ export function SceneViewport({
       selectedObjectId,
       selectedShotId,
       hideShotFrustums: Boolean(shotFraming),
+      theme,
     });
     if (previewPointRef.current && placementTypeRef.current) {
       updatePreviewMesh(previewPointRef.current);
     }
-  }, [project, selectedObjectId, selectedShotId, shotFraming, updatePreviewMesh]);
+  }, [project, selectedObjectId, selectedShotId, shotFraming, theme, updatePreviewMesh]);
 
   useEffect(() => {
     if (previewPointRef.current) updatePreviewMesh(previewPointRef.current);
     else clearPreviewMesh();
   }, [placementType, snapToGrid, clearPreviewMesh, updatePreviewMesh]);
 
-  const modeLabel = shotFraming
-    ? shotFraming.flyActive
-      ? 'Fly Camera'
-      : 'Camera Locked'
-    : placementType
-      ? `Stamping ${placementLabel ?? objectDisplayName(placementType)}`
-      : originPlacementActive
-        ? 'Origin'
-        : 'Select';
   const cursorClass = shotFraming
     ? 'cursor-crosshair'
     : placementType
@@ -581,13 +575,10 @@ export function SceneViewport({
 
   return (
     <div
-      className={`relative h-full ${minHeightClassName} overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 shadow-sm ${cursorClass}`}
+      className={`relative h-full ${minHeightClassName} overflow-hidden bg-surface-base ${cursorClass}`}
       data-testid="scene-viewport"
       ref={containerRef}
     >
-      <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-md border border-white/20 bg-zinc-950/75 px-3 py-2 text-xs text-zinc-100 shadow-sm backdrop-blur">
-        {modeLabel}
-      </div>
       {shotFraming && (
         <>
           <ShotViewfinderOverlay
@@ -604,13 +595,6 @@ export function SceneViewport({
           </div>
         </>
       )}
-      <div className="pointer-events-none absolute bottom-4 right-4 z-20 rounded-md border border-white/20 bg-white/85 px-3 py-2 text-xs text-zinc-700 shadow-sm backdrop-blur">
-        {shotFraming
-          ? shotFraming.flyActive
-            ? 'Drag to look · WASD fly · Space up · Shift down · left-click to lock'
-            : 'Camera locked · Fly Camera to adjust · scroll changes FOV'
-          : 'Stamp: click to place · Select: drag pieces · Shift/middle/right-drag orbits · scroll zoom'}
-      </div>
     </div>
   );
 }

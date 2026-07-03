@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 const downloadDir = resolve(repoRoot, 'artifacts/ai-brief-smoke');
-const appUrl = process.env.CONTINUITY_STAGE_URL ?? 'http://127.0.0.1:3001';
+const appUrl = process.env.CONTINUITY_STAGE_URL ?? 'http://127.0.0.1:3000';
 const chromePath = process.env.CHROME_PATH ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const debugPort = Number(process.env.CHROME_DEBUG_PORT ?? 9331);
 const profileDir = resolve(repoRoot, '.tmp-goal-chrome-profile');
@@ -38,36 +38,37 @@ try {
   await client.send('Page.navigate', { url: appUrl });
   await waitFor(client, 'document.title === "Continuity Stage" && document.body.textContent.includes("Reference")', 'app shell');
 
-  await clickOptionalButton(client, 'Got it');
-
-  await clickButton(client, 'Render Graybox 360');
-  await waitFor(client, 'document.body.textContent.includes("Graybox ready")', 'graybox pano');
-  await clickOptionalButton(client, 'Continue to Reference');
+  await clickButton(client, 'Render 360 Reference');
+  await waitFor(client, 'document.body.textContent.includes("Build is ready")', 'graybox pano');
+  await clickButton(client, 'Continue to Reference');
 
   await clickButton(client, 'Reference');
   await clickButton(client, 'Use Attached Reference');
-  await waitFor(client, 'document.body.textContent.includes("attached-canonical-reference")', 'attached reference');
-  await clickOptionalButton(client, 'Continue to Shots');
+  await waitFor(client, 'document.body.textContent.includes("Check pano alignment")', 'attached reference alignment');
+  await clickOptionalButton(client, 'Start checking');
+  await clickButton(client, 'Approve as Reference');
+  await waitFor(client, 'document.body.textContent.includes("Reference is ready")', 'approved reference');
+  await clickButton(client, 'Continue to Shots');
 
   await clickButton(client, 'Shots');
   await waitFor(client, 'document.body.textContent.includes("Camera 001")', 'origin camera');
 
   await clickButton(client, 'Review');
-  await clickButton(client, 'Export AI Brief ZIP');
+  await clickButton(client, 'Export AI Brief');
   const zipPath = await waitForDownloadedZip(downloadDir);
   await importAiResultFrame(client);
   await waitForValue(
     client,
     `(() => {
       const image = [...document.querySelectorAll('img')]
-        .find((candidate) => candidate.alt === 'AI Result Frame' && candidate.src.startsWith('data:image'));
+        .find((candidate) => candidate.src.startsWith('data:image'));
       return image ? 'ok' : '';
     })()`,
     'imported AI result frame',
   );
 
   await clickButton(client, 'Export');
-  await clickButton(client, 'Export ZIP');
+  await clickButton(client, 'Export Selected Shots');
   await waitFor(client, 'document.body.textContent.includes("shot_001/outputs/ai_result_frame.png")', 'final package export with AI result');
 
   const questState = await evaluate(client, `

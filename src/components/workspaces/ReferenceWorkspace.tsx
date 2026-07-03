@@ -14,6 +14,7 @@ import { PrimaryCTA } from '../common/PrimaryCTA';
 import { PanoViewer } from '../viewers/PanoViewer';
 import {
   hasReferenceCandidate,
+  hasStyledCanonicalPano,
   isReferenceAlignmentAccepted,
   isReferenceReady,
   needsReferenceAlignment,
@@ -129,9 +130,9 @@ export function ReferenceWorkspace() {
         />
 
         {!activeAsset && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
             <ContextualPanel className="max-w-sm text-center">
-              <p className="text-sm text-secondary">
+              <p className="text-sm font-medium text-primary">
                 {grayboxPano
                   ? 'Import a styled pano or approve the graybox to begin.'
                   : 'Render a graybox in Build first.'}
@@ -158,6 +159,23 @@ export function ReferenceWorkspace() {
             <ContextualPanel className="text-center text-sm text-secondary">
               Drag to look around
               <span className="mt-1 block text-xs text-muted">Tap markers to focus</span>
+            </ContextualPanel>
+          </div>
+        )}
+
+        {activeAsset && grayboxPano && !hasStyledCanonicalPano(project) && (
+          <div className="pointer-events-none absolute bottom-6 left-6 z-10 max-w-[calc(100%-20rem)]">
+            <ContextualPanel className="flex flex-wrap items-center gap-2">
+              <StyledPanoImportButton
+                label="Import styled pano"
+                primary
+                highlighted={primaryAction?.id === 'import-styled-pano'}
+                className="min-w-40"
+              />
+              <IconButton onClick={() => void loadAttachedReference()}>
+                <Sparkles className="h-4 w-4" />
+                Use Attached Reference
+              </IconButton>
             </ContextualPanel>
           </div>
         )}

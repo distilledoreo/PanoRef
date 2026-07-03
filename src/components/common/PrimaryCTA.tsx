@@ -21,13 +21,15 @@ export function PrimaryCTA({
         type="button"
         onClick={onClick}
         disabled={disabled}
-        className={`inline-flex items-center gap-2.5 rounded-[var(--radius-card)] px-5 py-3 text-sm font-semibold text-white shadow-soft transition disabled:cursor-not-allowed disabled:opacity-45 ${
+        className={`inline-flex items-center gap-3 rounded-[22px] border border-white/30 px-6 py-4 text-base font-semibold text-white shadow-[0_8px_24px_var(--accent-glow)] transition disabled:cursor-not-allowed disabled:opacity-45 ${
           highlighted
-            ? 'bg-emerald-500 ring-2 ring-emerald-300 hover:bg-emerald-600'
+            ? 'bg-[var(--accent)] ring-4 ring-[var(--accent-glow)] hover:bg-[var(--accent-hover)]'
             : 'bg-[var(--accent)] hover:bg-[var(--accent-hover)]'
         }`}
       >
-        {icon}
+        <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/55">
+          {icon}
+        </span>
         {label}
       </button>
       {hint && (

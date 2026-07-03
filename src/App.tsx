@@ -1,8 +1,9 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Boxes,
   Camera,
   Clapperboard,
+  Compass,
   FileJson,
   FolderOpen,
   Moon,
@@ -20,7 +21,7 @@ import { ReferenceWorkspace } from './components/workspaces/ReferenceWorkspace';
 import { ShotsWorkspace } from './components/workspaces/ShotsWorkspace';
 import { ReviewWorkspace } from './components/workspaces/ReviewWorkspace';
 import { ExportWorkspace } from './components/workspaces/ExportWorkspace';
-import { ObjectiveHelpButton, WorkflowGuidance } from './components/common/WorkflowGuidance';
+import { WorkflowGuidance } from './components/common/WorkflowGuidance';
 
 const workspaceItems: Array<{ id: Workspace; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'build', label: 'Build', icon: Boxes },
@@ -32,12 +33,14 @@ const workspaceItems: Array<{ id: Workspace; label: string; icon: React.Componen
 
 export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const { theme, toggleTheme } = useThemeStore();
   const {
     project,
     workspace,
     setWorkspace,
     setProject,
+    requestObjectiveModal,
   } = useContinuityStore();
 
   const importProject = async (file?: File) => {
@@ -48,45 +51,86 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-surface-base text-primary">
-      <header className="relative z-30 flex shrink-0 items-center justify-between gap-4 border-b border-subtle bg-surface-raised px-5 py-3 shadow-card">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent)] text-white shadow-card">
-            <Boxes className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-primary">Continuity Stage</div>
-            <div className="truncate text-xs text-secondary">{project.name}</div>
-          </div>
+      <header className="relative z-30 flex h-[72px] shrink-0 items-center justify-between gap-4 bg-surface-overlay px-7 shadow-card backdrop-blur">
+        <div className="relative min-w-0">
+          <button
+            type="button"
+            onClick={() => setProjectMenuOpen((open) => !open)}
+            className="flex min-w-0 items-center gap-3 rounded-2xl pr-3 transition hover:bg-surface-muted"
+            title="Project actions"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center text-accent">
+              <Boxes className="h-9 w-9" strokeWidth={2.2} />
+            </span>
+            <span className="truncate text-xl font-semibold tracking-normal text-primary">Continuity Stage</span>
+          </button>
+          {projectMenuOpen && (
+            <div className="absolute left-0 top-[calc(100%+10px)] z-50 w-64 overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-2 shadow-soft backdrop-blur">
+              <div className="border-b border-subtle px-3 py-2">
+                <div className="truncate text-sm font-semibold text-primary">{project.name}</div>
+                <div className="text-xs text-secondary">Project actions</div>
+              </div>
+              <ProjectMenuButton
+                icon={<Compass className="h-4 w-4" />}
+                label="Current Objective"
+                onClick={() => {
+                  requestObjectiveModal();
+                  setProjectMenuOpen(false);
+                }}
+              />
+              <ProjectMenuButton
+                icon={<FolderOpen className="h-4 w-4" />}
+                label="Open Project"
+                onClick={() => {
+                  fileRef.current?.click();
+                  setProjectMenuOpen(false);
+                }}
+              />
+              <ProjectMenuButton
+                icon={<FileJson className="h-4 w-4" />}
+                label="Save Project"
+                onClick={() => {
+                  downloadProject(project);
+                  setProjectMenuOpen(false);
+                }}
+              />
+              <ProjectMenuButton
+                icon={<Package className="h-4 w-4" />}
+                label="Package Export"
+                onClick={() => {
+                  setWorkspace('export');
+                  setProjectMenuOpen(false);
+                }}
+              />
+            </div>
+          )}
         </div>
 
-        <nav className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-6 md:flex">
-          {workspaceItems.map((item, index) => {
+        <nav className="absolute left-1/2 top-1/2 hidden w-[min(700px,56vw)] -translate-x-1/2 -translate-y-1/2 items-center justify-between md:flex">
+          <span className="absolute left-8 right-8 top-[21px] h-px bg-border-subtle" aria-hidden />
+          {workspaceItems.map((item) => {
             const Icon = item.icon;
             const active = workspace === item.id;
             return (
-              <React.Fragment key={item.id}>
-                <button
-                  onClick={() => setWorkspace(item.id)}
-                  className="group flex flex-col items-center gap-1.5"
-                  aria-current={active ? 'page' : undefined}
+              <button
+                key={item.id}
+                onClick={() => setWorkspace(item.id)}
+                className="group relative z-10 flex min-w-20 flex-col items-center gap-1.5"
+                aria-current={active ? 'page' : undefined}
+              >
+                <span
+                  className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${
+                    active
+                      ? 'border-[var(--accent)] bg-[var(--accent)] text-white shadow-[0_0_22px_var(--accent-glow)]'
+                      : 'border-subtle bg-surface-overlay text-secondary group-hover:border-strong group-hover:text-primary'
+                  }`}
                 >
-                  <span
-                    className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${
-                      active
-                        ? 'border-[var(--accent)] bg-[var(--accent)] text-white shadow-[0_0_16px_var(--accent-glow)]'
-                        : 'border-subtle bg-surface-muted text-secondary group-hover:border-strong group-hover:text-primary'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <span className={`text-[11px] font-medium ${active ? 'text-accent' : 'text-secondary'}`}>
-                    {item.label}
-                  </span>
-                </button>
-                {index < workspaceItems.length - 1 && (
-                  <span className="mb-5 h-px w-8 bg-border-subtle" aria-hidden />
-                )}
-              </React.Fragment>
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className={`text-[11px] font-medium ${active ? 'text-accent' : 'text-secondary'}`}>
+                  {item.label}
+                </span>
+              </button>
             );
           })}
         </nav>
@@ -111,7 +155,6 @@ export default function App() {
         </nav>
 
         <div className="flex items-center gap-1.5">
-          <ObjectiveHelpButton />
           <input
             ref={fileRef}
             type="file"
@@ -119,15 +162,6 @@ export default function App() {
             className="hidden"
             onChange={(event) => void importProject(event.target.files?.[0])}
           />
-          <IconHeaderButton onClick={() => fileRef.current?.click()} title="Open project">
-            <FolderOpen className="h-4 w-4" />
-          </IconHeaderButton>
-          <IconHeaderButton onClick={() => downloadProject(project)} title="Save project">
-            <FileJson className="h-4 w-4" />
-          </IconHeaderButton>
-          <IconHeaderButton onClick={() => setWorkspace('export')} title="Package export">
-            <Package className="h-4 w-4" />
-          </IconHeaderButton>
           <IconHeaderButton onClick={toggleTheme} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>
             {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </IconHeaderButton>
@@ -144,6 +178,27 @@ export default function App() {
 
       <WorkflowGuidance />
     </div>
+  );
+}
+
+function ProjectMenuButton({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-secondary transition hover:bg-surface-muted hover:text-primary"
+    >
+      <span className="text-accent">{icon}</span>
+      {label}
+    </button>
   );
 }
 
