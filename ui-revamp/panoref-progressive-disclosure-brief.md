@@ -67,8 +67,14 @@ Current branch progress:
 - Shots bottom chrome uses a compact overlay filmstrip separated from the command dock, with `--shots-overlay-bottom-safe` reserving space for the Render Shot Preview hint at 1280×720.
 - Export package card owns its title/subtitle header and places Export Settings near the lower-left of the card.
 - Build shows a compact “Drag arrows to move” guidance chip near the canvas center when an object is selected and the transform gizmo is visible.
+- Shots primary CTA now reserves a fixed helper-text lane so the Render Shot Preview hint remains readable at the validated 1280×720 target.
+- Review shot cards use a tighter thumbnail-first 3×2 layout with the footer actions kept visible below the grid.
+- Export selected-shot rows use a quieter active state and a more compact package visual so the checklist and CTA read closer to the reference screen.
+- The app shell now declares Continuity Stage favicon assets; browser console verification should stay free of favicon 404 noise.
 
 Remaining fidelity gaps:
 - Filmstrip three-dot markers are decorative only; a dedicated per-shot overflow menu can be added if reference parity requires it.
 - Default template media and real shot previews do not need to match the reference imagery, but live preview timing may still differ from the static reference shots.
 - Very narrow viewports below 1280px may still wrap the bottom action dock; desktop 1280x720 is the validated target.
+- Review still has more lower whitespace than the static reference once six compact cards are visible.
+- Export package illustration proportions are closer but not yet an exact match to the reference folder/ZIP composition.
