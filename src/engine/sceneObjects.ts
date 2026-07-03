@@ -296,28 +296,25 @@ function createHumanDummy(object: SceneObject, theme: SceneVisualTheme): THREE.G
   };
 
   const addJoint = (position: [number, number, number]) => {
-    addPart(new THREE.SphereGeometry(0.055 * unit, 12, 10), position, [0, 0, 0], jointMat);
+    addPart(new THREE.SphereGeometry(0.05 * unit, 12, 10), position, [0, 0, 0], jointMat);
   };
 
-  addPart(new THREE.SphereGeometry(0.11 * unit, 16, 14), [0, 0.79, 0]);
-  addPart(new THREE.CylinderGeometry(0.035 * unit, 0.04 * unit, 0.08 * unit, 12), [0, 0.68, 0]);
-  addPart(new THREE.CapsuleGeometry(0.13 * unit, 0.28 * unit, 6, 12), [0, 0.43, 0]);
-  addPart(new THREE.CapsuleGeometry(0.11 * unit, 0.12 * unit, 6, 12), [0, 0.18, 0]);
+  addPart(new THREE.SphereGeometry(0.1 * unit, 16, 14), [0, 0.72, 0]);
+  addPart(new THREE.CylinderGeometry(0.032 * unit, 0.038 * unit, 0.07 * unit, 10), [0, 0.61, 0]);
+  addPart(new THREE.CapsuleGeometry(0.13 * unit, 0.34 * unit, 6, 12), [0, 0.36, 0]);
+  addPart(new THREE.CapsuleGeometry(0.1 * unit, 0.1 * unit, 6, 10), [0, 0.1, 0]);
 
-  addJoint([0, 0.58, 0]);
-  addPart(new THREE.CapsuleGeometry(0.05 * unit, 0.24 * unit, 5, 10), [-0.2, 0.47, 0], [0, 0, 0.35]);
-  addPart(new THREE.CapsuleGeometry(0.045 * unit, 0.22 * unit, 5, 10), [-0.34, 0.28, 0.02], [0.15, 0, 0.55]);
-  addPart(new THREE.CapsuleGeometry(0.05 * unit, 0.24 * unit, 5, 10), [0.2, 0.47, 0], [0, 0, -0.35]);
-  addPart(new THREE.CapsuleGeometry(0.045 * unit, 0.22 * unit, 5, 10), [0.34, 0.28, 0.02], [0.15, 0, -0.55]);
+  addJoint([-0.16, 0.5, 0]);
+  addJoint([0.16, 0.5, 0]);
+  addPart(new THREE.CapsuleGeometry(0.042 * unit, 0.34 * unit, 5, 10), [-0.2, 0.34, 0], [0.12, 0, 0.72]);
+  addPart(new THREE.CapsuleGeometry(0.042 * unit, 0.34 * unit, 5, 10), [0.2, 0.34, 0], [0.12, 0, -0.72]);
 
-  addJoint([-0.1, 0.1, 0]);
-  addJoint([0.1, 0.1, 0]);
-  addPart(new THREE.CapsuleGeometry(0.065 * unit, 0.34 * unit, 6, 12), [-0.1, -0.2, 0]);
-  addPart(new THREE.CapsuleGeometry(0.055 * unit, 0.32 * unit, 6, 12), [-0.1, -0.56, 0.03], [0.08, 0, 0]);
-  addPart(new THREE.BoxGeometry(0.08 * unit, 0.04 * unit, 0.18 * unit), [-0.1, -0.78, 0.05]);
-  addPart(new THREE.CapsuleGeometry(0.065 * unit, 0.34 * unit, 6, 12), [0.1, -0.2, 0]);
-  addPart(new THREE.CapsuleGeometry(0.055 * unit, 0.32 * unit, 6, 12), [0.1, -0.56, 0.03], [0.08, 0, 0]);
-  addPart(new THREE.BoxGeometry(0.08 * unit, 0.04 * unit, 0.18 * unit), [0.1, -0.78, 0.05]);
+  addJoint([-0.08, 0.02, 0]);
+  addJoint([0.08, 0.02, 0]);
+  addPart(new THREE.CapsuleGeometry(0.058 * unit, 0.4 * unit, 6, 12), [-0.08, -0.3, 0]);
+  addPart(new THREE.BoxGeometry(0.07 * unit, 0.035 * unit, 0.15 * unit), [-0.08, -0.56, 0.04]);
+  addPart(new THREE.CapsuleGeometry(0.058 * unit, 0.4 * unit, 6, 12), [0.08, -0.3, 0]);
+  addPart(new THREE.BoxGeometry(0.07 * unit, 0.035 * unit, 0.15 * unit), [0.08, -0.56, 0.04]);
 
   const bounds = new THREE.Box3().setFromObject(group);
   const center = bounds.getCenter(new THREE.Vector3());

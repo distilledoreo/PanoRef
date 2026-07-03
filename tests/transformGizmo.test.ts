@@ -22,6 +22,14 @@ describe('build selection visuals', () => {
     expect(center.z).toBeCloseTo(0, 2);
   });
 
+  it('builds a two-arm mannequin without duplicated limb segments', () => {
+    const person = createSceneObject('human_dummy', 1);
+    person.transform.position = [0, 0, 0];
+    const mesh = createObject3D(person, false, 'light') as THREE.Group;
+    const offsetLimbs = mesh.children.filter((child) => Math.abs(child.position.x) > 0.12 * (person.dimensions[1] / 1.75));
+    expect(offsetLimbs).toHaveLength(4);
+  });
+
   it('keeps selected objects on their category material instead of a teal fill', () => {
     const floor = createSceneObject('floor', 1);
     const box = createSceneObject('box', 2);

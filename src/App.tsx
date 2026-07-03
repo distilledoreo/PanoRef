@@ -60,7 +60,7 @@ export default function App() {
       </main>
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-40">
-        <div className="flex h-[72px] items-center justify-between gap-4 px-7 pt-1">
+        <div className="flex h-[72px] items-center justify-between gap-4 px-7 pt-3">
           <div className="pointer-events-auto relative min-w-0">
             <button
               type="button"
@@ -115,8 +115,8 @@ export default function App() {
             )}
           </div>
 
-          <nav className="pointer-events-auto absolute left-1/2 top-1/2 hidden w-[min(700px,56vw)] -translate-x-1/2 -translate-y-1/2 items-center justify-between md:flex">
-            <span className="absolute left-8 right-8 top-[21px] h-px bg-border-subtle/80" aria-hidden />
+          <nav className="pointer-events-auto absolute left-1/2 top-5 hidden w-[min(700px,56vw)] -translate-x-1/2 items-start justify-between md:flex">
+            <span className="absolute left-8 right-8 top-[22px] h-px bg-border-subtle/80" aria-hidden />
             {workspaceItems.map((item) => {
               const Icon = item.icon;
               const active = workspace === item.id;
