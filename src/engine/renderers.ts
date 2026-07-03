@@ -1,5 +1,16 @@
 import * as THREE from 'three';
 import { CameraData, Euler, LocationProject, PanoCropSettings, Shot } from '../domain/types';
+import {
+  getCameraMoveDurationSeconds,
+  getSortedCameraKeyframes,
+  hasRenderableCameraMove,
+  interpolateCameraKeyframes,
+} from './cameraKeyframes';
+import {
+  CAMERA_MOVE_CUBEMAP_FACES,
+  DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
+  type CameraMoveCubemapFaceId,
+} from './cameraMoveCubemap';
 import { buildScene, disposeScene } from './sceneObjects';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 
@@ -7,6 +18,44 @@ export interface ImageRenderResult {
   dataUrl: string;
   width: number;
   height: number;
+}
+
+export interface VideoRenderResult {
+  blob: Blob;
+  dataUrl: string;
+  width: number;
+  height: number;
+  durationSeconds: number;
+  frameRate: number;
+  mimeType: string;
+  fileExtension: 'mp4';
+}
+
+export interface PanoCubemapRenderResult {
+  faceSize: number;
+  faces: Record<CameraMoveCubemapFaceId, ImageRenderResult>;
+}
+
+export interface CameraMoveVideoOptions {
+  frameRate?: number;
+  mimeType?: string;
+  videoBitsPerSecond?: number;
+  onProgress?: (progress: number) => void;
+}
+
+const MP4_MIME_CANDIDATES = [
+  'video/mp4;codecs="avc1.42E01E"',
+  'video/mp4;codecs=avc1.42E01E',
+  'video/mp4;codecs="avc1.640028"',
+  'video/mp4;codecs=avc1.640028',
+  'video/mp4',
+] as const;
+
+export function getSupportedCameraMoveMp4MimeType(): string | undefined {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return undefined;
+  }
+  return MP4_MIME_CANDIDATES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
 export async function renderGrayboxEquirectangularPano(
@@ -79,6 +128,107 @@ export async function renderShotFrame(project: LocationProject, shot: Shot): Pro
   );
 }
 
+export async function renderShotCameraMoveMp4(
+  project: LocationProject,
+  shot: Shot,
+  options: CameraMoveVideoOptions = {},
+): Promise<VideoRenderResult> {
+  const keyframes = getSortedCameraKeyframes(shot.cameraKeyframes);
+  if (!hasRenderableCameraMove(keyframes)) {
+    throw new Error('Capture start and end camera keyframes before exporting MP4.');
+  }
+
+  const mimeType = options.mimeType ?? getSupportedCameraMoveMp4MimeType();
+  if (!mimeType) {
+    throw new Error('MP4 camera move export is not supported in this browser.');
+  }
+
+  const frameRate = options.frameRate ?? 30;
+  const durationSeconds = getCameraMoveDurationSeconds(keyframes);
+  const width = shot.exportSettings.width;
+  const height = shot.exportSettings.height;
+  const renderer = createRenderer(width, height);
+  const scene = buildScene(project, { showHelpers: false, hiddenObjectTypes: ['sun_marker'] });
+  const camera = new THREE.PerspectiveCamera(
+    shot.camera.fovDegrees,
+    width / height,
+    shot.camera.near,
+    shot.camera.far,
+  );
+
+  const captureStream = renderer.domElement.captureStream?.bind(renderer.domElement);
+  if (!captureStream) {
+    disposeScene(scene);
+    renderer.dispose();
+    throw new Error('Canvas video capture is not supported in this browser.');
+  }
+
+  const stream = captureStream(frameRate);
+  const chunks: Blob[] = [];
+
+  try {
+    const recorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: options.videoBitsPerSecond ?? width * height * 3,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      let animationFrame = 0;
+      let startTime = 0;
+      let stopping = false;
+
+      const stopRecorder = () => {
+        if (stopping) return;
+        stopping = true;
+        cancelAnimationFrame(animationFrame);
+        if (recorder.state !== 'inactive') recorder.stop();
+      };
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onerror = (event) => {
+        stopRecorder();
+        reject(event instanceof ErrorEvent ? event.error : new Error('MP4 recording failed.'));
+      };
+      recorder.onstop = () => resolve();
+
+      const renderFrame = (now: number) => {
+        if (!startTime) startTime = now;
+        const elapsedSeconds = Math.min((now - startTime) / 1000, durationSeconds);
+        renderCameraMoveFrame(renderer, scene, camera, keyframes, elapsedSeconds, width, height);
+        options.onProgress?.(durationSeconds === 0 ? 1 : elapsedSeconds / durationSeconds);
+
+        if (elapsedSeconds >= durationSeconds) {
+          stopRecorder();
+          return;
+        }
+        animationFrame = requestAnimationFrame(renderFrame);
+      };
+
+      renderCameraMoveFrame(renderer, scene, camera, keyframes, 0, width, height);
+      recorder.start();
+      animationFrame = requestAnimationFrame(renderFrame);
+    });
+  } finally {
+    stream.getTracks().forEach((track) => track.stop());
+    disposeScene(scene);
+    renderer.dispose();
+  }
+
+  const blob = new Blob(chunks, { type: mimeType });
+  return {
+    blob,
+    dataUrl: await blobToDataUrl(blob),
+    width,
+    height,
+    durationSeconds,
+    frameRate,
+    mimeType,
+    fileExtension: 'mp4',
+  };
+}
+
 export function applyFlyCameraToPerspectiveCamera(
   camera: THREE.PerspectiveCamera,
   fly: FlyCameraState,
@@ -97,6 +247,27 @@ export function applyFlyCameraToPerspectiveCamera(
   camera.rotation.x = THREE.MathUtils.degToRad(fly.pitchDegrees);
   camera.rotation.z = 0;
   camera.updateProjectionMatrix();
+}
+
+function renderCameraMoveFrame(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.PerspectiveCamera,
+  keyframes: ReturnType<typeof getSortedCameraKeyframes>,
+  timeSeconds: number,
+  width: number,
+  height: number,
+) {
+  const cameraData = interpolateCameraKeyframes(keyframes, timeSeconds);
+  applyFlyCameraToPerspectiveCamera(
+    camera,
+    flyCameraFromCamera(cameraData),
+    cameraData.fovDegrees,
+    width / height,
+    cameraData.near,
+    cameraData.far,
+  );
+  renderer.render(scene, camera);
 }
 
 export async function renderViewportClay(
@@ -213,6 +384,105 @@ export async function renderPanoPerspectiveCrop(
   return { dataUrl, width: crop.width, height: crop.height };
 }
 
+export async function renderPanoCubemapFaces(
+  imageUrl: string,
+  options: {
+    faceSize?: number;
+    panoRotation?: Euler;
+  } = {},
+): Promise<PanoCubemapRenderResult> {
+  const faceSize = options.faceSize ?? DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE;
+  const renderedFaces = await Promise.all(
+    CAMERA_MOVE_CUBEMAP_FACES.map(async (face) => [
+      face,
+      await renderPanoCubemapFace(imageUrl, face, faceSize, options.panoRotation ?? [0, 0, 0]),
+    ] as const),
+  );
+
+  return {
+    faceSize,
+    faces: Object.fromEntries(renderedFaces) as Record<CameraMoveCubemapFaceId, ImageRenderResult>,
+  };
+}
+
+async function renderPanoCubemapFace(
+  imageUrl: string,
+  face: CameraMoveCubemapFaceId,
+  faceSize: number,
+  panoRotation: Euler,
+): Promise<ImageRenderResult> {
+  const renderer = createRenderer(faceSize, faceSize);
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const texture = await loadTexture(imageUrl);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      panoMap: { value: texture },
+      faceIndex: { value: CAMERA_MOVE_CUBEMAP_FACES.indexOf(face) },
+      panoYaw: { value: degreesToRadians(panoRotation[1] ?? 0) },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = vec4(position.xy, 0.0, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D panoMap;
+      uniform int faceIndex;
+      uniform float panoYaw;
+      varying vec2 vUv;
+      const float PI = 3.141592653589793;
+
+      vec3 applyInversePanoYaw(vec3 direction, float yaw) {
+        float s = sin(yaw);
+        float c = cos(yaw);
+        return normalize(vec3(
+          direction.x * c - direction.z * s,
+          direction.y,
+          direction.z * c + direction.x * s
+        ));
+      }
+
+      vec3 directionForFace(float sc, float tc) {
+        if (faceIndex == 0) return normalize(vec3(1.0, tc, -sc));
+        if (faceIndex == 1) return normalize(vec3(-1.0, tc, sc));
+        if (faceIndex == 2) return normalize(vec3(sc, 1.0, -tc));
+        if (faceIndex == 3) return normalize(vec3(sc, -1.0, tc));
+        if (faceIndex == 4) return normalize(vec3(sc, tc, 1.0));
+        return normalize(vec3(-sc, tc, -1.0));
+      }
+
+      void main() {
+        float sc = vUv.x * 2.0 - 1.0;
+        float tc = vUv.y * 2.0 - 1.0;
+        vec3 direction = applyInversePanoYaw(directionForFace(sc, tc), panoYaw);
+        float u = atan(direction.x, direction.z) / (2.0 * PI) + 0.5;
+        float v = asin(clamp(direction.y, -1.0, 1.0)) / PI + 0.5;
+        gl_FragColor = texture2D(panoMap, vec2(fract(u), clamp(v, 0.0, 1.0)));
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  scene.add(plane);
+
+  renderer.render(scene, camera);
+  const dataUrl = renderer.domElement.toDataURL('image/png');
+
+  plane.geometry.dispose();
+  material.dispose();
+  texture.dispose();
+  renderer.dispose();
+
+  return { dataUrl, width: faceSize, height: faceSize };
+}
+
 function createRenderer(width: number, height: number): THREE.WebGLRenderer {
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -228,5 +498,15 @@ function createRenderer(width: number, height: number): THREE.WebGLRenderer {
 function loadTexture(imageUrl: string): Promise<THREE.Texture> {
   return new Promise((resolve, reject) => {
     new THREE.TextureLoader().load(imageUrl, resolve, undefined, reject);
+  });
+}
+
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
   });
 }

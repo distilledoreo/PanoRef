@@ -16,6 +16,10 @@ describe('workflow guidance UI', () => {
     expect(shots).toContain('WorkspaceSidebar');
     expect(shots).toContain('ShotSelector');
     expect(shots).toContain('Accept Framing');
+    expect(shots).toContain('Camera Move MP4');
+    expect(shots).toContain('Export MP4');
+    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
+    expect(exportWorkspace).toContain('Camera move cubemap references');
     expect(shell).not.toContain('ShotDrawer');
     expect(shell).not.toContain('WorkspaceWithDrawer');
   });

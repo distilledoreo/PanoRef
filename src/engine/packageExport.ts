@@ -1,9 +1,18 @@
 import JSZip from 'jszip';
 import { LocationProject, Shot } from '../domain/types';
+import { getCameraMoveReferenceFrames } from './cameraKeyframes';
+import {
+  addCameraMoveCubemapCropPaths,
+  buildCameraMoveCubemapVisibility,
+  CAMERA_MOVE_CUBEMAP_FACES,
+  cameraMoveCubemapVisibleStitchedPath,
+  DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
+} from './cameraMoveCubemap';
 import { buildShotMetadata, createShotPackageManifest } from './exportManifest';
 import { generateImagePrompt, generateVideoPrompt } from './prompts';
 import { preparePanoExportDataUrl } from './panoImage';
-import { renderPanoPerspectiveCrop, renderShotFrame } from './renderers';
+import { stitchCubemapFacesCrossAsync, stitchCubemapVisibleFacesAsync } from './cubemapStitch';
+import { renderPanoCubemapFaces, renderPanoPerspectiveCrop, renderShotFrame, renderViewportClay } from './renderers';
 
 export interface ShotPackageResult {
   blob: Blob;
@@ -24,7 +33,8 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
   }
 
   const zip = new JSZip();
-  const manifest = createShotPackageManifest(project, shot);
+  const manifestPreview = createShotPackageManifest(project, shot);
+  const rootFolder = manifestPreview.rootFolder;
   const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);
   const canonicalPano = project.panoRefs.find((pano) => pano.isCanonical);
   const grayboxPano = project.panoRefs.find((pano) => pano.type === 'graybox_render');
@@ -32,23 +42,90 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
   const grayboxAsset = grayboxPano ? project.assets.assets[grayboxPano.imageAssetId] : undefined;
   const linkedPanoAsset = linkedPano ? project.assets.assets[linkedPano.imageAssetId] : undefined;
   const aiResultAssetId = shot.assets.aiResultFrameAssetId ?? shot.assets.finalBaseFrameAssetId;
+  const cameraMoveVideoAsset = shot.assets.cameraMoveVideoAssetId
+    ? project.assets.assets[shot.assets.cameraMoveVideoAssetId]
+    : undefined;
 
   if (shot.exportSettings.includeViewport) {
     const viewport = await renderShotFrame(project, shot);
-    addDataUrl(zip, `${manifest.rootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
+    addDataUrl(zip, `${rootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
   }
 
   if (shot.exportSettings.includeAiResultFrame && aiResultAssetId) {
     const aiResultAsset = project.assets.assets[aiResultAssetId];
     if (aiResultAsset) {
-      addDataUrl(zip, `${manifest.rootFolder}/outputs/ai_result_frame.png`, aiResultAsset.uri);
+      addDataUrl(zip, `${rootFolder}/outputs/ai_result_frame.png`, aiResultAsset.uri);
+    }
+  }
+
+  if (shot.exportSettings.includeCameraMoveVideo && cameraMoveVideoAsset) {
+    addDataUrl(zip, `${rootFolder}/inputs/viewport_clay_motion.mp4`, cameraMoveVideoAsset.uri);
+  }
+
+  const cameraMoveReferenceFrames = shot.exportSettings.includeCameraMoveReferenceFrames
+    ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
+    : [];
+  for (const frame of cameraMoveReferenceFrames) {
+    const clay = await renderViewportClay(
+      project,
+      frame.camera,
+      shot.exportSettings.width,
+      shot.exportSettings.height,
+    );
+    addDataUrl(zip, `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, clay.dataUrl);
+  }
+
+  const cameraMoveCubemapVisibility = linkedPano && linkedPanoAsset && cameraMoveReferenceFrames.length > 0
+    ? addCameraMoveCubemapCropPaths(buildCameraMoveCubemapVisibility(
+      project,
+      shot,
+      linkedPano,
+      cameraMoveReferenceFrames,
+      { faceSize: DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE },
+    ))
+    : undefined;
+
+  if (linkedPano && linkedPanoAsset) {
+    if (cameraMoveReferenceFrames.length > 0) {
+      const cubemap = await renderPanoCubemapFaces(linkedPanoAsset.uri, {
+        faceSize: cameraMoveCubemapVisibility?.faceSize ?? DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
+        panoRotation: linkedPano.rotation,
+      });
+
+      // Export individual face PNGs (master cubemap)
+      for (const face of CAMERA_MOVE_CUBEMAP_FACES) {
+        addDataUrl(zip, `${rootFolder}/inputs/camera_move/cubemap/${face}.png`, cubemap.faces[face].dataUrl);
+      }
+
+      // Export stitched cross unfold (master cubemap combined with continuous seams)
+      const stitchedCubemap = await stitchCubemapFacesCrossAsync(cubemap.faces, cubemap.faceSize);
+      addDataUrl(zip, `${rootFolder}/inputs/camera_move/cubemap/cubemap_stitched.png`, stitchedCubemap.dataUrl);
+
+      // Export per-frame visible crops in the same cross layout (cubemap_visible)
+      for (const frame of cameraMoveCubemapVisibility?.frames ?? []) {
+        if (frame.visibleFaces.length === 0) continue;
+
+        const stitchedVisible = await stitchCubemapVisibleFacesAsync(
+          frame.visibleFaces.map((visibleFace) => ({
+            face: visibleFace.face,
+            dataUrl: cubemap.faces[visibleFace.face].dataUrl,
+            crop: visibleFace.crop,
+          })),
+          cubemap.faceSize,
+        );
+        addDataUrl(
+          zip,
+          `${rootFolder}/${cameraMoveCubemapVisibleStitchedPath(frame.id)}`,
+          stitchedVisible.dataUrl,
+        );
+      }
     }
   }
 
   if (shot.exportSettings.includePanoCrop && linkedPano && shot.panoCrop) {
     if (linkedPanoAsset) {
       const crop = await renderPanoPerspectiveCrop(linkedPanoAsset.uri, shot.panoCrop, linkedPano.rotation);
-      addDataUrl(zip, `${manifest.rootFolder}/inputs/pano_crop.png`, crop.dataUrl);
+      addDataUrl(zip, `${rootFolder}/inputs/pano_crop.png`, crop.dataUrl);
     }
   }
 
@@ -63,7 +140,7 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
         targetHeight: project.settings.defaultShotHeight,
       },
     );
-    addDataUrl(zip, `${manifest.rootFolder}/inputs/global_reference.png`, exportUrl);
+    addDataUrl(zip, `${rootFolder}/inputs/global_reference.png`, exportUrl);
   }
 
   if (shot.exportSettings.includeGrayboxPano && grayboxAsset && grayboxPano) {
@@ -77,28 +154,38 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
         targetHeight: project.settings.defaultShotHeight,
       },
     );
-    addDataUrl(zip, `${manifest.rootFolder}/inputs/global_graybox.png`, exportUrl);
+    addDataUrl(zip, `${rootFolder}/inputs/global_graybox.png`, exportUrl);
   }
 
   if (shot.exportSettings.includeMetadata) {
     const metadata = buildShotMetadata(project, shot, linkedPano);
-    zip.file(`${manifest.rootFolder}/metadata/shot.json`, JSON.stringify(shot, null, 2));
-    zip.file(`${manifest.rootFolder}/metadata/camera.json`, JSON.stringify(shot.camera, null, 2));
-    zip.file(`${manifest.rootFolder}/metadata/landmarks.json`, JSON.stringify(metadata.landmarks, null, 2));
-    zip.file(`${manifest.rootFolder}/metadata/location.json`, JSON.stringify(metadata.project, null, 2));
+    zip.file(`${rootFolder}/metadata/shot.json`, JSON.stringify(shot, null, 2));
+    zip.file(`${rootFolder}/metadata/camera.json`, JSON.stringify(shot.camera, null, 2));
+    if (shot.cameraKeyframes.length > 0) {
+      zip.file(`${rootFolder}/metadata/camera_keyframes.json`, JSON.stringify(shot.cameraKeyframes, null, 2));
+    }
+    if (cameraMoveReferenceFrames.length > 0) {
+      zip.file(`${rootFolder}/metadata/camera_move_reference_frames.json`, JSON.stringify(cameraMoveReferenceFrames, null, 2));
+    }
+    if (cameraMoveCubemapVisibility) {
+      zip.file(`${rootFolder}/metadata/camera_move_cubemap_visibility.json`, JSON.stringify(cameraMoveCubemapVisibility, null, 2));
+    }
+    zip.file(`${rootFolder}/metadata/landmarks.json`, JSON.stringify(metadata.landmarks, null, 2));
+    zip.file(`${rootFolder}/metadata/location.json`, JSON.stringify(metadata.project, null, 2));
   }
 
   if (shot.exportSettings.includePrompt) {
-    zip.file(`${manifest.rootFolder}/prompts/image_gen_prompt.txt`, generateImagePrompt(project, shot));
-    zip.file(`${manifest.rootFolder}/prompts/video_gen_prompt.txt`, generateVideoPrompt(shot));
-    zip.file(`${manifest.rootFolder}/prompts/negative_prompt.txt`, shot.promptOverrides.negativePrompt || '');
+    zip.file(`${rootFolder}/prompts/image_gen_prompt.txt`, generateImagePrompt(project, shot));
+    zip.file(`${rootFolder}/prompts/video_gen_prompt.txt`, generateVideoPrompt(shot));
+    zip.file(`${rootFolder}/prompts/negative_prompt.txt`, shot.promptOverrides.negativePrompt || '');
   }
 
-  zip.file(`${manifest.rootFolder}/manifest.json`, JSON.stringify(manifest, null, 2));
+  const manifest = createShotPackageManifest(project, shot, cameraMoveCubemapVisibility);
+  zip.file(`${rootFolder}/manifest.json`, JSON.stringify(manifest, null, 2));
   const blob = await zip.generateAsync({ type: 'blob' });
   return {
     blob,
-    fileName: `${manifest.rootFolder}_package.zip`,
+    fileName: `${rootFolder}_package.zip`,
     manifestPaths: manifest.files.map((file) => file.path),
   };
 }

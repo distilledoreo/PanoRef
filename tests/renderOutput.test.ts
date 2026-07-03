@@ -18,6 +18,9 @@ describe('rendered shot output', () => {
     expect(source).toContain('#include <colorspace_fragment>');
     expect(source).not.toContain('renderContinuityControlView');
     expect(source).toContain('renderPanoPerspectiveCrop');
+    expect(source).toContain('renderPanoCubemapFaces');
+    expect(source).not.toContain('stitchCubemapFacesGridAsync');
+    expect(source).not.toContain('stitchImageStripAsync');
   });
 
   it('keeps sun markers out of AI-facing export renders', () => {
@@ -30,6 +33,10 @@ describe('rendered shot output', () => {
   it('applies linked pano rotation to local reference exports', () => {
     const source = readFileSync(new URL('../src/engine/packageExport.ts', import.meta.url), 'utf8');
     expect(source).toContain('renderPanoPerspectiveCrop(linkedPanoAsset.uri, shot.panoCrop, linkedPano.rotation)');
+    expect(source).toContain('renderPanoCubemapFaces(linkedPanoAsset.uri');
+    expect(source).toContain('panoRotation: linkedPano.rotation');
+    expect(source).toContain('stitchCubemapFacesCrossAsync');
+    expect(source).toContain('stitchCubemapVisibleFacesAsync');
   });
 
   it('letterboxes full pano exports when the project setting is enabled', () => {

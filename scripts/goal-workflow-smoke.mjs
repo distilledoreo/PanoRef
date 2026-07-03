@@ -38,12 +38,16 @@ try {
   await client.send('Page.navigate', { url: appUrl });
   await waitFor(client, 'document.title === "Continuity Stage" && document.body.textContent.includes("Reference")', 'app shell');
 
+  await clickOptionalButton(client, 'Got it');
+
+  await clickButton(client, 'Render Graybox 360');
+  await waitFor(client, 'document.body.textContent.includes("Graybox ready")', 'graybox pano');
+  await clickOptionalButton(client, 'Continue to Reference');
+
   await clickButton(client, 'Reference');
   await clickButton(client, 'Use Attached Reference');
   await waitFor(client, 'document.body.textContent.includes("attached-canonical-reference")', 'attached reference');
-
-  await clickButton(client, 'Render Graybox 360');
-  await waitFor(client, 'document.body.textContent.includes("graybox_render")', 'graybox pano');
+  await clickOptionalButton(client, 'Continue to Shots');
 
   await clickButton(client, 'Shots');
   await waitFor(client, 'document.body.textContent.includes("Camera 001")', 'origin camera');
@@ -55,9 +59,9 @@ try {
   await waitForValue(
     client,
     `(() => {
-      const button = [...document.querySelectorAll('button')]
-        .find((candidate) => candidate.textContent?.includes('Download AI Result'));
-      return button && !button.disabled ? 'ok' : '';
+      const image = [...document.querySelectorAll('img')]
+        .find((candidate) => candidate.alt === 'AI Result Frame' && candidate.src.startsWith('data:image'));
+      return image ? 'ok' : '';
     })()`,
     'imported AI result frame',
   );
@@ -161,6 +165,15 @@ async function clickButton(client, text, timeout = 20000) {
   }
   const available = await evaluate(client, '[...document.querySelectorAll("button")].map((button) => button.textContent?.trim()).join(" | ")');
   throw new Error(`Could not find enabled button: ${text}. Available: ${available}`);
+}
+
+async function clickOptionalButton(client, text, timeout = 3000) {
+  try {
+    await clickButton(client, text, timeout);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function waitFor(client, expression, label, timeout = 20000) {

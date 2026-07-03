@@ -1,8 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Download, Move3D, Trash2 } from 'lucide-react';
+import { CheckCircle2, Download, Film, KeyRound, Move3D, Trash2 } from 'lucide-react';
 import { CameraData, ShotStatus } from '../../domain/types';
+import {
+  DEFAULT_CAMERA_MOVE_DURATION_SECONDS,
+  CameraMoveKeyframeSlot,
+  getCameraMoveDurationSeconds,
+  getSortedCameraKeyframes,
+  hasRenderableCameraMove,
+  setTwoPointCameraKeyframe,
+  updateCameraMoveDuration,
+} from '../../engine/cameraKeyframes';
 import { downloadDataUrl } from '../../engine/projectIO';
-import { renderShotFrame } from '../../engine/renderers';
+import { getSupportedCameraMoveMp4MimeType, renderShotCameraMoveMp4, renderShotFrame } from '../../engine/renderers';
 import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
 import { ShotSelector } from '../common/ShotSelector';
 import { isShotFramingAccepted, resolveWorkspacePrimaryAction } from '../../engine/workflow';
@@ -34,6 +43,7 @@ export function ShotsWorkspace() {
     setShotCameraFlying,
     lockShotCamera,
     acceptShotFraming,
+    attachCameraMoveVideoToShot,
   } = useContinuityStore();
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
@@ -42,10 +52,29 @@ export function ShotsWorkspace() {
   const [framePreviewUrl, setFramePreviewUrl] = useState<string | undefined>();
   const [isRenderingFrame, setIsRenderingFrame] = useState(false);
   const [isExportingFrame, setIsExportingFrame] = useState(false);
+  const [cameraMovePreviewUrl, setCameraMovePreviewUrl] = useState<string | undefined>();
+  const [isExportingCameraMove, setIsExportingCameraMove] = useState(false);
+  const [cameraMoveProgress, setCameraMoveProgress] = useState(0);
+  const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
 
   const exportFrameFileName = selectedShot
     ? `${selectedShot.name.replace(/\s+/g, '_').toLowerCase()}_${selectedShot.exportSettings.width}x${selectedShot.exportSettings.height}.png`
     : 'camera_frame.png';
+  const cameraMoveFileName = selectedShot
+    ? `${selectedShot.name.replace(/\s+/g, '_').toLowerCase()}_camera_move.mp4`
+    : 'camera_move.mp4';
+  const cameraMoveKeyframes = useMemo(
+    () => getSortedCameraKeyframes(selectedShot?.cameraKeyframes ?? []),
+    [selectedShot?.cameraKeyframes],
+  );
+  const cameraMoveDurationSeconds = selectedShot
+    ? getCameraMoveDurationSeconds(cameraMoveKeyframes, DEFAULT_CAMERA_MOVE_DURATION_SECONDS)
+    : DEFAULT_CAMERA_MOVE_DURATION_SECONDS;
+  const cameraMoveReady = hasRenderableCameraMove(cameraMoveKeyframes);
+  const cameraMoveAsset = selectedShot?.assets.cameraMoveVideoAssetId
+    ? project.assets.assets[selectedShot.assets.cameraMoveVideoAssetId]
+    : undefined;
+  const supportedMp4MimeType = getSupportedCameraMoveMp4MimeType();
 
   const exportCameraFrame = useCallback(async () => {
     if (!selectedShot) return;
@@ -60,11 +89,82 @@ export function ShotsWorkspace() {
     }
   }, [exportFrameFileName, project, selectedShot, updateShot]);
 
+  const updateCameraMoveKeyframes = useCallback((keyframes: typeof cameraMoveKeyframes) => {
+    if (!selectedShot) return;
+    updateShot(selectedShot.id, {
+      cameraKeyframes: keyframes,
+      assets: {
+        ...selectedShot.assets,
+        cameraMoveVideoAssetId: undefined,
+      },
+    });
+    setCameraMovePreviewUrl(undefined);
+    setCameraMoveError(undefined);
+  }, [selectedShot, updateShot]);
+
+  const captureCameraMoveKeyframe = useCallback((slot: CameraMoveKeyframeSlot) => {
+    if (!selectedShot) return;
+    updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
+      keyframes: selectedShot.cameraKeyframes,
+      slot,
+      camera: selectedShot.camera,
+      durationSeconds: cameraMoveDurationSeconds,
+    }));
+  }, [cameraMoveDurationSeconds, selectedShot, updateCameraMoveKeyframes]);
+
+  const changeCameraMoveDuration = useCallback((durationSeconds: number) => {
+    if (!selectedShot) return;
+    updateCameraMoveKeyframes(updateCameraMoveDuration(selectedShot.cameraKeyframes, durationSeconds));
+  }, [selectedShot, updateCameraMoveKeyframes]);
+
+  const exportCameraMoveVideo = useCallback(async () => {
+    if (!selectedShot) return;
+    const mimeType = getSupportedCameraMoveMp4MimeType();
+    if (!mimeType) {
+      setCameraMoveError('MP4 export is not supported in this browser.');
+      return;
+    }
+    if (!hasRenderableCameraMove(selectedShot.cameraKeyframes)) {
+      setCameraMoveError('Capture start and end camera keyframes before exporting MP4.');
+      return;
+    }
+
+    setIsExportingCameraMove(true);
+    setCameraMoveProgress(0);
+    setCameraMoveError(undefined);
+    try {
+      const video = await renderShotCameraMoveMp4(project, selectedShot, {
+        mimeType,
+        frameRate: 30,
+        onProgress: setCameraMoveProgress,
+      });
+      const asset = attachCameraMoveVideoToShot(selectedShot.id, {
+        name: cameraMoveFileName,
+        dataUrl: video.dataUrl,
+        mimeType: video.mimeType,
+        width: video.width,
+        height: video.height,
+        durationSeconds: video.durationSeconds,
+        frameRate: video.frameRate,
+      });
+      setCameraMovePreviewUrl(asset.uri);
+      downloadDataUrl(asset.uri, asset.name);
+    } catch (error) {
+      setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
+    } finally {
+      setIsExportingCameraMove(false);
+    }
+  }, [attachCameraMoveVideoToShot, cameraMoveFileName, project, selectedShot]);
+
   useEffect(() => {
     if (!selectedShot || !shotCameraFlying) return;
     draftCameraRef.current = selectedShot.camera;
     setFramePreviewUrl(undefined);
   }, [selectedShot?.id, selectedShot?.camera, shotCameraFlying]);
+
+  useEffect(() => {
+    setCameraMovePreviewUrl(cameraMoveAsset?.uri);
+  }, [cameraMoveAsset?.uri, selectedShot?.id]);
 
   const framePreviewKey = useMemo(() => {
     if (!selectedShot) return '';
@@ -307,6 +407,82 @@ export function ShotsWorkspace() {
                 {isExportingFrame ? 'Exporting...' : `Download Frame (${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height})`}
               </IconButton>
             </Panel>
+            <Panel title="Camera Move MP4">
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <IconButton
+                    onClick={() => captureCameraMoveKeyframe('start')}
+                    disabled={shotCameraFlying}
+                    className="w-full"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                    Set Start
+                  </IconButton>
+                  <IconButton
+                    onClick={() => captureCameraMoveKeyframe('end')}
+                    disabled={shotCameraFlying}
+                    className="w-full"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                    Set End
+                  </IconButton>
+                </div>
+                <Field
+                  label="Duration Seconds"
+                  hint={cameraMoveKeyframes.length < 2 ? 'Capture the end keyframe before changing duration.' : undefined}
+                >
+                  <TextInput
+                    type="number"
+                    min="0.5"
+                    max="30"
+                    step="0.5"
+                    value={cameraMoveDurationSeconds}
+                    disabled={cameraMoveKeyframes.length < 2}
+                    onChange={(event) => changeCameraMoveDuration(Number(event.target.value))}
+                  />
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  {['Start', 'End'].map((label) => {
+                    const keyframe = cameraMoveKeyframes.find((item) => item.label === label);
+                    return (
+                      <div key={label} className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                        <div className="font-semibold text-zinc-800">{label}</div>
+                        {keyframe ? `${keyframe.timeSeconds.toFixed(1)}s · ${formatVec3(keyframe.camera.position)}` : 'Not set'}
+                      </div>
+                    );
+                  })}
+                </div>
+                <IconButton
+                  onClick={() => void exportCameraMoveVideo()}
+                  disabled={!cameraMoveReady || isExportingCameraMove || !supportedMp4MimeType}
+                  className="w-full"
+                >
+                  <Film className="h-4 w-4" />
+                  {isExportingCameraMove ? `Exporting ${Math.round(cameraMoveProgress * 100)}%` : 'Export MP4'}
+                </IconButton>
+                {!supportedMp4MimeType && (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                    MP4 export is not supported in this browser.
+                  </p>
+                )}
+                {cameraMoveError && (
+                  <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                    {cameraMoveError}
+                  </p>
+                )}
+                {cameraMovePreviewUrl ? (
+                  <video
+                    src={cameraMovePreviewUrl}
+                    controls
+                    className="aspect-video w-full rounded-md border border-zinc-200 bg-zinc-950"
+                  />
+                ) : (
+                  <p className="text-xs text-zinc-500">
+                    The exported MP4 will be saved into this shot and included in the final package when enabled.
+                  </p>
+                )}
+              </div>
+            </Panel>
             </>
           )}
         />
@@ -385,4 +561,8 @@ export function ShotsWorkspace() {
       </div>
     </WorkspaceLayout>
   );
+}
+
+function formatVec3(value: CameraData['position']): string {
+  return value.map((item) => item.toFixed(1)).join(', ');
 }

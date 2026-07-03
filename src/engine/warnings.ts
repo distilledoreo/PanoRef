@@ -1,5 +1,6 @@
 import { STYLED_PANO } from '../domain/copy';
 import { LocationProject, Shot, WarningItem } from '../domain/types';
+import { hasRenderableCameraMove } from './cameraKeyframes';
 import { getPanoMatchQuality } from './sync';
 
 export function getProjectWarnings(project: LocationProject): WarningItem[] {
@@ -71,6 +72,30 @@ export function getShotWarnings(project: LocationProject, shot: Shot): WarningIt
       id: `${shot.id}-aspect-mismatch`,
       severity: 'warning',
       message: 'Shot export aspect ratio differs from the camera preview aspect ratio.',
+    });
+  }
+
+  if (
+    shot.exportSettings.includeCameraMoveVideo
+    && hasRenderableCameraMove(shot.cameraKeyframes)
+    && !shot.assets.cameraMoveVideoAssetId
+  ) {
+    warnings.push({
+      id: `${shot.id}-missing-camera-move-video`,
+      severity: 'info',
+      message: 'Camera move keyframes exist, but no MP4 has been exported yet.',
+    });
+  }
+
+  if (
+    shot.exportSettings.includeCameraMoveReferenceFrames
+    && hasRenderableCameraMove(shot.cameraKeyframes)
+    && !linkedPano
+  ) {
+    warnings.push({
+      id: `${shot.id}-missing-camera-move-cubemap-references`,
+      severity: 'info',
+      message: 'Camera move clay frames can export, but cubemap references need a linked pano.',
     });
   }
 

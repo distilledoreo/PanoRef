@@ -42,14 +42,19 @@ function normalizeShot(shot: Shot): Shot {
   const legacyExportSettings = shot.exportSettings as Shot['exportSettings'] & {
     includeContinuityControlView?: boolean;
     includeSkinnedFrame?: boolean;
+    includeCameraMoveVideo?: boolean;
+    includeCameraMoveReferenceFrames?: boolean;
   };
   const legacyAssets = shot.assets as Shot['assets'] & { skinnedFrameAssetId?: string };
   const { includeContinuityControlView: _ignored, includeSkinnedFrame: _ignoredSkinned, ...exportSettings } = legacyExportSettings;
   return {
     ...shot,
+    cameraKeyframes: shot.cameraKeyframes ?? [],
     exportSettings: {
       ...exportSettings,
       includeAiResultFrame: legacyExportSettings.includeAiResultFrame ?? legacyExportSettings.includeSkinnedFrame ?? true,
+      includeCameraMoveVideo: legacyExportSettings.includeCameraMoveVideo ?? true,
+      includeCameraMoveReferenceFrames: legacyExportSettings.includeCameraMoveReferenceFrames ?? true,
     },
     assets: {
       ...shot.assets,
