@@ -6,6 +6,8 @@ import { ShotPackageError, buildShotPackage } from '../src/engine/packageExport'
 import { serializeProject, parseProject } from '../src/engine/projectIO';
 import { getProjectWarnings, getShotWarnings } from '../src/engine/warnings';
 import { getLatestGrayboxPano, getPanoAsset } from '../src/domain/selectors';
+import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
+import { addCameraMoveCubemapCropPaths, buildCameraMoveCubemapVisibility, cameraMoveCubemapVisibleStitchedPath } from '../src/engine/cameraMoveCubemap';
 
 describe('project workflow logic', () => {
   it('creates a valid default local-first project', () => {
@@ -60,6 +62,25 @@ describe('project workflow logic', () => {
     expect(parsed.shots[0].exportSettings.includeAiResultFrame).toBe(true);
     expect(parsed.shots[0].exportSettings).not.toHaveProperty('includeContinuityControlView');
     expect(parsed.shots[0].assets.aiResultFrameAssetId).toBe('asset_legacy_result');
+  });
+
+  it('normalizes legacy shots without camera keyframes or video export toggles', () => {
+    const project = createDefaultProject();
+    const legacyShot = {
+      ...project.shots[0],
+      cameraKeyframes: undefined,
+      exportSettings: {
+        ...project.shots[0].exportSettings,
+        includeCameraMoveVideo: undefined,
+        includeCameraMoveReferenceFrames: undefined,
+      },
+    };
+    project.shots = [legacyShot as unknown as typeof project.shots[0]];
+
+    const parsed = parseProject(JSON.stringify(project));
+    expect(parsed.shots[0].cameraKeyframes).toEqual([]);
+    expect(parsed.shots[0].exportSettings.includeCameraMoveVideo).toBe(true);
+    expect(parsed.shots[0].exportSettings.includeCameraMoveReferenceFrames).toBe(true);
   });
 
   it('normalizes legacy pano references without rotation', () => {
@@ -266,6 +287,130 @@ describe('project workflow logic', () => {
     shot.assets.aiResultFrameAssetId = 'asset_ai_result';
     expect(createShotPackageManifest(project, shot).files.map((file) => file.path))
       .toContain('shot_001/outputs/ai_result_frame.png');
+  });
+
+  it('adds exported camera move video and keyframe metadata to the package manifest', () => {
+    const project = createDefaultProject();
+    const shot = project.shots[0];
+    shot.cameraKeyframes = setTwoPointCameraKeyframe({
+      keyframes: setTwoPointCameraKeyframe({
+        keyframes: [],
+        slot: 'start',
+        camera: shot.camera,
+      }),
+      slot: 'end',
+      camera: {
+        ...shot.camera,
+        position: [1, 1.8, -3],
+      },
+      durationSeconds: 3,
+    });
+    shot.assets.cameraMoveVideoAssetId = 'asset_camera_move';
+
+    const manifest = createShotPackageManifest(project, shot);
+    const paths = manifest.files.map((file) => file.path);
+    expect(paths).toContain('shot_001/inputs/viewport_clay_motion.mp4');
+    expect(paths).toContain('shot_001/inputs/camera_move/clay_start.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/clay_mid.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/clay_end.png');
+    expect(paths).toContain('shot_001/metadata/camera_keyframes.json');
+    expect(paths).toContain('shot_001/metadata/camera_move_reference_frames.json');
+  });
+
+  it('adds cubemap references to the manifest when a camera move has a linked pano', () => {
+    const project = createDefaultProject();
+    const asset = createPanoAsset({
+      name: 'global_reference.png',
+      uri: 'data:image/png;base64,AAAA',
+      width: 2048,
+      height: 1024,
+    });
+    const pano = createPanoReference({
+      name: 'Canonical',
+      assetId: asset.id,
+      type: 'ai_global_reference',
+      origin: project.scene.panoOrigin,
+      width: asset.width ?? 2048,
+      height: asset.height ?? 1024,
+      isCanonical: true,
+    });
+    project.assets.assets[asset.id] = asset;
+    project.panoRefs.push(pano);
+    const shot = project.shots[0];
+    shot.linkedPanoId = pano.id;
+    shot.cameraKeyframes = setTwoPointCameraKeyframe({
+      keyframes: setTwoPointCameraKeyframe({
+        keyframes: [],
+        slot: 'start',
+        camera: shot.camera,
+      }),
+      slot: 'end',
+      camera: {
+        ...shot.camera,
+        position: [1, 1.8, -3],
+      },
+      durationSeconds: 3,
+    });
+
+    const paths = createShotPackageManifest(project, shot).files.map((file) => file.path);
+    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/px.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/nx.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/py.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/ny.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/pz.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/nz.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/cubemap_stitched.png');
+    expect(paths).toContain('shot_001/metadata/camera_move_cubemap_visibility.json');
+    expect(paths).not.toContain('shot_001/inputs/camera_move/pano_reference_start.png');
+  });
+
+  it('adds computed cubemap visible crop paths to the final manifest', () => {
+    const project = createDefaultProject();
+    const asset = createPanoAsset({
+      name: 'global_reference.png',
+      uri: 'data:image/png;base64,AAAA',
+      width: 2048,
+      height: 1024,
+    });
+    const pano = createPanoReference({
+      name: 'Canonical',
+      assetId: asset.id,
+      type: 'ai_global_reference',
+      origin: project.scene.panoOrigin,
+      width: asset.width ?? 2048,
+      height: asset.height ?? 1024,
+      isCanonical: true,
+    });
+    project.assets.assets[asset.id] = asset;
+    project.panoRefs.push(pano);
+    const shot = project.shots[0];
+    shot.linkedPanoId = pano.id;
+    shot.cameraKeyframes = setTwoPointCameraKeyframe({
+      keyframes: setTwoPointCameraKeyframe({
+        keyframes: [],
+        slot: 'start',
+        camera: shot.camera,
+      }),
+      slot: 'end',
+      camera: {
+        ...shot.camera,
+        position: [1, 1.8, -3],
+      },
+      durationSeconds: 3,
+    });
+    const visibility = addCameraMoveCubemapCropPaths(buildCameraMoveCubemapVisibility(
+      project,
+      shot,
+      pano,
+      [{ id: 'start', label: 'Start', timeSeconds: 0, camera: shot.camera }],
+      { faceSize: 128, columns: 5, rows: 3 },
+    ));
+
+    const paths = createShotPackageManifest(project, shot, visibility).files.map((file) => file.path);
+    expect(visibility.frames[0].visibleFaces.length).toBeGreaterThan(0);
+    const stitchedPath = cameraMoveCubemapVisibleStitchedPath('start');
+    expect(stitchedPath).toBeTruthy();
+    expect(paths).toContain(`shot_001/${stitchedPath}`);
   });
 
   it('fails gracefully when exporting without a selected shot', async () => {

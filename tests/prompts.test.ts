@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { generateGrayboxReferencePrompt } from '../src/engine/prompts';
+import { createDefaultProject } from '../src/domain/defaults';
+import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
+import { generateGrayboxReferencePrompt, generateVideoPrompt } from '../src/engine/prompts';
 
 describe('graybox reference prompt', () => {
   it('includes the continuity template and creative brief', () => {
@@ -26,5 +28,28 @@ describe('graybox reference prompt', () => {
     expect(prompt).toContain('The output must be a 16:9 image containing a centered 2:1 equirectangular panorama band.');
     expect(prompt).not.toContain('1920');
     expect(prompt).not.toContain('1080');
+  });
+
+  it('mentions the camera move MP4 when a shot has exported motion control', () => {
+    const shot = createDefaultProject().shots[0];
+    shot.cameraKeyframes = setTwoPointCameraKeyframe({
+      keyframes: setTwoPointCameraKeyframe({
+        keyframes: [],
+        slot: 'start',
+        camera: shot.camera,
+      }),
+      slot: 'end',
+      camera: {
+        ...shot.camera,
+        position: [1, 1.8, -3],
+      },
+    });
+    shot.assets.cameraMoveVideoAssetId = 'asset_camera_move';
+
+    const prompt = generateVideoPrompt(shot);
+    expect(prompt).toContain('Use viewport_clay_motion.mp4 as the camera-motion');
+    expect(prompt).toContain('inputs/camera_move/cubemap/');
+    expect(prompt).toContain('metadata/camera_move_cubemap_visibility.json');
+    expect(prompt).toContain('Do not treat the cubemap as the camera lens');
   });
 });

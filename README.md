@@ -26,7 +26,7 @@ Persisted workflow checkpoints are saved in project JSON under `workflow`:
 
 1. **Build:** shape the graybox set in the canvas-first sandbox. The guided sidebar leads with **Render Graybox 360** once blocking and the pano origin look right. Advanced controls hold toybox layers, shortcuts, and the precision drawer.
 2. **Reference:** import a styled canonical pano or **Approve Graybox as Working Reference** when you are iterating without a final AI pano yet. Calibrate yaw and opacity when a canonical pano overlays the graybox.
-3. **Shots:** frame the active shot from the **Shot Drawer** (peek bar at the bottom). Fly the camera, lock it in the viewport, then explicitly **Accept Framing** before moving on. Pano crop and export-frame previews refresh from the locked camera.
+3. **Shots:** frame the active shot from the **Shot Drawer** (peek bar at the bottom). Fly the camera, lock it in the viewport, then explicitly **Accept Framing** before moving on. Pano crop and export-frame previews refresh from the locked camera. For camera moves, lock a start view, set **Start**, fly and lock an end view, set **End**, then export an MP4 when the browser supports MP4 recording.
 4. **Review:** export the **AI Brief ZIP**, which marks the brief as sent, then import the external AI result frame. Use the drawer to switch shots without losing production-path context.
 5. **Export:** download the final continuity ZIP for the selected shot. The manifest and warning checks live in **Check Your Work**; package include/exclude toggles stay under **Adjust / Advanced**.
 
@@ -68,6 +68,23 @@ An exported shot ZIP uses this shape:
 shot_001/
   inputs/
     viewport_clay.png
+    viewport_clay_motion.mp4
+    camera_move/
+      clay_start.png
+      clay_mid.png
+      clay_end.png
+      cubemap/
+        px.png
+        nx.png
+        py.png
+        ny.png
+        pz.png
+        nz.png
+        cubemap_stitched.png
+      cubemap_visible/
+        start_stitched.png
+        mid_stitched.png
+        end_stitched.png
     pano_crop.png
     global_reference.png
     global_graybox.png
@@ -76,6 +93,9 @@ shot_001/
   metadata/
     shot.json
     camera.json
+    camera_keyframes.json
+    camera_move_reference_frames.json
+    camera_move_cubemap_visibility.json
     landmarks.json
     location.json
   prompts/
@@ -86,6 +106,10 @@ shot_001/
 ```
 
 `inputs/viewport_clay.png` is the primary camera-locked AI control image. It renders the shot camera view from the graybox scene. Helper-only build objects such as the sun marker are omitted from this render and from `inputs/global_graybox.png`.
+
+`inputs/viewport_clay_motion.mp4` is included only after a shot camera move has been exported. It records the graybox scene from the shot's start/end camera keyframes as a 16:9 MP4, using browser MP4 recording support when available. `metadata/camera_keyframes.json` stores the captured keyframes when keyframes exist.
+
+`inputs/camera_move/` is included when camera keyframes exist and camera-move cubemap references are enabled. `clay_start.png`, `clay_mid.png`, and `clay_end.png` are graybox control frames sampled from the shot move. `cubemap/px.png`, `nx.png`, `py.png`, `ny.png`, `pz.png`, and `nz.png` are the full linked pano converted into an aligned cubemap, which avoids passing equirectangular distortion into video-to-video references. `cubemap/cubemap_stitched.png` is a single 3×2 grid image combining all six faces with labels for convenient reference. `cubemap_visible/` contains per-frame stitched strips for the graybox surfaces that the moving 16:9 shot camera can actually see. Each frame gets a single `{frameId}_stitched.png` that combines the relevant visible face crops horizontally with face labels; those crops are computed by sampling the shot-camera frustum, raycasting into the graybox scene, projecting each hit from the linked pano origin into cubemap UV space, and padding the resulting face bounds. `metadata/camera_move_reference_frames.json` records the sampled frame times and cameras. `metadata/camera_move_cubemap_visibility.json` records the sampled face bounds, crop rectangles, and crop paths.
 
 `inputs/global_reference.png` is included only when a canonical/global reference pano exists. It provides visual identity, lighting, material, and palette authority.
 
@@ -107,6 +131,7 @@ npm run goal:smoke
 ```
 
 Runtime verification should also launch the app, import a canonical pano, render a graybox 360 pano, create the **Main Structure Wide Shot**, export an AI Brief ZIP, import an external AI result frame, export a shot package, and exercise at least one warning state such as exporting before a shot exists.
+For camera-move MP4 export, verify a shot can capture Start and End keyframes from locked camera views, export a playable MP4 when the browser reports MP4 support, preview the saved clip in Shots, and include `inputs/viewport_clay_motion.mp4`, `inputs/camera_move/clay_start.png`, `inputs/camera_move/cubemap/pz.png`, `inputs/camera_move/cubemap/cubemap_stitched.png`, `metadata/camera_keyframes.json`, `metadata/camera_move_reference_frames.json`, and `metadata/camera_move_cubemap_visibility.json` in the final ZIP manifest.
 For the Build sandbox specifically, verify pressing `3` to stamp multiple Boxes, using `Esc` or `V` to return to Select, pressing `0` to stamp Person, confirming Backdrop and Sun are click-only, dragging the selected object in Select mode, toggling grid snap with `G`, moving the amber pano origin with `O`, using selected-piece shortcuts, confirming shortcuts do not fire while editing a name field, and checking that orbit center and click targets stay visually aligned with the cursor on high-DPI displays.
 
 ## Limitations
@@ -115,5 +140,5 @@ For the Build sandbox specifically, verify pressing `3` to stamp multiple Boxes,
 - Geometry editing is primitive-level only. There is no vertex editing, UV editing, shader graph, rigging, or timeline.
 - Shot packages rely on `viewport_clay.png` for camera-locked layout control rather than projected pano textures on proxy geometry.
 - Projection quality depends on pano alignment. If the canonical pano is yaw-shifted relative to the graybox pano, use the opacity compare view and set the reference yaw offset before exporting shot packages.
-- Generated images/videos are imported manually in Review.
+- Final/generated AI images and videos are imported manually in Review; the in-app MP4 export is a graybox camera-motion control clip, not final AI video generation.
 - Project assets are stored as data URLs inside the JSON project file, so large projects can become heavy.

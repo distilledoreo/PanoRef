@@ -1,5 +1,6 @@
 import {
   CameraData,
+  CameraKeyframe,
   Landmark,
   LocationProject,
   PanoCropSettings,
@@ -74,6 +75,8 @@ export const defaultShotExportSettings: ShotExportSettings = {
   includePanoCrop: true,
   includeFullPano: true,
   includeGrayboxPano: true,
+  includeCameraMoveVideo: true,
+  includeCameraMoveReferenceFrames: true,
   includeMetadata: true,
   includePrompt: true,
 };
@@ -174,6 +177,7 @@ export function createShot(params: {
     name: `Shot ${shotNumber}`,
     description: '',
     camera: params.camera,
+    cameraKeyframes: [],
     linkedPanoId: params.linkedPanoId,
     panoCrop: params.panoCrop,
     landmarkIds: [],
@@ -206,6 +210,40 @@ export function createPanoAsset(params: {
   };
 }
 
+export function createVideoAsset(params: {
+  name: string;
+  uri: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  metadata?: Record<string, unknown>;
+}): ProjectAsset {
+  return {
+    id: createId('asset'),
+    type: 'video',
+    name: params.name,
+    uri: params.uri,
+    mimeType: params.mimeType,
+    width: params.width,
+    height: params.height,
+    createdAt: nowIso(),
+    metadata: params.metadata,
+  };
+}
+
+export function createCameraKeyframe(params: {
+  label: string;
+  timeSeconds: number;
+  camera: CameraData;
+}): CameraKeyframe {
+  return {
+    id: createId('keyframe'),
+    label: params.label,
+    timeSeconds: params.timeSeconds,
+    camera: cloneCamera(params.camera),
+  };
+}
+
 export function createPanoReference(params: {
   name: string;
   assetId: string;
@@ -232,6 +270,17 @@ export function createPanoReference(params: {
     sourcePanoId: params.sourcePanoId,
     notes: params.notes,
     createdAt: nowIso(),
+  };
+}
+
+function cloneCamera(camera: CameraData): CameraData {
+  return {
+    position: [...camera.position],
+    target: [...camera.target],
+    fovDegrees: camera.fovDegrees,
+    aspectRatio: camera.aspectRatio,
+    near: camera.near,
+    far: camera.far,
   };
 }
 

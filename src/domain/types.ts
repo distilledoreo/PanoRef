@@ -93,6 +93,13 @@ export interface CameraData {
   far: number;
 }
 
+export interface CameraKeyframe {
+  id: string;
+  label: string;
+  timeSeconds: number;
+  camera: CameraData;
+}
+
 export interface PanoCropSettings {
   panoId: string;
   yawDegrees: number;
@@ -112,6 +119,8 @@ export interface ShotExportSettings {
   includePanoCrop: boolean;
   includeFullPano: boolean;
   includeGrayboxPano: boolean;
+  includeCameraMoveVideo: boolean;
+  includeCameraMoveReferenceFrames: boolean;
   includeMetadata: boolean;
   includePrompt: boolean;
 }
@@ -128,6 +137,7 @@ export interface ShotAssetRefs {
   panoCropAssetId?: string;
   finalBaseFrameAssetId?: string;
   aiResultFrameAssetId?: string;
+  cameraMoveVideoAssetId?: string;
 }
 
 export interface Shot {
@@ -136,6 +146,7 @@ export interface Shot {
   name: string;
   description: string;
   camera: CameraData;
+  cameraKeyframes: CameraKeyframe[];
   linkedPanoId?: string;
   panoCrop?: PanoCropSettings;
   landmarkIds: string[];
