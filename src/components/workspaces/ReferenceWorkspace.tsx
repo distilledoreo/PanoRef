@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, FileDown, MapPin, Sparkles, Star } from 'lucide-react';
+import { Check, FileDown, Hand, Sparkles, Star } from 'lucide-react';
 import { STYLED_PANO } from '../../domain/copy';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
@@ -11,7 +11,9 @@ import { ContextualPanel } from '../common/ContextualPanel';
 import { Field, IconButton, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
+import { LandmarkStrip, PanoLandmarkMarkers } from '../viewers/PanoLandmarkOverlay';
 import { PanoViewer } from '../viewers/PanoViewer';
+import { directionToYawPitch, subtract } from '../../engine/sync';
 import {
   hasReferenceCandidate,
   hasStyledCanonicalPano,
@@ -25,7 +27,7 @@ import { FullBleedLayout } from './WorkspaceShell';
 export function ReferenceWorkspace() {
   const [compareOpacity, setCompareOpacity] = useState(0.65);
   const [precisionOpen, setPrecisionOpen] = useState(false);
-  const [landmarksOpen, setLandmarksOpen] = useState(false);
+  const [focusedLandmarkId, setFocusedLandmarkId] = useState<string | undefined>();
   const {
     project,
     activePanoId,
@@ -105,6 +107,22 @@ export function ReferenceWorkspace() {
     );
   };
 
+  const panoOrigin = activePano?.origin ?? project.scene.panoOrigin;
+
+  const focusLandmark = (landmarkId: string, yawDegrees?: number, pitchDegrees?: number) => {
+    setFocusedLandmarkId(landmarkId);
+    const landmark = project.landmarks.find((item) => item.id === landmarkId);
+    if (!landmark) return;
+    if (yawDegrees !== undefined && pitchDegrees !== undefined) {
+      setPanoView({ yawDegrees, pitchDegrees });
+      return;
+    }
+    const { yawDegrees: targetYaw, pitchDegrees: targetPitch } = directionToYawPitch(
+      subtract(landmark.position, panoOrigin),
+    );
+    setPanoView({ yawDegrees: targetYaw, pitchDegrees: targetPitch });
+  };
+
   const approveReference = () => {
     if (canCalibrate && needsReferenceAlignment(project) && !alignmentAccepted) {
       acceptReferenceAlignment();
@@ -117,120 +135,125 @@ export function ReferenceWorkspace() {
 
   return (
     <FullBleedLayout>
-      <div className="relative h-full min-h-0">
-        <PanoViewer
-          imageUrl={activeAsset?.uri}
-          view={panoView}
-          onViewChange={setPanoView}
-          label={activePano?.name ?? 'Reference Workspace'}
-          panoRotation={activePano?.rotation}
-          compareImageUrl={canCalibrate ? grayboxAsset?.uri : undefined}
-          compareRotation={grayboxPano?.rotation}
-          compareOpacity={compareOpacity}
-        />
+      <div className="flex h-full min-h-0 flex-col p-4 md:p-5">
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] border border-subtle bg-surface-raised shadow-card">
+          <div className="relative min-h-0 flex-1">
+            <PanoViewer
+              imageUrl={activeAsset?.uri}
+              view={panoView}
+              onViewChange={setPanoView}
+              label={activePano?.name ?? 'Reference Workspace'}
+              panoRotation={activePano?.rotation}
+              compareImageUrl={canCalibrate ? grayboxAsset?.uri : undefined}
+              compareRotation={grayboxPano?.rotation}
+              compareOpacity={compareOpacity}
+            />
 
-        {!activeAsset && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-            <ContextualPanel className="max-w-sm text-center">
-              <p className="text-sm font-medium text-primary">
-                {grayboxPano
-                  ? 'Import a styled pano or approve the graybox to begin.'
-                  : 'Render a graybox in Build first.'}
-              </p>
-              <div className="pointer-events-auto mt-3 flex flex-col gap-2">
-                <StyledPanoImportButton primary highlighted={primaryAction?.id === 'import-styled-pano'} />
-                <IconButton onClick={() => void loadAttachedReference()} className="w-full">
-                  <Sparkles className="h-4 w-4" />
-                  Use Attached Reference
-                </IconButton>
-                {grayboxPano && !hasReferenceCandidate(project) && (
-                  <IconButton onClick={() => approveGrayboxForReference()} className="w-full">
-                    <Star className="h-4 w-4" />
-                    Use graybox only (skip styling)
-                  </IconButton>
-                )}
+            {!activeAsset && (
+              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-surface-base/55 backdrop-blur-[2px]">
+                <ContextualPanel className="max-w-md text-center">
+                  <p className="text-base font-semibold text-primary">
+                    {grayboxPano
+                      ? 'Import a styled pano or approve the graybox to begin.'
+                      : 'Render a graybox in Build first.'}
+                  </p>
+                  <p className="mt-1 text-sm text-secondary">
+                    Use your own reference image or the attached sample to continue.
+                  </p>
+                  <div className="pointer-events-auto mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                    <StyledPanoImportButton
+                      primary
+                      highlighted={primaryAction?.id === 'import-styled-pano'}
+                      className="min-w-44"
+                    />
+                    <IconButton onClick={() => void loadAttachedReference()} className="min-w-44">
+                      <Sparkles className="h-4 w-4" />
+                      Use Attached Reference
+                    </IconButton>
+                  </div>
+                  {grayboxPano && !hasReferenceCandidate(project) && (
+                    <button
+                      type="button"
+                      onClick={() => approveGrayboxForReference()}
+                      className="pointer-events-auto mt-3 inline-flex items-center gap-2 text-sm text-secondary transition hover:text-accent"
+                    >
+                      <Star className="h-4 w-4" />
+                      Use graybox only (skip styling)
+                    </button>
+                  )}
+                </ContextualPanel>
               </div>
-            </ContextualPanel>
-          </div>
-        )}
+            )}
 
-        {activeAsset && (
-          <div className="pointer-events-none absolute left-1/2 top-1/3 z-10 -translate-x-1/2">
-            <ContextualPanel className="text-center text-sm text-secondary">
-              Drag to look around
-              <span className="mt-1 block text-xs text-muted">Tap markers to focus</span>
-            </ContextualPanel>
-          </div>
-        )}
-
-        {activeAsset && grayboxPano && !hasStyledCanonicalPano(project) && (
-          <div className="pointer-events-none absolute bottom-6 left-6 z-10 max-w-[calc(100%-20rem)]">
-            <ContextualPanel className="flex flex-wrap items-center gap-2">
-              <StyledPanoImportButton
-                label="Import styled pano"
-                primary
-                highlighted={primaryAction?.id === 'import-styled-pano'}
-                className="min-w-40"
-              />
-              <IconButton onClick={() => void loadAttachedReference()}>
-                <Sparkles className="h-4 w-4" />
-                Use Attached Reference
-              </IconButton>
-            </ContextualPanel>
-          </div>
-        )}
-
-        {project.landmarks.length > 0 && (
-          <div className="pointer-events-none absolute bottom-28 left-6 z-10">
-            <button
-              type="button"
-              onClick={() => setLandmarksOpen((open) => !open)}
-              className="pointer-events-auto"
-            >
-              <ContextualPanel className="flex items-center gap-2 text-sm text-secondary">
-                <MapPin className="h-4 w-4 text-accent" />
-                Landmarks
-                <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs text-accent">
-                  {project.landmarks.length}
-                </span>
-              </ContextualPanel>
-            </button>
-            {landmarksOpen && (
-              <div className="pointer-events-auto mt-2 w-72 rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-3 shadow-soft">
-                <div className="space-y-2">
-                  {project.landmarks.map((landmark) => (
-                    <div key={landmark.id} className="rounded-lg border border-subtle px-3 py-2 text-sm">
-                      <div className="font-medium text-primary">{landmark.displayName}</div>
-                      {landmark.description && (
-                        <div className="text-xs text-secondary">{landmark.description}</div>
-                      )}
-                    </div>
-                  ))}
+            {activeAsset && (
+              <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
+                <div className="rounded-full border border-subtle/70 bg-surface-overlay/55 px-3 py-1.5 text-center text-xs font-medium text-secondary shadow-soft backdrop-blur-sm">
+                  <Hand className="mr-1 inline h-3.5 w-3.5 text-accent" />
+                  Drag to look around
                 </div>
               </div>
             )}
-          </div>
-        )}
 
-        <div className="pointer-events-none absolute bottom-6 right-6 z-10">
-          <PrimaryCTA
-            icon={<Check className="h-5 w-5" />}
-            label="Approve as Reference"
-            hint="Looks good? Lock this pano for your shots."
-            onClick={approveReference}
-            highlighted={primaryAction?.id === 'confirm-alignment' || isReferenceReady(project)}
-          />
+            {activeAsset && project.landmarks.length > 0 && (
+              <PanoLandmarkMarkers
+                landmarks={project.landmarks}
+                panoOrigin={panoOrigin}
+                view={panoView}
+                focusedLandmarkId={focusedLandmarkId}
+                onFocusLandmark={focusLandmark}
+              />
+            )}
+
+            {activeAsset && grayboxPano && !hasStyledCanonicalPano(project) && (
+              <div className="pointer-events-none absolute left-5 top-5 z-20">
+                <ContextualPanel className="flex flex-wrap items-center gap-2">
+                  <StyledPanoImportButton
+                    label="Import styled pano"
+                    primary
+                    highlighted={primaryAction?.id === 'import-styled-pano'}
+                    className="min-w-40"
+                  />
+                  <IconButton onClick={() => void loadAttachedReference()}>
+                    <Sparkles className="h-4 w-4" />
+                    Use Attached Reference
+                  </IconButton>
+                </ContextualPanel>
+              </div>
+            )}
+
+            <div className="pointer-events-none absolute bottom-5 right-5 z-20">
+              <PrimaryCTA
+                icon={<Check className="h-5 w-5" />}
+                label="Approve as Reference"
+                hint="Looks good? Lock this pano for your shots."
+                onClick={approveReference}
+                highlighted={primaryAction?.id === 'confirm-alignment' || isReferenceReady(project)}
+              />
+            </div>
+
+            {canCalibrate && activePano && (
+              <div className="pointer-events-none absolute right-5 top-5 z-20">
+                <button type="button" onClick={() => setPrecisionOpen(true)} className="pointer-events-auto">
+                  <ContextualPanel className="text-sm text-secondary">
+                    Alignment controls
+                  </ContextualPanel>
+                </button>
+              </div>
+            )}
+
+            {activeAsset && project.landmarks.length > 0 && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
+                <LandmarkStrip
+                  landmarks={project.landmarks.filter((landmark) => landmark.visible)}
+                  panoImageUrl={activeAsset.uri}
+                  panoOrigin={panoOrigin}
+                  focusedLandmarkId={focusedLandmarkId}
+                  onFocusLandmark={(landmarkId) => focusLandmark(landmarkId)}
+                />
+              </div>
+            )}
+          </div>
         </div>
-
-        {canCalibrate && activePano && (
-          <div className="pointer-events-none absolute right-6 top-20 z-10">
-            <button type="button" onClick={() => setPrecisionOpen(true)} className="pointer-events-auto">
-              <ContextualPanel className="text-sm text-secondary">
-                Alignment controls
-              </ContextualPanel>
-            </button>
-          </div>
-        )}
       </div>
 
       <PrecisionDrawer open={precisionOpen} title="Reference Settings" onClose={() => setPrecisionOpen(false)}>

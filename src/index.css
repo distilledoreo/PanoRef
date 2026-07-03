@@ -23,6 +23,8 @@
   --danger: #dc2626;
   --shadow-soft: 0 4px 24px rgba(28, 25, 23, 0.08);
   --shadow-card: 0 2px 12px rgba(28, 25, 23, 0.06);
+  --tray-glow: 0 10px 36px rgba(28, 25, 23, 0.14);
+  --cta-glow: 0 8px 28px var(--accent-glow);
   --radius-card: 14px;
   --radius-pill: 999px;
 }
@@ -48,6 +50,8 @@
   --danger: #f87171;
   --shadow-soft: 0 4px 32px rgba(0, 0, 0, 0.45);
   --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.35);
+  --tray-glow: 0 12px 40px rgba(45, 212, 191, 0.18), 0 4px 16px rgba(0, 0, 0, 0.5);
+  --cta-glow: 0 0 28px var(--accent-glow), 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 body {

@@ -14,6 +14,8 @@ import {
   Lock,
   Mountain,
   Move3D,
+  RotateCcw,
+  RotateCw,
   Ruler,
   Square,
   SquareStack,
@@ -23,6 +25,8 @@ import {
   Unlock,
   User,
   Wrench,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import { objectDisplayName } from '../../domain/defaults';
@@ -35,6 +39,7 @@ import {
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
 import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
+import { useThemeStore } from '../../state/useThemeStore';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { ContextualPanel } from '../common/ContextualPanel';
 import { Field, Select, TextInput } from '../common/Field';
@@ -67,8 +72,10 @@ const primaryTrayItems = trayItems.slice(0, 8);
 const overflowTrayItems = trayItems.slice(8);
 
 export function BuildWorkspace() {
+  const theme = useThemeStore((state) => state.theme);
   const [precisionOpen, setPrecisionOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [showSceneGuides, setShowSceneGuides] = useState(false);
   const {
     project,
     selectedObjectId,
@@ -184,6 +191,8 @@ export function BuildWorkspace() {
           placementType={buildMode === 'place' ? activePrimitive : undefined}
           placementLabel={primitiveLabel(activePrimitive)}
           originPlacementActive={buildMode === 'pano_origin'}
+          showSceneGuides={showSceneGuides}
+          showTransformGizmo={Boolean(selectedObject && buildMode === 'select')}
           snapToGrid={gridSnap}
           onSelectObject={selectObject}
           onPlaceObject={placeObject}
@@ -191,17 +200,23 @@ export function BuildWorkspace() {
           onMovePanoOrigin={setPanoOrigin}
         />
 
-        {selectedObject && buildMode === 'select' && (
-          <div className="pointer-events-none absolute left-1/2 top-1/3 z-10 -translate-x-1/2">
-            <ContextualPanel className="text-center text-sm text-secondary">
-              <Move3D className="mr-1.5 inline h-4 w-4 text-accent" />
-              Drag arrows to move
-            </ContextualPanel>
-          </div>
-        )}
+        <div className="pointer-events-none absolute right-5 top-5 z-10">
+          <button
+            type="button"
+            title={showSceneGuides ? 'Hide scene guides' : 'Show camera guides'}
+            onClick={() => setShowSceneGuides((visible) => !visible)}
+            className={`pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${
+              showSceneGuides
+                ? 'border-[var(--accent)] bg-accent-soft text-accent'
+                : 'border-subtle bg-surface-overlay/90 text-secondary hover:border-accent hover:text-accent'
+            }`}
+          >
+            {showSceneGuides ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+          </button>
+        </div>
 
         {selectedObject && (
-          <div className="pointer-events-none absolute right-5 top-20 z-10">
+          <div className="pointer-events-none absolute right-5 top-14 z-10">
             <ContextualPanel>
               <div className="flex items-center gap-2">
                 <TextInput
@@ -228,6 +243,10 @@ export function BuildWorkspace() {
                 </button>
               </div>
               <div className="mt-2 flex flex-wrap gap-1">
+                <QuickAction title="Rotate left (Shift+R)" onClick={() => rotateSelected(-15)}><RotateCcw className="h-3.5 w-3.5" /></QuickAction>
+                <QuickAction title="Rotate right (R)" onClick={() => rotateSelected(15)}><RotateCw className="h-3.5 w-3.5" /></QuickAction>
+                <QuickAction title="Scale down ([)" onClick={() => scaleSelected(0.9)}><ZoomOut className="h-3.5 w-3.5" /></QuickAction>
+                <QuickAction title="Scale up (])" onClick={() => scaleSelected(1.1)}><ZoomIn className="h-3.5 w-3.5" /></QuickAction>
                 <QuickAction title="Duplicate (D)" onClick={() => duplicateObject(selectedObject.id)}><Copy className="h-3.5 w-3.5" /></QuickAction>
                 <QuickAction title={selectedObject.locked ? 'Unlock (L)' : 'Lock (L)'} onClick={() => toggleObjectLocked(selectedObject.id)}>
                   {selectedObject.locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
@@ -274,6 +293,7 @@ export function BuildWorkspace() {
             onClick={() => void renderGrayboxPano()}
             disabled={isRenderingGraybox}
             highlighted={primaryAction?.id === 'render-graybox'}
+            appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
           />
         </div>
 
@@ -383,7 +403,7 @@ function BuildObjectTray({
           </div>
         </div>
       )}
-      <div className="pointer-events-auto rounded-[22px] border border-subtle bg-surface-overlay px-3 py-2.5 shadow-soft backdrop-blur">
+      <div className="pointer-events-auto rounded-[22px] border border-subtle bg-surface-overlay px-3 py-2.5 shadow-[var(--tray-glow)] backdrop-blur dark:border-[var(--accent)]/25">
         <div className="flex items-center gap-1">
           {primaryTrayItems.map(({ type, label, icon: Icon }) => (
             <div key={type}>

@@ -19,7 +19,6 @@ const materialByTheme: Record<SceneVisualTheme, Record<SceneObject['category'], 
   },
 };
 
-const selectedMaterial = new THREE.MeshStandardMaterial({ color: 0x14b8a6, roughness: 0.52 });
 const darkFloorMaterial = new THREE.MeshStandardMaterial({ color: 0x242c32, roughness: 0.92 });
 const panoOriginMaterial = new THREE.MeshStandardMaterial({ color: 0xd08a28, emissive: 0x3a2306 });
 const landmarkMaterial = new THREE.MeshStandardMaterial({ color: 0x5f9b7a, emissive: 0x0b2e1e });
@@ -30,7 +29,6 @@ const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x111111 });
 const SHARED_MATERIALS = new Set<THREE.Material>([
   ...Object.values(materialByTheme.light),
   ...Object.values(materialByTheme.dark),
-  selectedMaterial,
   darkFloorMaterial,
   panoOriginMaterial,
   landmarkMaterial,
@@ -46,6 +44,8 @@ export function buildScene(
     selectedShotId?: string;
     hideShotFrustums?: boolean;
     showHelpers?: boolean;
+    showSceneGuides?: boolean;
+    showPanoOrigin?: boolean;
     hiddenObjectTypes?: SceneObjectType[];
     previewObject?: SceneObject;
     theme?: SceneVisualTheme;
@@ -84,8 +84,13 @@ export function buildScene(
     scene.add(createPreviewMesh(options.previewObject));
   }
 
-  if (options.showHelpers !== false) {
+  const showGuides = options.showSceneGuides ?? (options.showHelpers !== false);
+  const showPanoOrigin = options.showPanoOrigin ?? showGuides;
+
+  if (showPanoOrigin) {
     scene.add(createPanoOrigin(project.scene.panoOrigin));
+  }
+  if (showGuides) {
     for (const landmark of project.landmarks) {
       if (landmark.visible) scene.add(createLandmarkMarker(landmark));
     }
@@ -111,13 +116,17 @@ export function buildScene(
   return scene;
 }
 
-export function createObject3D(object: SceneObject, selected = false, theme: SceneVisualTheme = 'light'): THREE.Object3D {
+export function resolveObjectMaterial(
+  object: SceneObject,
+  theme: SceneVisualTheme = 'light',
+): THREE.MeshStandardMaterial {
+  if (theme === 'dark' && object.type === 'floor') return darkFloorMaterial;
+  return materialByTheme[theme][object.category];
+}
+
+export function createObject3D(object: SceneObject, _selected = false, theme: SceneVisualTheme = 'light'): THREE.Object3D {
   let node: THREE.Object3D;
-  const material = selected
-    ? selectedMaterial
-    : theme === 'dark' && object.type === 'floor'
-      ? darkFloorMaterial
-      : materialByTheme[theme][object.category];
+  const material = resolveObjectMaterial(object, theme);
   const [w, h, d] = object.dimensions;
 
   switch (object.type) {

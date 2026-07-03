@@ -201,7 +201,6 @@ export function ExportWorkspace() {
                 onClick={() => void exportSelectedShots()}
                 disabled={isExportingPackage || selectedShotIds.size === 0}
                 highlighted={primaryAction?.id === 'export-final-zip'}
-                tone="success"
                 layout="inline"
               />
             </div>

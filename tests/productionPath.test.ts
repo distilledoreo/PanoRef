@@ -25,7 +25,8 @@ describe('workflow guidance UI', () => {
     expect(shots).toContain('ShotThumbnail');
     expect(shotInfoCard).toContain('Open in 360');
     expect(shots).toContain('PrecisionDrawer');
-    expect(shots).toContain('tone="success"');
+    expect(shots).not.toContain('tone="success"');
+    expect(shots).toContain('PrimaryCTA');
     expect(shots).toContain('Accept Framing');
     expect(shots).toContain('Camera Move MP4');
     expect(shots).toContain('Export MP4');

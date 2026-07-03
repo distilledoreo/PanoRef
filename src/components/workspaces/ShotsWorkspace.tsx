@@ -435,7 +435,6 @@ export function ShotsWorkspace() {
                 onClick={() => void exportCameraFrame()}
                 disabled={!selectedShot || shotCameraFlying || isExportingFrame || isRenderingFrame}
                 highlighted={primaryAction?.id === 'accept-framing' || primaryAction?.id === 'lock-camera'}
-                tone="success"
                 layout="inline"
               />
             </div>

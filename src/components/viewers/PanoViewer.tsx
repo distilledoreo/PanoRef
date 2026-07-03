@@ -2,9 +2,12 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Euler, PanoViewState } from '../../domain/types';
 import { panoYawToThreeJsYawDegrees } from '../../engine/sync';
+import { useThemeStore } from '../../state/useThemeStore';
 
-const EMPTY_COLOR = 0xe4e7e5;
-const BACKGROUND_COLOR = 0xf4f6f4;
+const THEME_COLORS = {
+  light: { empty: 0xe4e7e5, background: 0xf4f6f4 },
+  dark: { empty: 0x243040, background: 0x0f1419 },
+} as const;
 
 export function PanoViewer({
   imageUrl,
@@ -25,6 +28,7 @@ export function PanoViewer({
   compareRotation?: Euler;
   compareOpacity?: number;
 }) {
+  const theme = useThemeStore((state) => state.theme);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const activeSceneRef = useRef<THREE.Scene | null>(null);
@@ -42,7 +46,7 @@ export function PanoViewer({
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setClearColor(BACKGROUND_COLOR, 1);
+    renderer.setClearColor(THEME_COLORS[theme].background, 1);
     renderer.autoClear = false;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(renderer.domElement);
@@ -56,8 +60,8 @@ export function PanoViewer({
     const camera = new THREE.PerspectiveCamera(view.fovDegrees, container.clientWidth / container.clientHeight, 0.1, 1000);
     cameraRef.current = camera;
 
-    const compareSphere = createSphere(new THREE.MeshBasicMaterial({ color: EMPTY_COLOR }));
-    const activeSphere = createSphere(new THREE.MeshBasicMaterial({ color: EMPTY_COLOR }));
+    const compareSphere = createSphere(new THREE.MeshBasicMaterial({ color: THEME_COLORS[theme].empty }));
+    const activeSphere = createSphere(new THREE.MeshBasicMaterial({ color: THEME_COLORS[theme].empty }));
     compareScene.add(compareSphere);
     activeScene.add(activeSphere);
     compareSphereRef.current = compareSphere;
@@ -97,7 +101,7 @@ export function PanoViewer({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, []);
+  }, [theme]);
 
   const viewRef = useRef(view);
   const activeRotationRef = useRef(panoRotation);
@@ -225,7 +229,7 @@ function setPanoSphereMaterial(params: {
 }) {
   if (!params.sphere) return;
   if (!params.imageUrl) {
-    const material = new THREE.MeshBasicMaterial({ color: EMPTY_COLOR });
+    const material = new THREE.MeshBasicMaterial({ color: THEME_COLORS.light.empty });
     setSphereMaterial(params.sphere, material, params.isCancelled);
     return;
   }
