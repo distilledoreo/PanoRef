@@ -208,16 +208,7 @@ export function updateTransformGizmo(
 
   gizmo.position.copy(computeGizmoAnchor(box, object.type));
   gizmo.scale.setScalar(scale);
-  const mode = gizmo.userData.gizmoMode as GizmoMode | undefined;
-  if (mode === 'rotate' || mode === 'scale') {
-    gizmo.rotation.set(0, 0, 0);
-  } else {
-    gizmo.rotation.set(
-      THREE.MathUtils.degToRad(object.transform.rotation[0]),
-      THREE.MathUtils.degToRad(object.transform.rotation[1]),
-      THREE.MathUtils.degToRad(object.transform.rotation[2]),
-    );
-  }
+  gizmo.rotation.set(0, 0, 0);
 
   outline.update();
 }

@@ -9,7 +9,9 @@ import {
   computeGizmoAnchor,
   computeGizmoScale,
   createGizmoGroup,
+  createSelectionOutline,
   gizmoHitPriority,
+  updateTransformGizmo,
 } from '../src/engine/transformGizmo';
 
 describe('build selection visuals', () => {
@@ -53,6 +55,18 @@ describe('build selection visuals', () => {
     expect(next).toEqual([1.4, 2.29, 1.4]);
     const uniform = applyAxisScaleDelta([1.4, 1.75, 1.4], 'uniform', 0.4);
     expect(uniform).toEqual([1.94, 2.29, 1.94]);
+  });
+
+  it('keeps translate gizmos world-aligned even when the object is rotated', () => {
+    const box = createSceneObject('box', 1);
+    box.transform.rotation = [0, 45, 0];
+    const mesh = createObject3D(box, false, 'light');
+    const gizmo = createGizmoGroup('translate');
+    const outline = createSelectionOutline(mesh);
+    updateTransformGizmo(gizmo, outline, mesh, box);
+    expect(gizmo.rotation.x).toBe(0);
+    expect(gizmo.rotation.y).toBe(0);
+    expect(gizmo.rotation.z).toBe(0);
   });
 
   it('creates translate, rotate, and scale gizmo groups with mode metadata', () => {
