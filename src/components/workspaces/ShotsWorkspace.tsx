@@ -37,6 +37,7 @@ import { Field, IconButton, Panel, Select, TextArea, TextInput } from '../common
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
 import { ShotFilmstrip } from '../common/ShotFilmstrip';
+import { ShotThumbnail } from '../common/ShotThumbnail';
 import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
@@ -419,7 +420,7 @@ export function ShotsWorkspace() {
             onSelectShot={selectShot}
             renderThumbnail={(shot) => (
               shot.id === selectedShot?.id && framePreviewUrl ? (
-                <img src={framePreviewUrl} alt="" className="h-full w-full object-cover" />
+                <ShotThumbnail project={project} shot={shot} overrideSrc={framePreviewUrl} />
               ) : undefined
             )}
           />

@@ -1,6 +1,7 @@
 import React from 'react';
 import { LocationProject, Shot } from '../../domain/types';
 import { getShotWarnings } from '../../engine/warnings';
+import { ShotThumbnail } from './ShotThumbnail';
 import { WarningPopover } from './StatusBadge';
 
 export function ShotFilmstrip({
@@ -19,6 +20,7 @@ export function ShotFilmstrip({
       {project.shots.map((shot) => {
         const selected = shot.id === selectedShotId;
         const warnings = getShotWarnings(project, shot);
+        const customThumbnail = renderThumbnail?.(shot);
         const card = (
           <button
             type="button"
@@ -30,11 +32,7 @@ export function ShotFilmstrip({
             }`}
           >
             <div className="aspect-video w-full overflow-hidden rounded-lg bg-surface-muted">
-              {renderThumbnail?.(shot) ?? (
-                <div className="flex h-full items-center justify-center text-[10px] text-muted">
-                  {shot.shotNumber}
-                </div>
-              )}
+              {customThumbnail ?? <ShotThumbnail project={project} shot={shot} />}
             </div>
             <div>
               <div className="truncate text-[11px] font-semibold text-primary">{shot.shotNumber}</div>

@@ -12,11 +12,19 @@ const toneMap: Record<StatusLevel, string> = {
   needs_work: 'ring-2 ring-amber-400/70 shadow-[0_0_12px_rgba(251,146,60,0.45)]',
 };
 
-export function StatusGlow({ level, children }: { level: StatusLevel; children: React.ReactNode }) {
+export function StatusGlow({
+  level,
+  children,
+  showIcon = true,
+}: {
+  level: StatusLevel;
+  children: React.ReactNode;
+  showIcon?: boolean;
+}) {
   return (
     <div className={`relative rounded-xl transition ${toneMap[level]}`}>
       {children}
-      {level !== 'ready' && (
+      {showIcon && level !== 'ready' && (
         <StatusIcon level={level} className="absolute -right-1 -top-1" />
       )}
     </div>
@@ -63,12 +71,15 @@ export function WarningPopover({
 
   return (
     <div className="relative">
+      <StatusGlow level={level} showIcon={false}>{children}</StatusGlow>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="block w-full text-left"
+        className="absolute -right-1 -top-1 z-10"
+        aria-label={`${warnings.length} issue${warnings.length === 1 ? '' : 's'}`}
+        title={`${warnings.length} issue${warnings.length === 1 ? '' : 's'}`}
       >
-        <StatusGlow level={level}>{children}</StatusGlow>
+        <StatusIcon level={level} />
       </button>
       {open && (
         <div className="absolute bottom-full left-0 z-20 mb-2 w-64 rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-3 shadow-soft">

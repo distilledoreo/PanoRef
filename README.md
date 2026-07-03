@@ -26,9 +26,9 @@ Persisted workflow checkpoints are saved in project JSON under `workflow`:
 
 1. **Build:** shape the graybox set in the full-bleed sandbox. The bottom object tray shows the primary primitives, the compact **More** tool opens select/origin/snap and extra primitives, and **Render 360 Reference** captures the graybox pano when blocking and pano origin look right.
 2. **Reference:** import a styled canonical pano or approve the graybox when iterating without a final AI pano yet. Import and alignment controls appear as contextual cards or in the precision drawer instead of a permanent sidebar.
-3. **Shots:** select an active shot from the bottom filmstrip. The shot opens in a composed/locked state; use **Frame** or the shot menu to fly the camera, lock it in the viewport, then explicitly **Accept Framing** before moving on. For camera moves, lock a start view, set **Start**, fly and lock an end view, set **End**, then export an MP4 when the browser supports MP4 recording.
-4. **Review:** export the **AI Brief**, which marks the brief as sent, then import the external AI result frame. Compare, notes, prompts, and result details live in the drawer.
-5. **Export:** choose shots and download the final continuity ZIP packages with **Export Selected Shots**. Package include/exclude toggles stay in **Export Settings**.
+3. **Shots:** select an active shot from the bottom filmstrip. Thumbnails use real project media when it exists, starting with the live locked preview and then imported or linked reference assets. The shot opens in a composed/locked state; use **Frame** or the shot menu to fly the camera, lock it in the viewport, then explicitly **Accept Framing** before moving on. For camera moves, lock a start view, set **Start**, fly and lock an end view, set **End**, then export an MP4 when the browser supports MP4 recording.
+4. **Review:** export the **AI Brief**, which marks the brief as sent, then import the external AI result frame. Review cards expand to the available grid space and show the best real shot image available instead of a text-only placeholder. Compare, notes, prompts, and result details live in the drawer.
+5. **Export:** choose shots from the media selector and download the final continuity ZIP packages with **Export Selected Shots**. Package include/exclude toggles stay in **Export Settings**.
 
 ## Build Shortcuts
 
@@ -123,7 +123,7 @@ npm run build
 npm run goal:smoke
 ```
 
-Runtime verification should also launch the app, render a graybox 360 pano with **Render 360 Reference**, import a canonical pano, approve reference alignment, frame and accept a shot, export an **AI Brief**, import an external AI result frame, export selected shot packages, and exercise at least one warning state such as exporting before a shot exists.
+Runtime verification should also launch the app, render a graybox 360 pano with **Render 360 Reference**, import a canonical pano, approve reference alignment, frame and accept a shot, confirm the filmstrip/Review/Export shot thumbnails use real available media, export an **AI Brief**, import an external AI result frame, export selected shot packages, and exercise at least one warning state such as exporting before a shot exists.
 For camera-move MP4 export, verify a shot can capture Start and End keyframes from locked camera views, export a playable MP4 when the browser reports MP4 support, preview the saved clip in Shots, and include `inputs/viewport_clay_motion.mp4`, `inputs/camera_move/clay_start.png`, `inputs/camera_move/cubemap/pz.png`, `inputs/camera_move/cubemap/cubemap_stitched.png`, `metadata/camera_keyframes.json`, `metadata/camera_move_reference_frames.json`, and `metadata/camera_move_cubemap_visibility.json` in the final ZIP manifest.
 For the Build sandbox specifically, verify pressing `3` to stamp multiple Boxes, using `Esc` or `V` to return to Select, pressing `0` to stamp Person, confirming Backdrop and Sun are click-only, dragging the selected object in Select mode, toggling grid snap with `G`, moving the amber pano origin with `O`, using selected-piece shortcuts, confirming shortcuts do not fire while editing a name field, and checking that orbit center and click targets stay visually aligned with the cursor on high-DPI displays.
 

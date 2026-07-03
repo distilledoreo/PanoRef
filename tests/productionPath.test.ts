@@ -16,7 +16,11 @@ describe('workflow guidance UI', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     const shell = readFileSync(new URL('../src/components/workspaces/WorkspaceShell.tsx', import.meta.url), 'utf8');
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
+    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
+    const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
     expect(shots).toContain('ShotFilmstrip');
+    expect(shots).toContain('ShotThumbnail');
     expect(shots).toContain('PrecisionDrawer');
     expect(shots).toContain('Accept Framing');
     expect(shots).toContain('Camera Move MP4');
@@ -26,9 +30,12 @@ describe('workflow guidance UI', () => {
     expect(build).toContain('primaryTrayItems');
     expect(build).toContain('overflowTrayItems');
     expect(build).toContain('Render 360 Reference');
-    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
     expect(exportWorkspace).toContain('Camera move cubemap references');
     expect(exportWorkspace).toContain('Export Settings');
+    expect(exportWorkspace).toContain('aria-label={`Export Shot');
+    expect(review).toContain('ShotThumbnail');
+    expect(review).toContain('gridTemplateColumns');
+    expect(shotThumbnail).toContain('resolveShotThumbnail');
     expect(shell).toContain('FullBleedLayout');
     expect(shell).not.toContain('ShotDrawer');
     expect(shell).not.toContain('WorkspaceWithDrawer');

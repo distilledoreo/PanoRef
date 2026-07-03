@@ -7,6 +7,7 @@ import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
+import { ShotThumbnail } from '../common/ShotThumbnail';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { FullBleedLayout } from './WorkspaceShell';
 
@@ -145,34 +146,39 @@ export function ExportWorkspace() {
               {project.shots.map((shot) => {
                 const warnings = [...getProjectWarnings(project), ...getShotWarnings(project, shot)];
                 const checked = selectedShotIds.has(shot.id);
+                const active = selectedShotId === shot.id;
                 return (
-                  <label
+                  <div
                     key={shot.id}
-                    className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
+                    className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
                       checked ? 'border-[var(--accent)] bg-accent-soft' : 'border-subtle hover:border-strong'
-                    }`}
+                    } ${active ? 'ring-1 ring-[var(--accent)]' : ''}`}
                   >
                     <input
                       type="checkbox"
                       checked={checked}
                       onChange={() => toggleShotSelection(shot.id)}
                       className="accent-[var(--accent)]"
+                      aria-label={`Export Shot ${shot.shotNumber}`}
                     />
                     <button
                       type="button"
                       onClick={() => selectShot(shot.id)}
-                      className="min-w-0 flex-1 text-left"
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
-                      <div className="text-sm font-medium text-primary">Shot {shot.shotNumber}</div>
-                      <div className="truncate text-xs text-secondary">{shot.name}</div>
+                      <ShotThumbnail project={project} shot={shot} className="h-14 w-24 shrink-0" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium text-primary">Shot {shot.shotNumber}</span>
+                        <span className="block truncate text-xs text-secondary">{shot.name}</span>
+                      </span>
                     </button>
                     {warnings.length > 0 && (
-                      <span className="text-[10px] text-amber-600">{warnings.length}</span>
+                      <span className="shrink-0 text-[10px] text-amber-600">{warnings.length}</span>
                     )}
                     {exportingShotId === shot.id && (
-                      <span className="text-[10px] text-accent">Exporting...</span>
+                      <span className="shrink-0 text-[10px] text-accent">Exporting...</span>
                     )}
-                  </label>
+                  </div>
                 );
               })}
               {project.shots.length === 0 && (

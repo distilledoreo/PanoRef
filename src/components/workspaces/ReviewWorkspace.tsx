@@ -20,6 +20,7 @@ import { getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, TextArea } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
+import { ShotThumbnail } from '../common/ShotThumbnail';
 import { StatusGlow } from '../common/StatusBadge';
 import { isAiBriefSent, resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { FullBleedLayout } from './WorkspaceShell';
@@ -131,7 +132,16 @@ export function ReviewWorkspace() {
           </div>
         </header>
 
-        <div className={`min-h-0 flex-1 ${view === 'grid' ? 'grid grid-cols-2 gap-4 md:grid-cols-3' : 'space-y-2 overflow-y-auto'}`}>
+        <div
+          className={`min-h-0 flex-1 overflow-y-auto ${
+            view === 'grid'
+              ? 'grid auto-rows-min content-start gap-4'
+              : 'space-y-2'
+          }`}
+          style={view === 'grid'
+            ? { gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 360px))' }
+            : undefined}
+        >
           {filteredShots.map((shot) => (
             <div key={shot.id}>
               <ShotReviewCard
@@ -262,11 +272,6 @@ function ShotReviewCard({
     : shot.status === 'needs_fix' || warnings.length > 0
       ? 'needs_work'
       : 'ready';
-  const aiAsset = shot.assets.aiResultFrameAssetId
-    ? project.assets.assets[shot.assets.aiResultFrameAssetId]
-    : shot.assets.finalBaseFrameAssetId
-      ? project.assets.assets[shot.assets.finalBaseFrameAssetId]
-      : undefined;
 
   if (view === 'list') {
     return (
@@ -278,9 +283,7 @@ function ShotReviewCard({
         }`}
       >
         <StatusGlow level={level}>
-          <div className="h-12 w-20 overflow-hidden rounded-lg bg-surface-muted">
-            {aiAsset?.uri ? <img src={aiAsset.uri} alt="" className="h-full w-full object-cover" /> : null}
-          </div>
+          <ShotThumbnail project={project} shot={shot} className="h-14 w-24 shrink-0" />
         </StatusGlow>
         <div className="min-w-0 flex-1">
           <div className="font-medium text-primary">{shot.shotNumber} {shot.name}</div>
@@ -294,23 +297,30 @@ function ShotReviewCard({
     <button
       type="button"
       onClick={onSelect}
-      className={`rounded-xl border p-3 text-left transition ${
+      className={`flex h-full w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border text-left transition ${
         selected ? 'border-[var(--accent)] bg-accent-soft shadow-card' : 'border-subtle bg-surface-raised hover:border-strong'
       }`}
     >
-      <StatusGlow level={level}>
-        <div className="aspect-video w-full overflow-hidden rounded-lg bg-surface-muted">
-          {aiAsset?.uri ? (
-            <img src={aiAsset.uri} alt={shot.name} className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex h-full items-center justify-center text-xs text-muted">{shot.shotNumber}</div>
-          )}
+      <div className="flex items-center justify-between gap-3 px-3 py-2">
+        <div className="min-w-0">
+          <div className="truncate text-xs font-semibold text-primary">{shot.shotNumber}</div>
+          <div className="truncate text-[11px] text-secondary">{shot.name}</div>
         </div>
+        <span className="text-muted">...</span>
+      </div>
+      <StatusGlow level={level}>
+        <ShotThumbnail project={project} shot={shot} className="aspect-video w-full rounded-none border-y border-subtle" />
       </StatusGlow>
-      <div className="mt-2 truncate text-sm font-medium text-primary">{shot.shotNumber}</div>
-      <div className="truncate text-xs text-secondary">{shot.name}</div>
+      <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+        <span className="truncate text-secondary">{formatShotStatus(shot.status)}</span>
+        {warnings.length > 0 && <span className="shrink-0 text-amber-600">{warnings.length} issue{warnings.length === 1 ? '' : 's'}</span>}
+      </div>
     </button>
   );
+}
+
+function formatShotStatus(status: ShotStatus) {
+  return status.replace('_', ' ');
 }
 
 function FilterTab({
