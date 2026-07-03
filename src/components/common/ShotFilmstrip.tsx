@@ -11,17 +11,20 @@ export function ShotFilmstrip({
   onSelectShot,
   renderThumbnail,
   appearance = 'default',
+  compact = false,
 }: {
   project: LocationProject;
   selectedShotId?: string;
   onSelectShot: (shotId: string) => void;
   renderThumbnail?: (shot: Shot) => React.ReactNode;
   appearance?: 'default' | 'overlay';
+  compact?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
   const isOverlay = appearance === 'overlay';
+  const useCompactOverlay = isOverlay && (compact || project.shots.length >= 5);
 
   const updateScrollState = useCallback(() => {
     const element = scrollRef.current;
@@ -40,9 +43,11 @@ export function ShotFilmstrip({
   return (
     <div
       data-shot-filmstrip={appearance}
-      className={`relative flex items-center gap-2 ${
+      className={`relative flex items-center gap-1.5 ${
         isOverlay
-          ? 'rounded-[var(--radius-card)] border border-[var(--filmstrip-border)] bg-[var(--filmstrip-overlay)] px-2 py-1.5 shadow-[var(--filmstrip-shadow)] backdrop-blur-md'
+          ? `rounded-[var(--radius-card)] border border-[var(--filmstrip-border)] bg-[var(--filmstrip-overlay)] shadow-[var(--filmstrip-shadow)] backdrop-blur-md ${
+            useCompactOverlay ? 'px-1.5 py-1' : 'px-2 py-1.5'
+          }`
           : ''
       }`}
     >
@@ -77,7 +82,7 @@ export function ShotFilmstrip({
                 aria-label={`Select shot ${shot.shotNumber}`}
                 className={`block shrink-0 overflow-hidden rounded-lg transition ${
                   isOverlay
-                    ? `w-[5.25rem] ${
+                    ? `${useCompactOverlay ? 'w-[4.25rem]' : 'w-[5.25rem]'} ${
                       selected
                         ? 'ring-2 ring-[var(--accent)] shadow-[0_0_12px_var(--accent-glow)]'
                         : 'ring-1 ring-white/10 hover:ring-white/25'
@@ -157,7 +162,7 @@ function FilmstripNavButton({
       aria-label={direction === 'left' ? 'Scroll shots left' : 'Scroll shots right'}
       className={`inline-flex shrink-0 items-center justify-center rounded-full transition disabled:opacity-35 ${
         overlay
-          ? 'h-10 w-10 border border-white/20 bg-black/40 text-white hover:border-white/40 hover:bg-black/55'
+          ? 'h-8 w-8 border border-white/20 bg-black/40 text-white hover:border-white/40 hover:bg-black/55'
           : 'h-9 w-9 border border-subtle bg-surface-raised text-secondary hover:border-strong hover:text-primary'
       }`}
     >

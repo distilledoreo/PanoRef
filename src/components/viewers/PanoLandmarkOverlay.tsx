@@ -89,17 +89,22 @@ export function LandmarkStrip({
   panoOrigin,
   focusedLandmarkId,
   onFocusLandmark,
+  className = '',
 }: {
   landmarks: Landmark[];
   panoImageUrl?: string;
   panoOrigin: Vec3;
   focusedLandmarkId?: string;
   onFocusLandmark: (landmarkId: string) => void;
+  className?: string;
 }) {
   if (landmarks.length === 0) return null;
 
   return (
-    <div className="pointer-events-auto mx-3 mb-3 flex shrink-0 items-center gap-2 rounded-full border border-subtle bg-surface-overlay/90 px-3 py-1.5 shadow-soft backdrop-blur">
+    <div
+      data-landmark-strip
+      className={`pointer-events-auto flex shrink-0 items-center gap-2 rounded-full border border-subtle bg-surface-overlay/90 px-3 py-1.5 shadow-soft backdrop-blur ${className}`}
+    >
       <div className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-secondary">
         <MapPin className="h-3.5 w-3.5 text-accent" />
         <span className="hidden sm:inline">Landmarks</span>

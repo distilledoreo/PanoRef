@@ -33,14 +33,14 @@ export function PrimaryCTA({
       onClick={onClick}
       disabled={disabled}
       className={`inline-flex items-center gap-3 rounded-[22px] border px-6 py-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
-        layout === 'inline' ? 'px-5 py-3 text-sm' : 'px-7 py-4 text-base'
+        layout === 'inline' ? 'gap-2.5 px-5 py-2.5 text-sm' : 'px-7 py-4 text-base'
       } ${toneClasses} ${
         highlighted ? 'ring-4' : ''
       }`}
     >
-      <span className={`inline-flex h-9 w-9 items-center justify-center rounded-full border ${
-        appearance === 'glow-outline' ? 'border-[var(--accent)]' : 'border-white/55'
-      }`}>
+      <span className={`inline-flex items-center justify-center rounded-full border ${
+        layout === 'inline' ? 'h-8 w-8' : 'h-9 w-9'
+      } ${appearance === 'glow-outline' ? 'border-[var(--accent)]' : 'border-white/55'}`}>
         {icon}
       </span>
       {label}
@@ -49,9 +49,19 @@ export function PrimaryCTA({
 
   if (layout === 'inline') {
     return (
-      <div className="pointer-events-auto flex flex-col gap-1 pb-0.5">
+      <div
+        data-primary-cta="inline"
+        className="pointer-events-auto flex shrink-0 flex-col gap-0.5"
+      >
         {button}
-        {hint && <p className="text-xs text-secondary">{hint}</p>}
+        {hint && (
+          <p
+            data-primary-cta-hint
+            className="m-0 text-xs leading-[var(--shots-cta-hint-block,1rem)] text-secondary"
+          >
+            {hint}
+          </p>
+        )}
       </div>
     );
   }

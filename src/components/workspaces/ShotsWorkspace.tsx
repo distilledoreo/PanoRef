@@ -381,10 +381,14 @@ export function ShotsWorkspace() {
           </div>
         )}
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-1.5 px-3 pb-4">
-          <div className="pointer-events-auto">
+        <div
+          data-shots-bottom-chrome
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-[var(--shots-bottom-chrome-gap)] px-3 pb-[var(--shots-bottom-chrome-pad)]"
+        >
+          <div className="pointer-events-auto shrink-0">
             <ShotFilmstrip
               appearance="overlay"
+              compact
               project={project}
               selectedShotId={selectedShot?.id}
               onSelectShot={selectShot}
@@ -395,8 +399,8 @@ export function ShotsWorkspace() {
               )}
             />
           </div>
-          <div className="pointer-events-auto flex flex-wrap items-end justify-between gap-2">
-            <div className="flex max-w-full flex-wrap items-center gap-1.5 rounded-[var(--radius-card)] border border-subtle bg-surface-overlay px-2 py-1.5 shadow-card backdrop-blur-sm">
+          <div className="pointer-events-auto flex min-h-0 items-end justify-between gap-2">
+            <div className="flex max-w-[min(100%,42rem)] flex-wrap items-center gap-1 rounded-[var(--radius-card)] border border-subtle bg-surface-overlay px-2 py-1 shadow-card backdrop-blur-sm">
               <ToolbarButton icon={<Plus className="h-4 w-4" />} label="Add Shot" onClick={addCamera} />
               <ToolbarButton
                 icon={<Copy className="h-4 w-4" />}
@@ -622,7 +626,7 @@ function ToolbarButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-45 ${
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition disabled:opacity-45 ${
         danger
           ? 'border-red-200 text-red-600 hover:bg-red-50'
           : active

@@ -63,6 +63,10 @@ Current branch progress:
 - Shots framing uses a compact viewfinder marker (camera puck) instead of a full FOV/resolution pill over the viewport; lens/FOV/resolution remain in `ShotInfoCard` and the precision drawer.
 - Build renders graybox 360 panos at 4096×2048 by default and exposes **Download Graybox 360** beside **Render 360 Reference** once a graybox exists, downloading the native 2:1 PNG.
 - Export package summary now uses a composed horizontal layout: large folder/ZIP visual left, compact package-contents card right, with manifest preview and Export Settings subordinate below.
+- Reference bottom chrome reserves a dedicated right CTA lane (`--reference-cta-lane`) so the landmark strip stays lower-left and never spans under Approve as Reference.
+- Shots bottom chrome uses a compact overlay filmstrip separated from the command dock, with `--shots-overlay-bottom-safe` reserving space for the Render Shot Preview hint at 1280×720.
+- Export package card owns its title/subtitle header and places Export Settings near the lower-left of the card.
+- Build shows a compact “Drag arrows to move” guidance chip near the canvas center when an object is selected and the transform gizmo is visible.
 
 Remaining fidelity gaps:
 - Filmstrip three-dot markers are decorative only; a dedicated per-shot overflow menu can be added if reference parity requires it.

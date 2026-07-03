@@ -144,9 +144,57 @@ describe('ui revamp fidelity surfaces', () => {
     expect(exportWorkspace).toContain('h-9 w-16 shrink-0');
     expect(exportWorkspace).toContain('data-export-package-panel="composed"');
     expect(exportWorkspace).toContain('Package Contents');
-    expect(exportWorkspace).toContain('items-center justify-center gap-4');
+    expect(exportWorkspace).toContain('data-export-package-header');
+    expect(exportWorkspace).toContain('data-export-settings-trigger');
     expect(exportWorkspace).toContain('shrink-0 border-t border-subtle');
     expect(exportWorkspace).toContain('layout="inline"');
+    expect(exportWorkspace).not.toContain('<header className="mb-2 shrink-0">');
+  });
+
+  it('prioritizes key export output paths in capped last-export preview', () => {
+    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
+    const exportManifest = readFileSync(new URL('../src/engine/exportManifest.ts', import.meta.url), 'utf8');
+    expect(exportWorkspace).toContain('selectExportPathPreview');
+    expect(exportWorkspace).toContain('lastExportPreviewPaths');
+    expect(exportWorkspace).not.toMatch(/lastExport\.slice\(0,\s*\d+\)/);
+    expect(exportManifest).toContain('PRIORITY_EXPORT_PATH_MARKERS');
+    expect(exportManifest).toContain('/outputs/ai_result_frame.png');
+  });
+
+  it('reserves a dedicated CTA lane so the reference landmark strip does not span underneath', () => {
+    const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
+    const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+    expect(styles).toContain('--reference-cta-lane');
+    expect(reference).toContain('data-reference-bottom-chrome');
+    expect(reference).toContain('max-w-[calc(100%-var(--reference-cta-lane))]');
+    expect(reference).toContain('Approve as Reference');
+    expect(reference).not.toMatch(/LandmarkStrip[\s\S]*bottom-5 right-5[\s\S]*PrimaryCTA/);
+  });
+
+  it('reserves an intentional shots bottom safe area for the filmstrip and CTA hint', () => {
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    const primaryCta = readFileSync(new URL('../src/components/common/PrimaryCTA.tsx', import.meta.url), 'utf8');
+    const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+    expect(styles).toContain('--shots-overlay-bottom-safe: 11.25rem');
+    expect(styles).toContain('--shots-bottom-chrome-pad: 1rem');
+    expect(styles).toContain('--shots-bottom-chrome-gap: 0.375rem');
+    expect(styles).toContain('--shots-cta-hint-block: 1rem');
+    expect(shots).toContain('data-shots-bottom-chrome');
+    expect(shots).toContain('bottom-[var(--shots-overlay-bottom-safe)]');
+    expect(shots).toContain('pb-[var(--shots-bottom-chrome-pad)]');
+    expect(shots).toContain('gap-[var(--shots-bottom-chrome-gap)]');
+    expect(shots).toContain('Preview this shot from the reference.');
+    expect(shots).toContain('compact');
+    expect(primaryCta).toContain('data-primary-cta-hint');
+    expect(primaryCta).toContain('leading-[var(--shots-cta-hint-block,1rem)]');
+  });
+
+  it('shows build drag guidance near the gizmo when an object is selected', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    expect(build).toContain('data-build-drag-guidance');
+    expect(build).toContain('Drag arrows to move');
+    expect(build).toContain('buildMode === \'select\'');
+    expect(build).toContain('showTransformGizmo');
   });
 
   it('renders polished theme-aware shot thumbnail fallbacks for missing media', () => {

@@ -215,6 +215,18 @@ export function BuildWorkspace() {
           </button>
         </div>
 
+        {selectedObject && buildMode === 'select' && (
+          <div
+            data-build-drag-guidance
+            className="pointer-events-none absolute left-[58%] top-[54%] z-10 -translate-x-1/2"
+          >
+            <div className="rounded-full border border-subtle/70 bg-surface-overlay/80 px-3 py-1.5 text-center text-xs font-medium text-secondary shadow-soft backdrop-blur-sm">
+              <Move3D className="mr-1 inline h-3.5 w-3.5 text-accent" />
+              Drag arrows to move
+            </div>
+          </div>
+        )}
+
         {selectedObject && (
           <div className="pointer-events-none absolute right-5 top-14 z-10">
             <ContextualPanel>

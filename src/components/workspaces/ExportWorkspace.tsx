@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Archive, Check, Download, FileJson, FolderArchive, Settings } from 'lucide-react';
-import { createShotPackageManifest } from '../../engine/exportManifest';
+import { createShotPackageManifest, selectExportPathPreview } from '../../engine/exportManifest';
 import { buildShotPackage, downloadBlob } from '../../engine/packageExport';
 import { getProjectWarnings, getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
@@ -89,21 +89,29 @@ export function ExportWorkspace() {
   ];
 
   const fitsCompactShotList = project.shots.length > 0 && project.shots.length <= 6;
+  const manifestPreviewPaths = useMemo(
+    () => (manifest ? selectExportPathPreview(manifest.files.map((file) => file.path), 3) : []),
+    [manifest],
+  );
+  const lastExportPreviewPaths = useMemo(
+    () => selectExportPathPreview(lastExport, 3),
+    [lastExport],
+  );
 
   return (
     <FullBleedLayout>
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-base p-4">
-        <header className="mb-2 shrink-0">
-          <h1 className="text-xl font-semibold text-primary">Export Your Shots</h1>
-          <p className="mt-0.5 text-sm text-secondary">Choose what to export. Each shot is packaged individually.</p>
-        </header>
-
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
           <div
             data-export-package-panel="composed"
-            className="flex min-h-0 flex-col items-center justify-center overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-3 shadow-card"
+            className="flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-4 shadow-card"
           >
-            <div className="flex w-full max-w-lg items-center justify-center gap-4">
+            <header data-export-package-header className="mb-3 shrink-0">
+              <h1 className="text-xl font-semibold text-primary">Export Your Shots</h1>
+              <p className="mt-0.5 text-sm text-secondary">Choose what to export. Each shot is packaged individually.</p>
+            </header>
+
+            <div className="flex min-h-0 flex-1 items-center gap-4">
               <div className="flex shrink-0 flex-col items-center gap-1.5">
                 <div className="flex h-20 w-24 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-[var(--cta-glow)]">
                   <FolderArchive className="h-10 w-10" />
@@ -129,32 +137,36 @@ export function ExportWorkspace() {
                 </ul>
               </div>
             </div>
-            {manifest && (
-              <div className="mt-2 max-h-10 w-full max-w-lg space-y-0.5 overflow-hidden">
-                {manifest.files.slice(0, 4).map((file) => (
-                  <div key={file.path} className="truncate font-mono text-[10px] text-muted">{file.path}</div>
-                ))}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(true)}
-              className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-secondary transition hover:text-accent"
-            >
-              <Settings className="h-3.5 w-3.5" />
-              Export Settings
-            </button>
-            {lastExport.length > 0 && (
-              <div className="mt-2 w-full max-w-lg">
-                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-primary">
-                  <Check className="h-3.5 w-3.5 text-emerald-500" />
-                  Last Export
+
+            <div className="mt-3 shrink-0 space-y-2">
+              {manifest && (
+                <div data-export-manifest-preview className="max-h-8 space-y-0.5 overflow-hidden opacity-70">
+                  {manifestPreviewPaths.map((path) => (
+                    <div key={path} className="truncate font-mono text-[10px] text-muted">{path}</div>
+                  ))}
                 </div>
-                {lastExport.map((path) => (
-                  <div key={path} className="truncate font-mono text-[10px] text-emerald-700 dark:text-emerald-400">{path}</div>
-                ))}
-              </div>
-            )}
+              )}
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                data-export-settings-trigger
+                className="inline-flex items-center gap-1.5 text-[11px] font-medium text-secondary transition hover:text-accent"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Export Settings
+              </button>
+              {lastExport.length > 0 && (
+                <div data-export-last-export className="max-h-8 space-y-0.5 overflow-hidden opacity-80">
+                  <div className="flex items-center gap-1.5 text-[10px] font-medium text-primary">
+                    <Check className="h-3 w-3 text-emerald-500" />
+                    Last Export
+                  </div>
+                  {lastExportPreviewPaths.map((path) => (
+                    <div key={path} className="truncate font-mono text-[10px] text-emerald-700 dark:text-emerald-400">{path}</div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised shadow-card">

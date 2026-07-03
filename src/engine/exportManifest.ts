@@ -12,6 +12,25 @@ export interface ShotPackageManifest {
   }>;
 }
 
+export const PRIORITY_EXPORT_PATH_MARKERS = ['/outputs/ai_result_frame.png'] as const;
+
+export function selectExportPathPreview(paths: readonly string[], limit: number): string[] {
+  if (paths.length <= limit) return [...paths];
+
+  const isPriority = (path: string) => PRIORITY_EXPORT_PATH_MARKERS.some((marker) => path.includes(marker));
+  const selected = new Set<string>();
+
+  for (const path of paths) {
+    if (isPriority(path)) selected.add(path);
+  }
+  for (const path of paths) {
+    if (selected.size >= limit) break;
+    if (!selected.has(path)) selected.add(path);
+  }
+
+  return paths.filter((path) => selected.has(path));
+}
+
 export function createShotPackageManifest(
   project: LocationProject,
   shot: Shot,

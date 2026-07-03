@@ -221,14 +221,30 @@ export function ReferenceWorkspace() {
               </div>
             )}
 
-            <div className="pointer-events-none absolute bottom-5 right-5 z-20">
-              <PrimaryCTA
-                icon={<Check className="h-5 w-5" />}
-                label="Approve as Reference"
-                hint="Looks good? Lock this pano for your shots."
-                onClick={approveReference}
-                highlighted={primaryAction?.id === 'confirm-alignment' || isReferenceReady(project)}
-              />
+            <div
+              data-reference-bottom-chrome
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-end gap-3 px-4 pb-4"
+            >
+              {activeAsset && project.landmarks.length > 0 && (
+                <div className="pointer-events-auto min-w-0 max-w-[calc(100%-var(--reference-cta-lane))]">
+                  <LandmarkStrip
+                    landmarks={project.landmarks.filter((landmark) => landmark.visible)}
+                    panoImageUrl={activeAsset.uri}
+                    panoOrigin={panoOrigin}
+                    focusedLandmarkId={focusedLandmarkId}
+                    onFocusLandmark={(landmarkId) => focusLandmark(landmarkId)}
+                  />
+                </div>
+              )}
+              <div className="pointer-events-none ml-auto shrink-0">
+                <PrimaryCTA
+                  icon={<Check className="h-5 w-5" />}
+                  label="Approve as Reference"
+                  hint="Looks good? Lock this pano for your shots."
+                  onClick={approveReference}
+                  highlighted={primaryAction?.id === 'confirm-alignment' || isReferenceReady(project)}
+                />
+              </div>
             </div>
 
             {canCalibrate && activePano && (
@@ -241,17 +257,6 @@ export function ReferenceWorkspace() {
               </div>
             )}
 
-            {activeAsset && project.landmarks.length > 0 && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
-                <LandmarkStrip
-                  landmarks={project.landmarks.filter((landmark) => landmark.visible)}
-                  panoImageUrl={activeAsset.uri}
-                  panoOrigin={panoOrigin}
-                  focusedLandmarkId={focusedLandmarkId}
-                  onFocusLandmark={(landmarkId) => focusLandmark(landmarkId)}
-                />
-              </div>
-            )}
           </div>
         </div>
       </div>
