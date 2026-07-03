@@ -38,6 +38,8 @@ export const DEFAULT_CAMERA_LENS_MM = 35;
 export const DEFAULT_CAMERA_FOV_DEGREES = 54.4;
 export const DEFAULT_CAMERA_HEIGHT_METERS = 1.65;
 export const DEFAULT_CAMERA_ASPECT_RATIO = 16 / 9;
+export const DEFAULT_GRAYBOX_PANO_WIDTH = 4096;
+export const DEFAULT_GRAYBOX_PANO_HEIGHT = 2048;
 
 export const defaultProjectSettings = {
   defaultShotWidth: 1920,

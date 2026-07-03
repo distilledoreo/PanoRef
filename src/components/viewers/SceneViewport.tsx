@@ -736,6 +736,7 @@ export function SceneViewport({
           aspectRatio={shotFraming.frameAspectRatio}
           fovDegrees={shotFraming.camera.fovDegrees}
           resolutionLabel={shotFraming.frameResolutionLabel}
+          variant="compact"
         />
       )}
     </div>

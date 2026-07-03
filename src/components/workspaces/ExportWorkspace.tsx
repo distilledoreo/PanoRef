@@ -99,29 +99,39 @@ export function ExportWorkspace() {
         </header>
 
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
-          <div className="flex min-h-0 flex-col items-start justify-start overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-3 shadow-card">
-            <div className="mb-2 flex items-end gap-2">
-              <div className="flex h-12 w-14 items-center justify-center rounded-lg bg-[var(--accent)] text-white shadow-card">
-                <FolderArchive className="h-7 w-7" />
+          <div
+            data-export-package-panel="composed"
+            className="flex min-h-0 flex-col items-center justify-center overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-3 shadow-card"
+          >
+            <div className="flex w-full max-w-lg items-center justify-center gap-4">
+              <div className="flex shrink-0 flex-col items-center gap-1.5">
+                <div className="flex h-20 w-24 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-[var(--cta-glow)]">
+                  <FolderArchive className="h-10 w-10" />
+                </div>
+                <div className="rounded-md bg-surface-muted px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-secondary">
+                  ZIP Package
+                </div>
               </div>
-              <div className="rounded-md bg-surface-muted px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-secondary">
-                ZIP
+              <div className="min-w-0 flex-1 rounded-lg border border-subtle bg-surface-muted p-2.5 shadow-card">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-secondary">
+                  Package Contents
+                </div>
+                <ul className="space-y-1">
+                  {packageContents.map((item) => (
+                    <li key={item.name} className="flex items-center gap-2 rounded-md border border-subtle bg-surface-raised px-2 py-1">
+                      <Archive className="h-3 w-3 shrink-0 text-accent" />
+                      <div className="min-w-0">
+                        <div className="truncate font-mono text-[11px] font-medium text-primary">{item.name}</div>
+                        <div className="truncate text-[10px] text-secondary">{item.description}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
-            <ul className="w-full space-y-1">
-              {packageContents.map((item) => (
-                <li key={item.name} className="flex items-start gap-2 rounded-lg border border-subtle px-2.5 py-1.5">
-                  <Archive className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
-                  <div className="min-w-0">
-                    <div className="font-mono text-xs font-medium text-primary">{item.name}</div>
-                    <div className="text-[11px] text-secondary">{item.description}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
             {manifest && (
-              <div className="mt-2 max-h-12 w-full space-y-0.5 overflow-hidden">
-                {manifest.files.slice(0, 6).map((file) => (
+              <div className="mt-2 max-h-10 w-full max-w-lg space-y-0.5 overflow-hidden">
+                {manifest.files.slice(0, 4).map((file) => (
                   <div key={file.path} className="truncate font-mono text-[10px] text-muted">{file.path}</div>
                 ))}
               </div>
@@ -135,7 +145,7 @@ export function ExportWorkspace() {
               Export Settings
             </button>
             {lastExport.length > 0 && (
-              <div className="mt-2 w-full">
+              <div className="mt-2 w-full max-w-lg">
                 <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-primary">
                   <Check className="h-3.5 w-3.5 text-emerald-500" />
                   Last Export

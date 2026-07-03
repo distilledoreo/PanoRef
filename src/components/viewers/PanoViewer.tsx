@@ -130,6 +130,7 @@ export function PanoViewer({
     setPanoSphereMaterial({
       sphere: activeSphereRef.current,
       imageUrl,
+      theme,
       opacity: compareImageUrl ? opacityRef.current : 1,
       transparent: Boolean(compareImageUrl),
       isCancelled: () => cancelled,
@@ -137,13 +138,14 @@ export function PanoViewer({
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, compareImageUrl]);
+  }, [imageUrl, compareImageUrl, theme]);
 
   useEffect(() => {
     let cancelled = false;
     setPanoSphereMaterial({
       sphere: compareSphereRef.current,
       imageUrl: compareImageUrl,
+      theme,
       opacity: 1,
       transparent: false,
       isCancelled: () => cancelled,
@@ -151,7 +153,7 @@ export function PanoViewer({
     return () => {
       cancelled = true;
     };
-  }, [compareImageUrl]);
+  }, [compareImageUrl, theme]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -223,13 +225,14 @@ function configureCamera(camera: THREE.PerspectiveCamera, view: PanoViewState, r
 function setPanoSphereMaterial(params: {
   sphere: THREE.Mesh | null;
   imageUrl?: string;
+  theme: keyof typeof THEME_COLORS;
   opacity: number;
   transparent: boolean;
   isCancelled: () => boolean;
 }) {
   if (!params.sphere) return;
   if (!params.imageUrl) {
-    const material = new THREE.MeshBasicMaterial({ color: THEME_COLORS.light.empty });
+    const material = new THREE.MeshBasicMaterial({ color: THEME_COLORS[params.theme].empty });
     setSphereMaterial(params.sphere, material, params.isCancelled);
     return;
   }

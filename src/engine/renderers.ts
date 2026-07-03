@@ -11,6 +11,7 @@ import {
   DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
   type CameraMoveCubemapFaceId,
 } from './cameraMoveCubemap';
+import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH } from '../domain/defaults';
 import { buildScene, disposeScene } from './sceneObjects';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 
@@ -60,12 +61,13 @@ export function getSupportedCameraMoveMp4MimeType(): string | undefined {
 
 export async function renderGrayboxEquirectangularPano(
   project: LocationProject,
-  width = 2048,
-  height = 1024,
+  width = DEFAULT_GRAYBOX_PANO_WIDTH,
+  height = DEFAULT_GRAYBOX_PANO_HEIGHT,
 ): Promise<ImageRenderResult> {
   const renderer = createRenderer(width, height);
   const scene = buildScene(project, { showHelpers: false, hiddenObjectTypes: ['sun_marker'] });
-  const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(1024, {
+  const cubeFaceSize = Math.min(2048, Math.max(512, Math.round(width / 2)));
+  const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(cubeFaceSize, {
     type: THREE.UnsignedByteType,
     generateMipmaps: true,
     minFilter: THREE.LinearMipmapLinearFilter,

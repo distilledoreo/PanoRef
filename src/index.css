@@ -25,6 +25,10 @@
   --shadow-card: 0 2px 12px rgba(28, 25, 23, 0.06);
   --tray-glow: 0 10px 36px rgba(28, 25, 23, 0.14);
   --cta-glow: 0 8px 28px var(--accent-glow);
+  --filmstrip-overlay: rgba(28, 25, 23, 0.78);
+  --filmstrip-border: rgba(255, 255, 255, 0.12);
+  --filmstrip-shadow: 0 8px 32px rgba(28, 25, 23, 0.28);
+  --shots-overlay-bottom-safe: 12.5rem;
   --radius-card: 14px;
   --radius-pill: 999px;
   --thumbnail-fallback-sky: #e8e4de;
@@ -60,6 +64,9 @@
   --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.35);
   --tray-glow: 0 12px 40px rgba(45, 212, 191, 0.18), 0 4px 16px rgba(0, 0, 0, 0.5);
   --cta-glow: 0 0 28px var(--accent-glow), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --filmstrip-overlay: rgba(8, 12, 18, 0.84);
+  --filmstrip-border: rgba(255, 255, 255, 0.1);
+  --filmstrip-shadow: 0 10px 36px rgba(0, 0, 0, 0.55);
   --thumbnail-fallback-sky: #2a3544;
   --thumbnail-fallback-mid: #1f2833;
   --thumbnail-fallback-ground: #171e28;

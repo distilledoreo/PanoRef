@@ -6,15 +6,74 @@ describe('ui revamp fidelity surfaces', () => {
     const overlay = readFileSync(new URL('../src/components/viewers/ShotViewfinderOverlay.tsx', import.meta.url), 'utf8');
     expect(overlay).toContain('useThemeStore');
     expect(overlay).toContain('border-[var(--accent)]');
+    expect(overlay).toContain("variant?: 'full' | 'compact'");
+    expect(overlay).toContain('data-shot-viewfinder={variant}');
     expect(overlay).not.toContain('border-teal-500');
   });
 
-  it('keeps shots workspace sidebar and docked primary CTA', () => {
+  it('uses compact shot viewfinder framing in the shots viewport', () => {
+    const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
+    expect(viewport).toContain('variant="compact"');
+  });
+
+  it('keeps empty pano viewer materials theme-aware in dark mode', () => {
+    const panoViewer = readFileSync(new URL('../src/components/viewers/PanoViewer.tsx', import.meta.url), 'utf8');
+    expect(panoViewer).toContain('THEME_COLORS[params.theme].empty');
+    expect(panoViewer).not.toContain('THEME_COLORS.light.empty');
+  });
+
+  it('exposes fly camera controls directly in the shots action dock', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    expect(shots).toContain("'Fly Camera'");
+    expect(shots).toContain("'Lock View'");
+    expect(shots).toContain('commitDraftCameraAndLock');
+    expect(shots).not.toContain('label="Frame"');
+  });
+
+  it('keeps filmstrip overlay dots decorative instead of misleading option buttons', () => {
+    const filmstrip = readFileSync(new URL('../src/components/common/ShotFilmstrip.tsx', import.meta.url), 'utf8');
+    expect(filmstrip).toContain('aria-hidden');
+    expect(filmstrip).toContain('pointer-events-none');
+    expect(filmstrip).not.toContain('Shot ${shot.shotNumber} options');
+  });
+
+  it('shows a visible native graybox 360 download action in build', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    const defaults = readFileSync(new URL('../src/domain/defaults.ts', import.meta.url), 'utf8');
+    expect(build).toContain('Download Graybox 360');
+    expect(build).toContain('letterboxEnabled: false');
+    expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
+    expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT = 2048');
+  });
+
+  it('anchors shots floating card above the bottom overlay safe area', () => {
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+    expect(styles).toContain('--shots-overlay-bottom-safe');
+    expect(shots).toContain('data-shots-info-safe-area');
+    expect(shots).toContain('bottom-[var(--shots-overlay-bottom-safe)]');
+    expect(shots).toContain('items-start');
+    expect(shots).not.toContain('items-center pl-3');
+  });
+
+  it('uses shots workspace overlay layout with floating info card and cinematic filmstrip', () => {
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    const shotInfoCard = readFileSync(new URL('../src/components/common/ShotInfoCard.tsx', import.meta.url), 'utf8');
+    const filmstrip = readFileSync(new URL('../src/components/common/ShotFilmstrip.tsx', import.meta.url), 'utf8');
+    const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
     expect(shots).toContain('ShotInfoCard');
-    expect(shots).toContain('grid-cols-[minmax(220px,280px)_minmax(0,1fr)]');
+    expect(shots).toContain('appearance="overlay"');
+    expect(shots).toContain('absolute inset-x-0 bottom-0');
     expect(shots).toContain('layout="inline"');
+    expect(shots).not.toContain('grid-cols-[minmax(220px,280px)_minmax(0,1fr)]');
     expect(shots).not.toContain('ContextualPanel');
+    expect(shotInfoCard).toContain('data-shot-info-card="floating"');
+    expect(shotInfoCard).toContain('bg-surface-overlay');
+    expect(filmstrip).toContain("appearance?: 'default' | 'overlay'");
+    expect(filmstrip).toContain('data-shot-filmstrip={appearance}');
+    expect(filmstrip).toContain('ring-2 ring-[var(--accent)]');
+    expect(filmstrip).toContain('MoreHorizontal');
+    expect(styles).toContain('--filmstrip-overlay');
   });
 
   it('renders shots viewport in camera-framing mode without build selection chrome', () => {
@@ -79,11 +138,13 @@ describe('ui revamp fidelity surfaces', () => {
     expect(review).not.toContain('gridTemplateColumns');
   });
 
-  it('keeps export shot rows and package summary compact with a docked CTA footer', () => {
+  it('keeps export shot rows and composed package summary with a docked CTA footer', () => {
     const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
     expect(exportWorkspace).toContain('fitsCompactShotList');
     expect(exportWorkspace).toContain('h-9 w-16 shrink-0');
-    expect(exportWorkspace).toContain('items-start justify-start');
+    expect(exportWorkspace).toContain('data-export-package-panel="composed"');
+    expect(exportWorkspace).toContain('Package Contents');
+    expect(exportWorkspace).toContain('items-center justify-center gap-4');
     expect(exportWorkspace).toContain('shrink-0 border-t border-subtle');
     expect(exportWorkspace).toContain('layout="inline"');
   });

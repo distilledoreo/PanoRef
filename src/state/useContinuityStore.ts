@@ -304,7 +304,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     set({ isRenderingGraybox: true });
     try {
       const state = get();
-      const render = await renderGrayboxEquirectangularPano(state.project, 2048, 1024);
+      const render = await renderGrayboxEquirectangularPano(state.project);
       const asset = createPanoAsset({
         name: 'global_graybox.png',
         uri: render.dataUrl,

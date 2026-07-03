@@ -8,11 +8,13 @@ export function ShotViewfinderOverlay({
   aspectRatio,
   fovDegrees,
   resolutionLabel,
+  variant = 'full',
 }: {
   containerRef: React.RefObject<HTMLElement | null>;
   aspectRatio: number;
   fovDegrees: number;
   resolutionLabel: string;
+  variant?: 'full' | 'compact';
 }) {
   const theme = useThemeStore((state) => state.theme);
   const [frameBox, setFrameBox] = useState<ExportFrameLayout>({ left: 0, top: 0, width: 0, height: 0 });
@@ -36,7 +38,7 @@ export function ShotViewfinderOverlay({
   const dimColor = theme === 'dark' ? 'rgba(8, 12, 18, 0.62)' : 'rgba(28, 25, 23, 0.28)';
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10">
+    <div className="pointer-events-none absolute inset-0 z-10" data-shot-viewfinder={variant}>
       <div
         className="absolute border-2 border-[var(--accent)] shadow-[0_0_0_9999px_var(--viewfinder-dim)]"
         style={{
@@ -59,12 +61,20 @@ export function ShotViewfinderOverlay({
           <span className="absolute bottom-0 left-1/2 h-5 w-px -translate-x-1/2 bg-white/90 shadow-sm" />
         </div>
 
-        <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/25 bg-surface-overlay px-3 py-1.5 shadow-card backdrop-blur">
-          <Camera className="h-3.5 w-3.5 text-accent" />
-          <span className="text-[10px] font-medium text-primary">FOV {fovDegrees.toFixed(0)}°</span>
-          <span className="text-[10px] text-muted">·</span>
-          <span className="font-mono text-[10px] text-secondary">{resolutionLabel}</span>
-        </div>
+        {variant === 'compact' ? (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-black/45 text-white shadow-card backdrop-blur-sm">
+              <Camera className="h-3.5 w-3.5 text-accent" aria-hidden />
+            </span>
+          </div>
+        ) : (
+          <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/25 bg-surface-overlay px-3 py-1.5 shadow-card backdrop-blur">
+            <Camera className="h-3.5 w-3.5 text-accent" />
+            <span className="text-[10px] font-medium text-primary">FOV {fovDegrees.toFixed(0)}°</span>
+            <span className="text-[10px] text-muted">·</span>
+            <span className="font-mono text-[10px] text-secondary">{resolutionLabel}</span>
+          </div>
+        )}
       </div>
     </div>
   );

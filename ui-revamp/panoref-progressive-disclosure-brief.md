@@ -59,8 +59,12 @@ Current branch progress:
 - Review uses a compact 3x2 grid for six-shot review so the full card set and bottom action bar remain visible at 1280x720.
 - Export uses compact selected-shot rows so six shots and the export CTA remain visible without losing the selection workflow.
 - Missing-media shot thumbnails use a theme-aware clay fallback instead of a broken icon-style placeholder.
+- Shots workspace now uses a full-bleed viewport with overlay layers: a compact floating `ShotInfoCard` (~220px) anchored top-left within a reserved bottom safe area so `Camera settings` and `Open in 360` stay above the filmstrip/action dock at 1280x720, a dark translucent cinematic filmstrip tray with teal active outline and thumbnail-first controls, and a split bottom dock (compact white action group left, dominant teal Render Shot Preview CTA right).
+- Shots framing uses a compact viewfinder marker (camera puck) instead of a full FOV/resolution pill over the viewport; lens/FOV/resolution remain in `ShotInfoCard` and the precision drawer.
+- Build renders graybox 360 panos at 4096×2048 by default and exposes **Download Graybox 360** beside **Render 360 Reference** once a graybox exists, downloading the native 2:1 PNG.
+- Export package summary now uses a composed horizontal layout: large folder/ZIP visual left, compact package-contents card right, with manifest preview and Export Settings subordinate below.
 
 Remaining fidelity gaps:
-- The Export package summary is functionally compact but still reads as a large sparse panel; the reference uses a tighter composed package card with stronger visual hierarchy.
-- The Shots workspace still needs a closer pass on the floating shot-info card and filmstrip rhythm shown in the reference.
-- The default template media does not need to match the reference, but UI chrome, density, and action placement should continue moving toward the supplied light/dark images.
+- Filmstrip three-dot markers are decorative only; a dedicated per-shot overflow menu can be added if reference parity requires it.
+- Default template media and real shot previews do not need to match the reference imagery, but live preview timing may still differ from the static reference shots.
+- Very narrow viewports below 1280px may still wrap the bottom action dock; desktop 1280x720 is the validated target.

@@ -4,8 +4,9 @@ import {
   Copy,
   Download,
   Film,
-  Frame,
   KeyRound,
+  Lock,
+  Move3D,
   Plus,
   Trash2,
 } from 'lucide-react';
@@ -327,117 +328,125 @@ export function ShotsWorkspace() {
 
   return (
     <FullBleedLayout>
-      <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto]">
-        <div className="grid min-h-0 grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
-          {selectedShot ? (
-            <ShotInfoCard
-              project={project}
-              shot={selectedShot}
-              lensMm={lensMm}
-              cameraHeight={cameraHeight}
-              previewSrc={framePreviewUrl}
-              onOpenPrecision={() => setPrecisionOpen(true)}
-              onOpenMenuAction={handleShotMenuAction}
-              onOpenIn360={linkedPano ? openLinkedPanoIn360 : undefined}
-              menuItems={[
-                { id: 'fly', label: 'Fly Camera' },
-                {
-                  id: 'accept-framing',
-                  label: 'Accept Framing',
-                  disabled: framingAccepted || shotCameraFlying,
-                },
-                { id: 'precision', label: 'Camera Settings' },
-              ]}
-            />
-          ) : (
-            <aside className="flex items-center justify-center border-r border-subtle bg-surface-raised px-4 text-sm text-secondary">
-              Add a shot to begin framing.
-            </aside>
-          )}
-
-          <div className="relative min-h-0 bg-surface-base">
-            <div className="absolute inset-3 overflow-hidden rounded-[var(--radius-card)] border border-subtle shadow-[inset_0_0_48px_rgba(0,0,0,0.12)] dark:shadow-[inset_0_0_48px_rgba(0,0,0,0.45)]">
-              <SceneViewport
-                project={project}
-                selectedShotId={selectedShot?.id}
-                shotFraming={shotFraming}
-                minHeightClassName="min-h-0"
-              />
-            </div>
-
-            {showCompare && selectedShot && (
-              <div className="absolute inset-y-3 right-3 z-10 w-72 overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised shadow-soft">
-                <ShotPanoCropPreview
-                  imageUrl={linkedAsset?.uri}
-                  crop={selectedShot.panoCrop}
-                  panoRotation={linkedPano?.rotation}
-                  label={linkedPano?.name ?? 'Linked Pano'}
-                  matchQuality={panoMatch?.quality}
-                  matchDistanceMeters={panoMatch?.distanceMeters}
-                  disabledReason={shotCameraFlying ? 'Lock the camera to render the pano crop preview.' : undefined}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="border-t border-subtle bg-surface-raised px-4 py-3 shadow-card">
-          <ShotFilmstrip
+      <div className="relative h-full min-h-0 overflow-hidden bg-surface-base">
+        <div className="absolute inset-0">
+          <SceneViewport
             project={project}
             selectedShotId={selectedShot?.id}
-            onSelectShot={selectShot}
-            renderThumbnail={(shot) => (
-              shot.id === selectedShot?.id && framePreviewUrl ? (
-                <ShotThumbnail project={project} shot={shot} overrideSrc={framePreviewUrl} />
-              ) : undefined
-            )}
+            shotFraming={shotFraming}
+            minHeightClassName="min-h-0"
           />
-          <div className="mt-3 flex flex-wrap items-end gap-3">
-            <ToolbarButton icon={<Plus className="h-4 w-4" />} label="Add Shot" onClick={addCamera} />
-            <ToolbarButton
-              icon={<Copy className="h-4 w-4" />}
-              label="Duplicate"
-              onClick={duplicateSelectedShot}
-              disabled={!selectedShot}
-            />
-            <ToolbarButton icon={<Frame className="h-4 w-4" />} label="Frame" onClick={startFlyCamera} disabled={!selectedShot} />
-            <ToolbarButton
-              icon={<Film className="h-4 w-4" />}
-              label="Compare"
-              onClick={() => setShowCompare((value) => !value)}
-              active={showCompare}
-            />
-            <ToolbarButton
-              icon={<Trash2 className="h-4 w-4" />}
-              label="Delete"
-              onClick={() => selectedShot && removeShot(selectedShot.id)}
-              disabled={!selectedShot || project.shots.length <= 1}
-              danger
-            />
-            {shotCameraFlying && (
-              <span className="text-xs text-secondary">Click viewport to lock camera</span>
-            )}
-            {!shotCameraFlying && selectedShot && !framingAccepted && (
-              <button
-                type="button"
-                onClick={() => acceptShotFraming(selectedShot.id)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Accept Framing
-              </button>
-            )}
-            <div className="ml-auto">
-              <PrimaryCTA
-                icon={<Film className="h-5 w-5" />}
-                label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}
-                hint="Preview this shot from the reference."
-                onClick={() => void exportCameraFrame()}
-                disabled={!selectedShot || shotCameraFlying || isExportingFrame || isRenderingFrame}
-                highlighted={primaryAction?.id === 'accept-framing' || primaryAction?.id === 'lock-camera'}
-                layout="inline"
+        </div>
+
+        {selectedShot && (
+          <div
+            data-shots-info-safe-area
+            className="pointer-events-none absolute inset-x-0 top-0 bottom-[var(--shots-overlay-bottom-safe)] left-0 z-20 flex items-start pl-3 pt-3"
+          >
+            <div className="pointer-events-auto min-h-0 max-h-full overflow-y-auto">
+              <ShotInfoCard
+                project={project}
+                shot={selectedShot}
+                lensMm={lensMm}
+                cameraHeight={cameraHeight}
+                previewSrc={framePreviewUrl}
+                onOpenPrecision={() => setPrecisionOpen(true)}
+                onOpenMenuAction={handleShotMenuAction}
+                onOpenIn360={linkedPano ? openLinkedPanoIn360 : undefined}
+                menuItems={[
+                  { id: 'fly', label: 'Fly Camera' },
+                  {
+                    id: 'accept-framing',
+                    label: 'Accept Framing',
+                    disabled: framingAccepted || shotCameraFlying,
+                  },
+                  { id: 'precision', label: 'Camera Settings' },
+                ]}
               />
             </div>
+          </div>
+        )}
+
+        {showCompare && selectedShot && (
+          <div className="pointer-events-auto absolute inset-y-3 right-3 z-20 w-72 overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-overlay shadow-soft backdrop-blur-sm">
+            <ShotPanoCropPreview
+              imageUrl={linkedAsset?.uri}
+              crop={selectedShot.panoCrop}
+              panoRotation={linkedPano?.rotation}
+              label={linkedPano?.name ?? 'Linked Pano'}
+              matchQuality={panoMatch?.quality}
+              matchDistanceMeters={panoMatch?.distanceMeters}
+              disabledReason={shotCameraFlying ? 'Lock the camera to render the pano crop preview.' : undefined}
+            />
+          </div>
+        )}
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-1.5 px-3 pb-4">
+          <div className="pointer-events-auto">
+            <ShotFilmstrip
+              appearance="overlay"
+              project={project}
+              selectedShotId={selectedShot?.id}
+              onSelectShot={selectShot}
+              renderThumbnail={(shot) => (
+                shot.id === selectedShot?.id && framePreviewUrl ? (
+                  <ShotThumbnail project={project} shot={shot} overrideSrc={framePreviewUrl} />
+                ) : undefined
+              )}
+            />
+          </div>
+          <div className="pointer-events-auto flex flex-wrap items-end justify-between gap-2">
+            <div className="flex max-w-full flex-wrap items-center gap-1.5 rounded-[var(--radius-card)] border border-subtle bg-surface-overlay px-2 py-1.5 shadow-card backdrop-blur-sm">
+              <ToolbarButton icon={<Plus className="h-4 w-4" />} label="Add Shot" onClick={addCamera} />
+              <ToolbarButton
+                icon={<Copy className="h-4 w-4" />}
+                label="Duplicate"
+                onClick={duplicateSelectedShot}
+                disabled={!selectedShot}
+              />
+              <ToolbarButton
+                icon={shotCameraFlying ? <Lock className="h-4 w-4" /> : <Move3D className="h-4 w-4" />}
+                label={shotCameraFlying ? 'Lock View' : 'Fly Camera'}
+                onClick={shotCameraFlying ? commitDraftCameraAndLock : startFlyCamera}
+                disabled={!selectedShot}
+                active={shotCameraFlying}
+              />
+              <ToolbarButton
+                icon={<Film className="h-4 w-4" />}
+                label="Compare"
+                onClick={() => setShowCompare((value) => !value)}
+                active={showCompare}
+              />
+              <ToolbarButton
+                icon={<Trash2 className="h-4 w-4" />}
+                label="Delete"
+                onClick={() => selectedShot && removeShot(selectedShot.id)}
+                disabled={!selectedShot || project.shots.length <= 1}
+                danger
+              />
+              {shotCameraFlying && (
+                <span className="hidden px-1 text-xs text-secondary sm:inline">Click viewport or Lock View</span>
+              )}
+              {!shotCameraFlying && selectedShot && !framingAccepted && (
+                <button
+                  type="button"
+                  onClick={() => acceptShotFraming(selectedShot.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-accent-soft px-2.5 py-1.5 text-xs font-semibold text-accent"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Accept Framing
+                </button>
+              )}
+            </div>
+            <PrimaryCTA
+              icon={<Film className="h-5 w-5" />}
+              label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}
+              hint="Preview this shot from the reference."
+              onClick={() => void exportCameraFrame()}
+              disabled={!selectedShot || shotCameraFlying || isExportingFrame || isRenderingFrame}
+              highlighted={primaryAction?.id === 'accept-framing' || primaryAction?.id === 'lock-camera'}
+              layout="inline"
+            />
           </div>
         </div>
       </div>

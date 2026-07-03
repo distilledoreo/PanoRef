@@ -49,7 +49,7 @@ export function PrimaryCTA({
 
   if (layout === 'inline') {
     return (
-      <div className="pointer-events-auto flex flex-col gap-1">
+      <div className="pointer-events-auto flex flex-col gap-1 pb-0.5">
         {button}
         {hint && <p className="text-xs text-secondary">{hint}</p>}
       </div>

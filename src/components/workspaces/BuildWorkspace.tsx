@@ -286,7 +286,7 @@ export function BuildWorkspace() {
           onGridSnapChange={setGridSnap}
         />
 
-        <div className="pointer-events-none absolute bottom-6 right-6 z-10">
+        <div className="pointer-events-none absolute bottom-6 right-6 z-10 flex flex-col items-end gap-2">
           <PrimaryCTA
             icon={<Globe className="h-5 w-5" />}
             label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
@@ -295,6 +295,28 @@ export function BuildWorkspace() {
             highlighted={primaryAction?.id === 'render-graybox'}
             appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
           />
+          {grayboxAsset && grayboxPano && (
+            <button
+              type="button"
+              onClick={() => void downloadPanoImage(
+                grayboxAsset.uri,
+                grayboxPano.width,
+                grayboxPano.height,
+                grayboxAsset.name || 'global_graybox.png',
+                {
+                  letterboxEnabled: false,
+                  targetWidth: project.settings.defaultShotWidth,
+                  targetHeight: project.settings.defaultShotHeight,
+                },
+                downloadDataUrl,
+              )}
+              disabled={isRenderingGraybox}
+              className="pointer-events-auto inline-flex items-center gap-2 rounded-[18px] border border-subtle bg-surface-overlay px-4 py-2 text-xs font-medium text-secondary shadow-card backdrop-blur-sm transition hover:border-[var(--accent)] hover:text-accent disabled:opacity-45"
+            >
+              <FileDown className="h-3.5 w-3.5" />
+              Download Graybox 360 ({grayboxPano.width}×{grayboxPano.height})
+            </button>
+          )}
         </div>
 
         {buildMode === 'pano_origin' && (
