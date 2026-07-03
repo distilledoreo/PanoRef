@@ -2,6 +2,17 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('ui revamp fidelity surfaces', () => {
+  it('declares Continuity Stage favicon assets in the app shell', () => {
+    const shell = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+    const faviconSvg = readFileSync(new URL('../public/favicon.svg', import.meta.url), 'utf8');
+    const faviconIco = readFileSync(new URL('../public/favicon.ico', import.meta.url));
+    expect(shell).toContain('rel="icon"');
+    expect(shell).toContain('/favicon.svg');
+    expect(shell).toContain('/favicon.ico');
+    expect(faviconSvg).toContain('#0d9488');
+    expect(faviconIco.subarray(0, 4)).toEqual(Buffer.from([0, 0, 1, 0]));
+  });
+
   it('uses theme-aware shot viewfinder chrome', () => {
     const overlay = readFileSync(new URL('../src/components/viewers/ShotViewfinderOverlay.tsx', import.meta.url), 'utf8');
     expect(overlay).toContain('useThemeStore');
@@ -132,9 +143,13 @@ describe('ui revamp fidelity surfaces', () => {
     const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
     expect(review).toContain('fitsCompactGrid');
     expect(review).toContain('lg:grid-cols-3');
-    expect(review).toContain('lg:grid-rows-2');
-    expect(review).toContain('lg:overflow-hidden');
+    expect(review).toContain('content-start');
+    expect(review).toContain('auto-rows-min');
+    expect(review).toContain('overflow-hidden');
     expect(review).toContain('compactGrid');
+    expect(review).toContain('data-review-grid-card={compactGrid ? \'compact\' : \'default\'}');
+    expect(review).toContain('aspect-video max-h-[8.5rem]');
+    expect(review).not.toContain('lg:grid-rows-2');
     expect(review).not.toContain('gridTemplateColumns');
   });
 
@@ -143,9 +158,14 @@ describe('ui revamp fidelity surfaces', () => {
     expect(exportWorkspace).toContain('fitsCompactShotList');
     expect(exportWorkspace).toContain('h-9 w-16 shrink-0');
     expect(exportWorkspace).toContain('data-export-package-panel="composed"');
+    expect(exportWorkspace).toContain('data-export-package-visual');
+    expect(exportWorkspace).toContain('w-44 max-w-[11rem]');
     expect(exportWorkspace).toContain('Package Contents');
     expect(exportWorkspace).toContain('data-export-package-header');
     expect(exportWorkspace).toContain('data-export-settings-trigger');
+    expect(exportWorkspace).toContain('data-export-shot-row={checked ? \'selected\' : \'default\'}');
+    expect(exportWorkspace).toContain('shadow-[inset_3px_0_0_var(--accent)]');
+    expect(exportWorkspace).not.toContain('bg-accent-soft shadow-[0_0_0_1px_var(--accent-glow)]');
     expect(exportWorkspace).toContain('shrink-0 border-t border-subtle');
     expect(exportWorkspace).toContain('layout="inline"');
     expect(exportWorkspace).not.toContain('<header className="mb-2 shrink-0">');
@@ -175,18 +195,23 @@ describe('ui revamp fidelity surfaces', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     const primaryCta = readFileSync(new URL('../src/components/common/PrimaryCTA.tsx', import.meta.url), 'utf8');
     const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
-    expect(styles).toContain('--shots-overlay-bottom-safe: 11.25rem');
-    expect(styles).toContain('--shots-bottom-chrome-pad: 1rem');
+    expect(styles).toContain('--shots-overlay-bottom-safe: 12rem');
+    expect(styles).toContain('--shots-bottom-chrome-pad: 1.125rem');
     expect(styles).toContain('--shots-bottom-chrome-gap: 0.375rem');
-    expect(styles).toContain('--shots-cta-hint-block: 1rem');
+    expect(styles).toContain('--shots-cta-hint-block: 1.125rem');
+    expect(styles).toContain('--shots-cta-lane: 15.5rem');
     expect(shots).toContain('data-shots-bottom-chrome');
+    expect(shots).toContain('data-shots-action-dock');
     expect(shots).toContain('bottom-[var(--shots-overlay-bottom-safe)]');
     expect(shots).toContain('pb-[var(--shots-bottom-chrome-pad)]');
     expect(shots).toContain('gap-[var(--shots-bottom-chrome-gap)]');
     expect(shots).toContain('Preview this shot from the reference.');
     expect(shots).toContain('compact');
     expect(primaryCta).toContain('data-primary-cta-hint');
-    expect(primaryCta).toContain('leading-[var(--shots-cta-hint-block,1rem)]');
+    expect(primaryCta).toContain('items-end');
+    expect(primaryCta).toContain('whitespace-nowrap');
+    expect(primaryCta).toContain('--shots-cta-lane');
+    expect(primaryCta).toContain('leading-[var(--shots-cta-hint-block,1.125rem)]');
   });
 
   it('shows build drag guidance near the gizmo when an object is selected', () => {
@@ -208,14 +233,15 @@ describe('ui revamp fidelity surfaces', () => {
     expect(styles).toContain('--thumbnail-fallback-block-a');
   });
 
-  it('keeps review compact-grid thumbnails stretched through StatusGlow', () => {
+  it('keeps review compact-grid thumbnails thumbnail-first instead of stretching', () => {
     const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
     const statusBadge = readFileSync(new URL('../src/components/common/StatusBadge.tsx', import.meta.url), 'utf8');
     const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
     expect(statusBadge).toContain('className?: string');
-    expect(review).toContain('min-h-0 flex-1');
-    expect(review).toContain('className={compactGrid ? \'h-full min-h-0 w-full\' : \'w-full\'}');
-    expect(review).toContain('compactGrid ? \'h-full min-h-0\' : \'aspect-video\'');
+    expect(review).toContain('aspect-video max-h-[8.5rem]');
+    expect(review).toContain('StatusGlow level={level} showIcon={false} className="w-full"');
+    expect(review).not.toContain('compactGrid ? \'h-full min-h-0\'');
+    expect(review).not.toContain('lg:grid-rows-2');
     expect(shotThumbnail).toContain('data-shot-thumbnail-fallback');
   });
 

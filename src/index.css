@@ -28,10 +28,11 @@
   --filmstrip-overlay: rgba(28, 25, 23, 0.78);
   --filmstrip-border: rgba(255, 255, 255, 0.12);
   --filmstrip-shadow: 0 8px 32px rgba(28, 25, 23, 0.28);
-  --shots-bottom-chrome-pad: 1rem;
+  --shots-bottom-chrome-pad: 1.125rem;
   --shots-bottom-chrome-gap: 0.375rem;
-  --shots-cta-hint-block: 1rem;
-  --shots-overlay-bottom-safe: 11.25rem;
+  --shots-cta-hint-block: 1.125rem;
+  --shots-cta-lane: 15.5rem;
+  --shots-overlay-bottom-safe: 12rem;
   --reference-cta-lane: 17.5rem;
   --radius-card: 14px;
   --radius-pill: 999px;

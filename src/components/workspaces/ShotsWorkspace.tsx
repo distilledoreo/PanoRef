@@ -399,7 +399,10 @@ export function ShotsWorkspace() {
               )}
             />
           </div>
-          <div className="pointer-events-auto flex min-h-0 items-end justify-between gap-2">
+          <div
+            data-shots-action-dock
+            className="pointer-events-auto flex min-h-0 items-end justify-between gap-2"
+          >
             <div className="flex max-w-[min(100%,42rem)] flex-wrap items-center gap-1 rounded-[var(--radius-card)] border border-subtle bg-surface-overlay px-2 py-1 shadow-card backdrop-blur-sm">
               <ToolbarButton icon={<Plus className="h-4 w-4" />} label="Add Shot" onClick={addCamera} />
               <ToolbarButton

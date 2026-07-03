@@ -111,30 +111,35 @@ export function ExportWorkspace() {
               <p className="mt-0.5 text-sm text-secondary">Choose what to export. Each shot is packaged individually.</p>
             </header>
 
-            <div className="flex min-h-0 flex-1 items-center gap-4">
-              <div className="flex shrink-0 flex-col items-center gap-1.5">
-                <div className="flex h-20 w-24 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-[var(--cta-glow)]">
-                  <FolderArchive className="h-10 w-10" />
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2">
+              <div
+                data-export-package-visual
+                className="flex shrink-0 items-start justify-center gap-3"
+              >
+                <div className="flex shrink-0 flex-col items-center gap-1">
+                  <div className="flex h-16 w-20 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-[var(--cta-glow)]">
+                    <FolderArchive className="h-8 w-8" />
+                  </div>
+                  <div className="rounded-md bg-surface-muted px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-secondary">
+                    ZIP Package
+                  </div>
                 </div>
-                <div className="rounded-md bg-surface-muted px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-secondary">
-                  ZIP Package
+                <div className="w-44 max-w-[11rem] shrink-0 rounded-lg border border-subtle bg-surface-muted p-2 shadow-card">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-secondary">
+                    Package Contents
+                  </div>
+                  <ul className="space-y-0.5">
+                    {packageContents.map((item) => (
+                      <li key={item.name} className="flex items-center gap-1.5 rounded-md border border-subtle bg-surface-raised px-1.5 py-0.5">
+                        <Archive className="h-3 w-3 shrink-0 text-accent" />
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-[10px] font-medium text-primary">{item.name}</div>
+                          <div className="truncate text-[9px] text-secondary">{item.description}</div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-              </div>
-              <div className="min-w-0 flex-1 rounded-lg border border-subtle bg-surface-muted p-2.5 shadow-card">
-                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-secondary">
-                  Package Contents
-                </div>
-                <ul className="space-y-1">
-                  {packageContents.map((item) => (
-                    <li key={item.name} className="flex items-center gap-2 rounded-md border border-subtle bg-surface-raised px-2 py-1">
-                      <Archive className="h-3 w-3 shrink-0 text-accent" />
-                      <div className="min-w-0">
-                        <div className="truncate font-mono text-[11px] font-medium text-primary">{item.name}</div>
-                        <div className="truncate text-[10px] text-secondary">{item.description}</div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
               </div>
             </div>
 
@@ -186,8 +191,11 @@ export function ExportWorkspace() {
                 return (
                   <div
                     key={shot.id}
+                    data-export-shot-row={checked ? 'selected' : 'default'}
                     className={`flex items-center gap-2 rounded-lg border px-2 py-1 transition ${
-                      checked ? 'border-[var(--accent)] bg-accent-soft shadow-[0_0_0_1px_var(--accent-glow)]' : 'border-subtle hover:border-strong'
+                      checked
+                        ? 'border-[var(--accent)] bg-surface-raised shadow-[inset_3px_0_0_var(--accent)]'
+                        : 'border-subtle bg-surface-raised hover:border-strong'
                     } ${active ? 'ring-1 ring-[var(--accent)]' : ''}`}
                   >
                     <input

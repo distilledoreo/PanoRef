@@ -137,14 +137,14 @@ export function ReviewWorkspace() {
         <div
           className={
             view === 'grid'
-              ? `grid min-h-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 ${
-                  fitsCompactGrid ? 'lg:grid-rows-2 lg:overflow-hidden' : 'auto-rows-min overflow-y-auto'
+              ? `grid min-h-0 flex-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 ${
+                  fitsCompactGrid ? 'content-start auto-rows-min overflow-hidden' : 'auto-rows-min overflow-y-auto'
                 }`
               : 'min-h-0 flex-1 space-y-1.5 overflow-y-auto'
           }
         >
           {filteredShots.map((shot) => (
-            <div key={shot.id} className={fitsCompactGrid ? 'h-full min-h-0' : ''}>
+            <div key={shot.id}>
               <ShotReviewCard
                 shot={shot}
                 project={project}
@@ -301,34 +301,27 @@ function ShotReviewCard({
     <button
       type="button"
       onClick={onSelect}
+      data-review-grid-card={compactGrid ? 'compact' : 'default'}
       className={`flex w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border text-left transition ${
-        compactGrid ? 'h-full min-h-0' : ''
-      } ${
-        selected ? 'border-[var(--accent)] bg-accent-soft shadow-card' : 'border-subtle bg-surface-raised hover:border-strong'
+        selected ? 'border-[var(--accent)] ring-1 ring-[var(--accent)] bg-surface-raised shadow-card' : 'border-subtle bg-surface-raised hover:border-strong'
       }`}
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-1.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-1">
         <div className="min-w-0">
           <div className="truncate text-[11px] font-semibold text-primary">{shot.shotNumber} {shot.name}</div>
         </div>
         <StatusIcon level={level} className="!h-4 !w-4 [&_svg]:!h-3 [&_svg]:!w-3" />
       </div>
-      <div className={compactGrid ? 'min-h-0 flex-1' : ''}>
-        <StatusGlow
-          level={level}
-          showIcon={false}
-          className={compactGrid ? 'h-full min-h-0 w-full' : 'w-full'}
-        >
-          <ShotThumbnail
-            project={project}
-            shot={shot}
-            className={`w-full rounded-none border-y border-subtle ${
-              compactGrid ? 'h-full min-h-0' : 'aspect-video'
-            }`}
-          />
-        </StatusGlow>
-      </div>
-      <div className="shrink-0 px-2.5 py-1 text-[11px] font-medium text-secondary">
+      <StatusGlow level={level} showIcon={false} className="w-full">
+        <ShotThumbnail
+          project={project}
+          shot={shot}
+          className={`w-full rounded-none border-y border-subtle ${
+            compactGrid ? 'aspect-video max-h-[8.5rem]' : 'aspect-video'
+          }`}
+        />
+      </StatusGlow>
+      <div className="shrink-0 px-2.5 py-0.5 text-[11px] font-medium text-secondary">
         {formatShotStatus(shot.status, warnings.length)}
       </div>
     </button>

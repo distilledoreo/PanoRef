@@ -51,13 +51,13 @@ export function PrimaryCTA({
     return (
       <div
         data-primary-cta="inline"
-        className="pointer-events-auto flex shrink-0 flex-col gap-0.5"
+        className="pointer-events-auto flex w-[var(--shots-cta-lane,15.5rem)] min-w-[var(--shots-cta-lane,15.5rem)] shrink-0 flex-col items-end gap-0.5"
       >
         {button}
         {hint && (
           <p
             data-primary-cta-hint
-            className="m-0 text-xs leading-[var(--shots-cta-hint-block,1rem)] text-secondary"
+            className="m-0 w-full text-right text-xs leading-[var(--shots-cta-hint-block,1.125rem)] text-secondary whitespace-nowrap"
           >
             {hint}
           </p>
