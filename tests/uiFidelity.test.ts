@@ -4,11 +4,27 @@ import { describe, expect, it } from 'vitest';
 describe('ui revamp fidelity surfaces', () => {
   it('floats the stage rail over a full-bleed workspace instead of a separate header strip', () => {
     const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+    const shell = readFileSync(new URL('../src/components/workspaces/WorkspaceShell.tsx', import.meta.url), 'utf8');
+    const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
+    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
     expect(app).toContain('<main className="absolute inset-0">');
     expect(app).toContain('pointer-events-none absolute inset-x-0 top-0 z-40');
     expect(app).toContain('bg-surface-overlay/75');
     expect(app).not.toContain('border-b border-subtle bg-surface-header');
     expect(app).not.toContain('flex h-screen w-full flex-col');
+    expect(styles).toContain('--stage-header-safe');
+    expect(shell).toContain('reserveHeader');
+    expect(shell).toContain('pt-[var(--stage-header-safe)]');
+    expect(reference).toContain('FullBleedLayout reserveHeader');
+    expect(shots).toContain('FullBleedLayout reserveHeader');
+    expect(review).toContain('FullBleedLayout reserveHeader');
+    expect(exportWorkspace).toContain('FullBleedLayout reserveHeader');
+    expect(build).toContain('<FullBleedLayout>');
+    expect(build).not.toContain('reserveHeader');
   });
 
   it('declares Continuity Stage favicon assets in the app shell', () => {

@@ -134,7 +134,7 @@ export function ReferenceWorkspace() {
   };
 
   return (
-    <FullBleedLayout>
+    <FullBleedLayout reserveHeader>
       <div className="flex h-full min-h-0 flex-col p-4 md:p-5">
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[18px] border border-subtle bg-surface-raised shadow-card">
           <div className="relative min-h-0 flex-1">

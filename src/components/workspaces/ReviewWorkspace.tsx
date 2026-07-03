@@ -109,7 +109,7 @@ export function ReviewWorkspace() {
   const fitsCompactGrid = view === 'grid' && filteredShots.length > 0 && filteredShots.length <= 6;
 
   return (
-    <FullBleedLayout>
+    <FullBleedLayout reserveHeader>
       <div className="flex h-full min-h-0 flex-col bg-surface-base p-4">
         <header className="mb-2 shrink-0">
           <h1 className="text-xl font-semibold text-primary">Review Your Shots</h1>

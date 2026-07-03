@@ -99,7 +99,7 @@ export function ExportWorkspace() {
   );
 
   return (
-    <FullBleedLayout>
+    <FullBleedLayout reserveHeader>
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-base p-4">
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
           <div

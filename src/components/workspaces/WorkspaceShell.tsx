@@ -1,8 +1,18 @@
 import React from 'react';
 
-export function FullBleedLayout({ children }: { children: React.ReactNode }) {
+export function FullBleedLayout({
+  children,
+  reserveHeader = false,
+}: {
+  children: React.ReactNode;
+  reserveHeader?: boolean;
+}) {
   return (
-    <div className="relative h-full min-h-0 bg-surface-base">
+    <div
+      className={`relative box-border h-full min-h-0 bg-surface-base ${
+        reserveHeader ? 'pt-[var(--stage-header-safe)]' : ''
+      }`}
+    >
       {children}
     </div>
   );

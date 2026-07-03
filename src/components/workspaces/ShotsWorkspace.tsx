@@ -354,7 +354,7 @@ export function ShotsWorkspace() {
   }, [acceptShotFraming, selectedShot, startFlyCamera]);
 
   return (
-    <FullBleedLayout>
+    <FullBleedLayout reserveHeader>
       <div className="relative h-full min-h-0 overflow-hidden bg-surface-base">
         <div className="absolute inset-0">
           <SceneViewport

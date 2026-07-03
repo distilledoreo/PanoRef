@@ -80,7 +80,7 @@ export function GrayboxStylingTools({
         <TextArea
           readOnly
           value={prompt}
-          className="min-h-52 bg-zinc-50 font-mono text-[13px] leading-relaxed text-zinc-700"
+          className="min-h-52 bg-surface-muted font-mono text-[13px] leading-relaxed text-secondary"
         />
       </Field>
 
@@ -120,18 +120,18 @@ export function GrayboxReferencePromptBuilder({
 }) {
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-[15px] leading-relaxed text-teal-900">
+      <div className="rounded-xl border border-subtle bg-accent-soft px-4 py-3 text-[15px] leading-relaxed text-primary">
         Your graybox 360 is ready. Download the PNG below, then use the prompt with your image AI.
       </div>
 
-      <p className="text-[15px] leading-relaxed text-zinc-700">
+      <p className="text-[15px] leading-relaxed text-secondary">
         Turn the graybox into a finished 360 pano using any image AI you like.
       </p>
 
       <ol className="space-y-3">
         {STEPS.map((step, index) => (
-          <li key={step} className="flex gap-3 text-[15px] leading-snug text-zinc-800">
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-teal-100 text-xs font-semibold text-teal-800">
+          <li key={step} className="flex gap-3 text-[15px] leading-snug text-primary">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent">
               {index + 1}
             </span>
             <span className="pt-0.5">{step}</span>
@@ -139,7 +139,7 @@ export function GrayboxReferencePromptBuilder({
         ))}
       </ol>
 
-      <div className="border-t border-zinc-100 pt-5">
+      <div className="border-t border-subtle pt-5">
         <GrayboxStylingTools
           project={project}
           grayboxAsset={grayboxAsset}
@@ -168,10 +168,10 @@ export function AlignmentRetryContent({
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <p className="text-[15px] font-medium text-zinc-900">
+        <p className="text-[15px] font-medium text-primary">
           Yaw only fixes rotation. If the scene shape still feels wrong, generate again.
         </p>
-        <ul className="list-disc space-y-2 pl-5 text-[15px] text-zinc-700">
+        <ul className="list-disc space-y-2 pl-5 text-[15px] text-secondary">
           <li>Try a few more generations. One bad result can just be bad luck.</li>
           <li>Use the graybox as your main image. One other reference is usually fine — but the more you add, the easier it is to confuse the model.</li>
           <li>Use the strongest image model you have.</li>
@@ -180,8 +180,8 @@ export function AlignmentRetryContent({
         </ul>
       </div>
 
-      <div className="border-t border-zinc-100 pt-5">
-        <p className="mb-4 text-[15px] text-zinc-700">
+      <div className="border-t border-subtle pt-5">
+        <p className="mb-4 text-[15px] text-secondary">
           Then copy the prompt, run your image AI, and import the new {STYLED_PANO.short}.
         </p>
         <GrayboxStylingTools

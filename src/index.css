@@ -35,6 +35,7 @@
   --shots-cta-lane: 15.5rem;
   --shots-overlay-bottom-safe: 12rem;
   --reference-cta-lane: 17.5rem;
+  --stage-header-safe: 4.75rem;
   --radius-card: 14px;
   --radius-pill: 999px;
   --thumbnail-fallback-sky: #e8e4de;
@@ -45,6 +46,12 @@
   --thumbnail-fallback-block-b: rgba(120, 113, 108, 0.42);
   --thumbnail-fallback-block-c: rgba(214, 211, 209, 0.65);
   --thumbnail-fallback-label: #78716c;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --stage-header-safe: 6rem;
+  }
 }
 
 .dark {
