@@ -22,6 +22,7 @@ import { ShotsWorkspace } from './components/workspaces/ShotsWorkspace';
 import { ReviewWorkspace } from './components/workspaces/ReviewWorkspace';
 import { ExportWorkspace } from './components/workspaces/ExportWorkspace';
 import { WorkflowGuidance } from './components/common/WorkflowGuidance';
+import SplashScreen from './components/common/SplashScreen';
 
 const workspaceItems: Array<{ id: Workspace; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'build', label: 'Build', icon: Boxes },
@@ -179,6 +180,8 @@ export default function App() {
       </header>
 
       <WorkflowGuidance />
+
+      <SplashScreen />
     </div>
   );
 }
