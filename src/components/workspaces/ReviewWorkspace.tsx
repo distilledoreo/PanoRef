@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -16,6 +16,7 @@ import { Shot, ShotStatus } from '../../domain/types';
 import { buildShotPackage, downloadBlob } from '../../engine/packageExport';
 import { generateImagePrompt, generateVideoPrompt } from '../../engine/prompts';
 import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
+import { renderViewportClay } from '../../engine/renderers';
 import { getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, TextArea } from '../common/Field';
@@ -35,6 +36,8 @@ export function ReviewWorkspace() {
   const [view, setView] = useState<ReviewView>('grid');
   const [selectedDetailShotId, setSelectedDetailShotId] = useState<string | undefined>();
   const [precisionOpen, setPrecisionOpen] = useState(false);
+  const [shotControlFrames, setShotControlFrames] = useState<Record<string, string>>({});
+  const [renderingShotIds, setRenderingShotIds] = useState<Record<string, boolean>>({});
   const {
     project,
     selectedShotId,
@@ -46,15 +49,61 @@ export function ReviewWorkspace() {
   } = useContinuityStore();
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const detailShot = project.shots.find((shot) => shot.id === selectedDetailShotId) ?? selectedShot;
-  const selectedShotPano = detailShot?.linkedPanoId
-    ? project.panoRefs.find((pano) => pano.id === detailShot.linkedPanoId)
-    : undefined;
-  const selectedPanoAsset = selectedShotPano ? project.assets.assets[selectedShotPano.imageAssetId] : undefined;
   const selectedAiResultAsset = detailShot?.assets.aiResultFrameAssetId
     ? project.assets.assets[detailShot.assets.aiResultFrameAssetId]
     : detailShot?.assets.finalBaseFrameAssetId
       ? project.assets.assets[detailShot.assets.finalBaseFrameAssetId]
       : undefined;
+  const detailShotControlFrame = detailShot ? shotControlFrames[detailShot.id] : undefined;
+
+  const shotControlRenderKey = useMemo(() => JSON.stringify({
+    scene: project.scene,
+    shots: project.shots.map((shot) => ({
+      id: shot.id,
+      camera: shot.camera,
+      width: shot.exportSettings.width,
+      height: shot.exportSettings.height,
+    })),
+  }), [project.scene, project.shots]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const renderShotControls = async () => {
+      const activeShotIds = new Set(project.shots.map((shot) => shot.id));
+      setShotControlFrames((current) => (
+        Object.fromEntries(Object.entries(current).filter(([shotId]) => activeShotIds.has(shotId)))
+      ));
+      setRenderingShotIds(Object.fromEntries(project.shots.map((shot) => [shot.id, true])));
+
+      await Promise.all(project.shots.map(async (shot) => {
+        try {
+          const previewSize = getReviewShotControlSize(shot);
+          const frame = await renderViewportClay(project, shot.camera, previewSize.width, previewSize.height);
+          if (!cancelled) {
+            setShotControlFrames((current) => ({ ...current, [shot.id]: frame.dataUrl }));
+          }
+        } catch {
+          if (!cancelled) {
+            setShotControlFrames((current) => {
+              const { [shot.id]: _unused, ...rest } = current;
+              return rest;
+            });
+          }
+        } finally {
+          if (!cancelled) {
+            setRenderingShotIds((current) => ({ ...current, [shot.id]: false }));
+          }
+        }
+      }));
+    };
+
+    void renderShotControls();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [project, shotControlRenderKey]);
 
   const setStatus = (status: ShotStatus, shotId?: string) => {
     const id = shotId ?? detailShot?.id;
@@ -117,6 +166,7 @@ export function ReviewWorkspace() {
             <div className="text-sm text-secondary">
               Approved <span className="font-semibold text-primary">{approvedCount}</span> / {project.shots.length}
             </div>
+            <div className="text-sm text-secondary">Check the graybox shot frame, export the AI brief, then compare the imported result.</div>
             <div className="h-1.5 min-w-[10rem] flex-1 max-w-xs overflow-hidden rounded-full bg-surface-muted">
               <div className="h-full rounded-full bg-[var(--accent)] transition-all" style={{ width: `${progress * 100}%` }} />
             </div>
@@ -151,6 +201,8 @@ export function ReviewWorkspace() {
                 view={view}
                 compactGrid={fitsCompactGrid}
                 selected={shot.id === detailShot?.id}
+                shotControlSrc={shotControlFrames[shot.id]}
+                shotControlRendering={Boolean(renderingShotIds[shot.id])}
                 onSelect={() => {
                   setSelectedDetailShotId(shot.id);
                   selectShot(shot.id);
@@ -201,7 +253,11 @@ export function ReviewWorkspace() {
         {detailShot && (
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-3">
-              <ReviewImage title="Linked Pano Reference" src={selectedPanoAsset?.uri} emptyText="No linked pano reference" />
+              <ReviewImage
+                title="Graybox Shot Control"
+                src={detailShotControlFrame}
+                emptyText={renderingShotIds[detailShot.id] ? 'Rendering the locked shot frame...' : 'No shot control frame available.'}
+              />
               <ReviewImage title="AI Result Frame" src={selectedAiResultAsset?.uri} emptyText="Import a result frame after exporting the AI brief." />
             </div>
             <div className="grid grid-cols-1 gap-2">
@@ -261,6 +317,8 @@ function ShotReviewCard({
   view,
   compactGrid,
   selected,
+  shotControlSrc,
+  shotControlRendering,
   onSelect,
 }: {
   shot: Shot;
@@ -268,9 +326,12 @@ function ShotReviewCard({
   view: ReviewView;
   compactGrid?: boolean;
   selected: boolean;
+  shotControlSrc?: string;
+  shotControlRendering?: boolean;
   onSelect: () => void;
 }) {
   const warnings = getShotWarnings(project, shot);
+  const aiResultAsset = getShotResultAsset(project, shot);
   const level = shot.status === 'approved'
     ? 'approved'
     : shot.status === 'needs_fix' || warnings.length > 0
@@ -287,11 +348,19 @@ function ShotReviewCard({
         }`}
       >
         <StatusGlow level={level}>
-          <ShotThumbnail project={project} shot={shot} className="h-11 w-20 shrink-0" />
+          <ShotThumbnail
+            project={project}
+            shot={shot}
+            overrideSrc={shotControlSrc}
+            overrideLabel="Graybox shot"
+            className="h-11 w-20 shrink-0"
+            showSourceLabel
+            fallbackOnly
+          />
         </StatusGlow>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-primary">{shot.shotNumber} {shot.name}</div>
-          <div className="text-[11px] text-secondary">{formatShotStatus(shot.status, warnings.length)}</div>
+          <div className="text-[11px] text-secondary">{formatShotStatus(shot.status, warnings.length)} · {shotControlRendering ? 'Rendering shot frame' : 'Graybox shot frame'}</div>
         </div>
       </button>
     );
@@ -313,19 +382,52 @@ function ShotReviewCard({
         <StatusIcon level={level} className="!h-4 !w-4 [&_svg]:!h-3 [&_svg]:!w-3" />
       </div>
       <StatusGlow level={level} showIcon={false} className="w-full">
-        <ShotThumbnail
-          project={project}
-          shot={shot}
-          className={`w-full rounded-none border-y border-subtle ${
-            compactGrid ? 'aspect-video max-h-[8.5rem]' : 'aspect-video'
-          }`}
-        />
+        <div className="relative">
+          <ShotThumbnail
+            project={project}
+            shot={shot}
+            overrideSrc={shotControlSrc}
+            overrideLabel="Graybox shot"
+            className={`w-full rounded-none border-y border-subtle ${
+              compactGrid ? 'aspect-video max-h-[8.5rem]' : 'aspect-video'
+            }`}
+            showSourceLabel
+            fallbackOnly
+          />
+          {shotControlRendering && (
+            <span className="absolute bottom-2 left-2 rounded-md bg-surface-overlay px-2 py-0.5 text-[10px] font-medium text-secondary shadow-card">
+              Rendering shot frame
+            </span>
+          )}
+          {aiResultAsset && (
+            <div className="absolute bottom-2 right-2 h-[36%] w-[36%] overflow-hidden rounded-md border border-white/70 bg-surface-muted shadow-card">
+              <img src={aiResultAsset.uri} alt="" className="h-full w-full object-cover" />
+              <span className="absolute left-1 top-1 rounded bg-black/55 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-white">
+                Result
+              </span>
+            </div>
+          )}
+        </div>
       </StatusGlow>
       <div className="shrink-0 px-2.5 py-0.5 text-[11px] font-medium text-secondary">
-        {formatShotStatus(shot.status, warnings.length)}
+        {formatShotStatus(shot.status, warnings.length)} · Graybox shot frame
       </div>
     </button>
   );
+}
+
+function getShotResultAsset(project: Parameters<typeof getShotWarnings>[0], shot: Shot) {
+  const assetId = shot.assets.aiResultFrameAssetId ?? shot.assets.finalBaseFrameAssetId;
+  return assetId ? project.assets.assets[assetId] : undefined;
+}
+
+function getReviewShotControlSize(shot: Shot) {
+  const aspectRatio = shot.exportSettings.width / shot.exportSettings.height;
+  const width = Math.min(640, shot.exportSettings.width);
+  return {
+    width,
+    height: Math.max(1, Math.round(width / aspectRatio)),
+  };
 }
 
 function formatShotStatus(status: ShotStatus, warningCount: number) {

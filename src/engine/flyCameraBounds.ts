@@ -6,15 +6,12 @@ export interface FlyCameraBounds {
   max: Vec3;
 }
 
-const DEFAULT_MARGIN: Vec3 = [2.5, 1.75, 2.5];
-const FALLBACK_HALF_EXTENT: Vec3 = [8, 3.5, 8];
+export const DEFAULT_FLY_CAMERA_HORIZONTAL_MARGIN_METERS = 10;
+const DEFAULT_VERTICAL_MARGIN_METERS = 1.75;
+const FALLBACK_HALF_EXTENT: Vec3 = [18, 3.5, 18];
 const MIN_EYE_HEIGHT_METERS = 0.45;
-const FRONT_BLOCKER_STANDOFF_METERS = 0.3;
-const CENTER_CORRIDOR_HALF_WIDTH_METERS = 2;
 
 const EXCLUDED_BOUND_TYPES = new Set<SceneObjectType>(['sun_marker']);
-const FLOOR_TYPES = new Set<SceneObjectType>(['floor', 'terrain_mass']);
-const FRONT_BLOCKER_TYPES = new Set<SceneObjectType>(['wall', 'arch', 'doorway', 'background_card']);
 
 interface ObjectExtents {
   minX: number;
@@ -44,15 +41,6 @@ function isQualifyingObject(object: SceneObject): boolean {
   return object.visible && !EXCLUDED_BOUND_TYPES.has(object.type);
 }
 
-function isFrontBlocker(object: SceneObject, originX: number, originZ: number): boolean {
-  if (!FRONT_BLOCKER_TYPES.has(object.type)) return false;
-  const { minX, maxX, minZ } = objectExtents(object);
-  if (minZ <= originZ) return false;
-  const corridorMinX = originX - CENTER_CORRIDOR_HALF_WIDTH_METERS;
-  const corridorMaxX = originX + CENTER_CORRIDOR_HALF_WIDTH_METERS;
-  return maxX >= corridorMinX && minX <= corridorMaxX;
-}
-
 function expandVerticalBounds(
   minY: number,
   maxY: number,
@@ -67,11 +55,13 @@ function expandVerticalBounds(
 export function computeSceneFlyBounds(
   scene: SceneData,
   options?: {
-    margin?: Vec3;
+    horizontalMarginMeters?: number;
+    verticalMarginMeters?: number;
     fallbackHalfExtent?: Vec3;
   },
 ): FlyCameraBounds {
-  const margin = options?.margin ?? DEFAULT_MARGIN;
+  const horizontalMargin = options?.horizontalMarginMeters ?? DEFAULT_FLY_CAMERA_HORIZONTAL_MARGIN_METERS;
+  const verticalMargin = options?.verticalMarginMeters ?? DEFAULT_VERTICAL_MARGIN_METERS;
   const fallbackHalf = options?.fallbackHalfExtent ?? FALLBACK_HALF_EXTENT;
   const [originX, originY, originZ] = scene.panoOrigin;
 
@@ -91,78 +81,32 @@ export function computeSceneFlyBounds(
     };
   }
 
-  const floors = qualifyingObjects.filter((object) => FLOOR_TYPES.has(object.type));
-  const stageObjects = qualifyingObjects.filter((object) => !FLOOR_TYPES.has(object.type));
-
+  let minX = originX;
   let minY = originY;
+  let minZ = originZ;
+  let maxX = originX;
   let maxY = originY;
-  for (const object of stageObjects) {
-    [minY, maxY] = expandVerticalBounds(minY, maxY, objectExtents(object));
-  }
-
-  let minX: number;
-  let maxX: number;
-  let minZ: number;
-  let maxZ: number;
-
-  if (floors.length > 0) {
-    let floorMinX = Infinity;
-    let floorMinZ = Infinity;
-    let floorMaxX = -Infinity;
-    let floorMaxZ = -Infinity;
-
-    for (const floor of floors) {
-      const extents = objectExtents(floor);
-      floorMinX = Math.min(floorMinX, extents.minX);
-      floorMinZ = Math.min(floorMinZ, extents.minZ);
-      floorMaxX = Math.max(floorMaxX, extents.maxX);
-      floorMaxZ = Math.max(floorMaxZ, extents.maxZ);
-    }
-
-    minX = floorMinX + margin[0];
-    maxX = floorMaxX - margin[0];
-    minZ = floorMinZ + margin[2];
-    maxZ = floorMaxZ;
-  } else {
-    let stageMinX = originX;
-    let stageMinZ = originZ;
-    let stageMaxX = originX;
-    let stageMaxZ = originZ;
-
-    for (const object of stageObjects) {
-      const extents = objectExtents(object);
-      stageMinX = Math.min(stageMinX, extents.minX);
-      stageMinZ = Math.min(stageMinZ, extents.minZ);
-      stageMaxX = Math.max(stageMaxX, extents.maxX);
-      stageMaxZ = Math.max(stageMaxZ, extents.maxZ);
-    }
-
-    minX = stageMinX + margin[0];
-    maxX = stageMaxX - margin[0];
-    minZ = stageMinZ + margin[2];
-    maxZ = stageMaxZ;
-  }
+  let maxZ = originZ;
 
   for (const object of qualifyingObjects) {
-    if (!isFrontBlocker(object, originX, originZ)) continue;
-    maxZ = Math.min(
-      maxZ,
-      objectExtents(object).minZ - FRONT_BLOCKER_STANDOFF_METERS,
-    );
+    const extents = objectExtents(object);
+    minX = Math.min(minX, extents.minX);
+    minZ = Math.min(minZ, extents.minZ);
+    maxX = Math.max(maxX, extents.maxX);
+    maxZ = Math.max(maxZ, extents.maxZ);
+    [minY, maxY] = expandVerticalBounds(minY, maxY, extents);
   }
-
-  maxZ = Math.max(maxZ, originZ);
 
   return {
     min: [
-      minX,
-      Math.max(minY - margin[1], MIN_EYE_HEIGHT_METERS),
-      minZ,
+      minX - horizontalMargin,
+      Math.max(minY - verticalMargin, MIN_EYE_HEIGHT_METERS),
+      minZ - horizontalMargin,
     ],
     max: [
-      maxX,
-      maxY + margin[1],
-      maxZ,
+      maxX + horizontalMargin,
+      maxY + verticalMargin,
+      maxZ + horizontalMargin,
     ],
   };
 }

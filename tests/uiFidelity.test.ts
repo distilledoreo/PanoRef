@@ -314,9 +314,15 @@ describe('ui revamp fidelity surfaces', () => {
     expect(statusBadge).toContain('className?: string');
     expect(review).toContain('aspect-video max-h-[8.5rem]');
     expect(review).toContain('StatusGlow level={level} showIcon={false} className="w-full"');
+    expect(review).toContain('renderViewportClay(project, shot.camera, previewSize.width, previewSize.height)');
+    expect(review).toContain('getReviewShotControlSize');
+    expect(review).toContain('overrideLabel="Graybox shot"');
+    expect(review).toContain('fallbackOnly');
+    expect(review).toContain('Graybox Shot Control');
     expect(review).not.toContain('compactGrid ? \'h-full min-h-0\'');
     expect(review).not.toContain('lg:grid-rows-2');
     expect(shotThumbnail).toContain('data-shot-thumbnail-fallback');
+    expect(shotThumbnail).toContain('fallbackOnly?: boolean');
   });
 
   it('uses compact shot thumbnail fallbacks without cramped labels in export rows', () => {

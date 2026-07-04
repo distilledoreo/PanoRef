@@ -41,22 +41,26 @@ export function ShotThumbnail({
   project,
   shot,
   overrideSrc,
+  overrideLabel,
   alt = '',
   className,
   showSourceLabel,
   compact,
+  fallbackOnly,
 }: {
   project: LocationProject;
   shot: Shot;
   overrideSrc?: string;
+  overrideLabel?: string;
   alt?: string;
   className?: string;
   showSourceLabel?: boolean;
   compact?: boolean;
+  fallbackOnly?: boolean;
 }) {
-  const resolved = resolveShotThumbnail(project, shot);
+  const resolved = fallbackOnly ? { label: 'No shot frame yet' } : resolveShotThumbnail(project, shot);
   const src = overrideSrc ?? resolved.asset?.uri;
-  const sourceLabel = overrideSrc ? 'Live preview' : resolved.label;
+  const sourceLabel = overrideSrc ? (overrideLabel ?? 'Live preview') : resolved.label;
   const sizeClassName = className ?? 'h-full w-full';
 
   return (

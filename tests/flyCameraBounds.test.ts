@@ -1,17 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { createDefaultProject } from '../src/domain/defaults';
-import { clampFlyCameraPosition, computeSceneFlyBounds } from '../src/engine/flyCameraBounds';
+import {
+  DEFAULT_FLY_CAMERA_HORIZONTAL_MARGIN_METERS,
+  clampFlyCameraPosition,
+  computeSceneFlyBounds,
+} from '../src/engine/flyCameraBounds';
 import type { SceneData } from '../src/domain/types';
 
 describe('fly camera bounds', () => {
-  it('derives navigable bounds from floor footprint and stage objects with inset margin', () => {
+  it('derives navigable bounds from the full object envelope plus outward margin', () => {
     const project = createDefaultProject();
-    const bounds = computeSceneFlyBounds(project.scene, { margin: [2, 1, 2] });
+    const bounds = computeSceneFlyBounds(project.scene, {
+      horizontalMarginMeters: 3,
+      verticalMarginMeters: 1,
+    });
+    const qualifyingObjects = project.scene.objects.filter((object) => object.visible && object.type !== 'sun_marker');
+    const minObjectX = Math.min(...qualifyingObjects.map((object) => object.transform.position[0] - object.dimensions[0] / 2));
+    const maxObjectX = Math.max(...qualifyingObjects.map((object) => object.transform.position[0] + object.dimensions[0] / 2));
+    const minObjectZ = Math.min(...qualifyingObjects.map((object) => object.transform.position[2] - object.dimensions[2] / 2));
 
-    expect(bounds.min[0]).toBeCloseTo(-6 + 2, 5);
-    expect(bounds.max[0]).toBeCloseTo(6 - 2, 5);
-    expect(bounds.min[2]).toBeCloseTo(-6 + 2, 5);
-    expect(bounds.max[2]).toBeLessThan(4.5);
+    expect(bounds.min[0]).toBeCloseTo(minObjectX - 3, 5);
+    expect(bounds.max[0]).toBeCloseTo(maxObjectX + 3, 5);
+    expect(bounds.min[2]).toBeCloseTo(minObjectZ - 3, 5);
+    expect(bounds.max[2]).toBeGreaterThan(8);
     expect(bounds.min[1]).toBeGreaterThanOrEqual(0.45);
     expect(bounds.max[1]).toBeGreaterThan(project.scene.panoOrigin[1]);
   });
@@ -24,7 +35,6 @@ describe('fly camera bounds', () => {
       panoRotation: [0, 0, 0],
     };
     const bounds = computeSceneFlyBounds(scene, {
-      margin: [0, 0, 0],
       fallbackHalfExtent: [5, 2, 5],
     });
 
@@ -38,7 +48,6 @@ describe('fly camera bounds', () => {
       ...project.scene,
       objects: project.scene.objects.filter((object) => object.type === 'sun_marker'),
     }, {
-      margin: [0, 0, 0],
       fallbackHalfExtent: [4, 2, 4],
     });
 
@@ -54,14 +63,29 @@ describe('fly camera bounds', () => {
     ]);
   });
 
-  it('clamps sustained forward movement before the central front wall and gate', () => {
+  it('allows sustained forward movement beyond the central wall and gate', () => {
     const project = createDefaultProject();
     const bounds = computeSceneFlyBounds(project.scene);
     const clamped = clampFlyCameraPosition([0, project.scene.panoOrigin[1], 100], bounds);
 
-    expect(clamped[2]).toBeLessThan(4.5);
-    expect(clamped[2]).toBeGreaterThan(3.5);
-    expect(bounds.max[2]).toBeLessThan(4.5);
+    expect(clamped[2]).toBe(bounds.max[2]);
+    expect(bounds.max[2]).toBeGreaterThan(14);
+  });
+
+  it('extends the default horizontal movement volume ten meters past the farthest visible object', () => {
+    const project = createDefaultProject();
+    const bounds = computeSceneFlyBounds(project.scene);
+    const farthestObjectZ = Math.max(
+      ...project.scene.objects
+        .filter((object) => object.visible && object.type !== 'sun_marker')
+        .map((object) => object.transform.position[2] + object.dimensions[2] / 2),
+      project.scene.panoOrigin[2],
+    );
+
+    expect(bounds.max[2]).toBeCloseTo(
+      farthestObjectZ + DEFAULT_FLY_CAMERA_HORIZONTAL_MARGIN_METERS,
+      5,
+    );
   });
 
   it('clamps fly movement inside the computed bounds without changing look state', () => {
