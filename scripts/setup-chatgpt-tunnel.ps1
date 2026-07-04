@@ -54,13 +54,16 @@ if (-not $workspace) {
 New-Item -ItemType Directory -Force -Path $workspace | Out-Null
 New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
 
+# tunnel-client splits --mcp-command on spaces, so wrap the .cmd path in cmd.exe /c "..."
+$mcpCommand = "cmd.exe /c `"$runMcpCmd`""
+
 $initArgs = @(
   'init',
   '--sample', 'sample_mcp_stdio_local',
   '--profile', 'continuity-stage',
   '--profile-dir', $profileDir,
   '--tunnel-id', $tunnelId,
-  '--mcp-command', $runMcpCmd
+  '--mcp-command', $mcpCommand
 )
 if ($Force) { $initArgs += '--force' }
 
