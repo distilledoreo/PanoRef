@@ -186,6 +186,8 @@ export interface ProjectSettings {
   defaultShotWidth: number;
   defaultShotHeight: number;
   defaultShotFovDegrees: number;
+  defaultCameraLensMm?: number;
+  defaultCameraHeightMeters?: number;
   panoGoodMatchMeters: number;
   panoModerateMatchMeters: number;
   panoLetterboxExports169: boolean;

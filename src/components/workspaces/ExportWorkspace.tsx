@@ -1,16 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Archive, Check, Download } from 'lucide-react';
-import { createShotPackageManifest } from '../../engine/exportManifest';
+import { Archive, Check, Download, FileJson, FolderArchive, Settings } from 'lucide-react';
+import { createShotPackageManifest, selectExportPathPreview } from '../../engine/exportManifest';
 import { buildShotPackage, downloadBlob } from '../../engine/packageExport';
 import { getProjectWarnings, getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
-import { WorkspaceSidebar } from '../common/WorkspaceSidebar';
-import { ShotSelector } from '../common/ShotSelector';
-import { Field, IconButton, Panel, TextInput } from '../common/Field';
-import { WarningList } from '../common/WarningList';
+import { Field, IconButton, TextInput } from '../common/Field';
+import { PrecisionDrawer } from '../common/PrecisionDrawer';
+import { PrimaryCTA } from '../common/PrimaryCTA';
+import { ShotThumbnail } from '../common/ShotThumbnail';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
-import { NextStepHighlight } from '../common/NextStepHighlight';
-import { WorkspaceLayout } from './WorkspaceShell';
+import { FullBleedLayout } from './WorkspaceShell';
 
 export function ExportWorkspace() {
   const {
@@ -24,6 +23,9 @@ export function ExportWorkspace() {
     markFinalPackageExported,
   } = useContinuityStore();
   const [lastExport, setLastExport] = useState<string[]>([]);
+  const [selectedShotIds, setSelectedShotIds] = useState<Set<string>>(() => new Set(project.shots.map((shot) => shot.id)));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exportingShotId, setExportingShotId] = useState<string | undefined>();
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const manifest = useMemo(() => selectedShot ? createShotPackageManifest(project, selectedShot) : undefined, [project, selectedShot]);
   const primaryAction = useMemo(
@@ -35,6 +37,34 @@ export function ExportWorkspace() {
     }),
     [project, selectedShot?.id],
   );
+
+  const toggleShotSelection = (shotId: string) => {
+    setSelectedShotIds((current) => {
+      const next = new Set(current);
+      if (next.has(shotId)) next.delete(shotId);
+      else next.add(shotId);
+      return next;
+    });
+  };
+
+  const exportSelectedShots = async () => {
+    const shotsToExport = project.shots.filter((shot) => selectedShotIds.has(shot.id));
+    if (shotsToExport.length === 0) return;
+    setExportingPackage(true);
+    try {
+      for (const shot of shotsToExport) {
+        setExportingShotId(shot.id);
+        const result = await buildShotPackage(project, shot);
+        downloadBlob(result.blob, result.fileName);
+        setLastExport(result.manifestPaths);
+        updateShot(shot.id, { status: 'exported' });
+        markFinalPackageExported(shot.id);
+      }
+    } finally {
+      setExportingPackage(false);
+      setExportingShotId(undefined);
+    }
+  };
 
   const exportShot = async () => {
     if (!selectedShot) return;
@@ -50,151 +80,228 @@ export function ExportWorkspace() {
     }
   };
 
+  const packageContents = [
+    { name: 'inputs', description: 'Reference and camera data' },
+    { name: 'outputs', description: 'Final frames and media' },
+    { name: 'metadata', description: 'Shot and scene info' },
+    { name: 'prompts', description: 'AI prompts and notes' },
+    { name: 'manifest.json', description: 'Package manifest' },
+  ];
+
+  const fitsCompactShotList = project.shots.length > 0 && project.shots.length <= 6;
+  const manifestPreviewPaths = useMemo(
+    () => (manifest ? selectExportPathPreview(manifest.files.map((file) => file.path), 3) : []),
+    [manifest],
+  );
+  const lastExportPreviewPaths = useMemo(
+    () => selectExportPathPreview(lastExport, 3),
+    [lastExport],
+  );
+
   return (
-    <WorkspaceLayout
-      sidebar={(
-        <WorkspaceSidebar
-          primary={(
-            <>
-              <ShotSelector
-                project={project}
-                selectedShotId={selectedShot?.id}
-                onSelectShot={selectShot}
-                onAddShot={addCamera}
-              />
-              {selectedShot ? (
-                <NextStepHighlight
-                  active={primaryAction?.id === 'export-final-zip'}
-                  hint={primaryAction?.hint}
-                >
-                  <IconButton
-                    onClick={() => void exportShot()}
-                    disabled={isExportingPackage}
-                    highlighted={primaryAction?.id === 'export-final-zip'}
-                    className={`w-full ${primaryAction?.id === 'export-final-zip' ? '' : 'border-teal-500 bg-teal-500 text-white hover:bg-teal-600'}`}
-                  >
-                    <Download className="h-4 w-4" />
-                    {isExportingPackage ? 'Building Package...' : 'Export Final ZIP'}
-                  </IconButton>
-                </NextStepHighlight>
-              ) : null}
-            </>
-          )}
-          diagnostics={selectedShot ? (
-            <WarningList warnings={[...getProjectWarnings(project), ...getShotWarnings(project, selectedShot)]} />
-          ) : (
-            <p className="text-sm text-zinc-500">No shot selected.</p>
-          )}
-          advanced={selectedShot && (
-            <>
-              <Panel title="Package Settings">
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <Field label="Width">
-                      <TextInput
-                        type="number"
-                        value={selectedShot.exportSettings.width}
-                        onChange={(event) => updateShot(selectedShot.id, {
-                          exportSettings: {
-                            ...selectedShot.exportSettings,
-                            width: Number(event.target.value),
-                          },
-                        })}
-                      />
-                    </Field>
-                    <Field label="Height">
-                      <TextInput
-                        type="number"
-                        value={selectedShot.exportSettings.height}
-                        onChange={(event) => updateShot(selectedShot.id, {
-                          exportSettings: {
-                            ...selectedShot.exportSettings,
-                            height: Number(event.target.value),
-                          },
-                        })}
-                      />
-                    </Field>
+    <FullBleedLayout reserveHeader>
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-base p-4">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+          <div
+            data-export-package-panel="composed"
+            className="flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-4 shadow-card"
+          >
+            <header data-export-package-header className="mb-3 shrink-0">
+              <h1 className="text-xl font-semibold text-primary">Export Your Shots</h1>
+              <p className="mt-0.5 text-sm text-secondary">Choose what to export. Each shot is packaged individually.</p>
+            </header>
+
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2">
+              <div
+                data-export-package-visual
+                className="flex shrink-0 items-start justify-center gap-3"
+              >
+                <div className="flex shrink-0 flex-col items-center gap-1">
+                  <div className="flex h-16 w-20 items-center justify-center rounded-2xl bg-[var(--accent)] text-white shadow-[var(--cta-glow)]">
+                    <FolderArchive className="h-8 w-8" />
                   </div>
-                  {([
-                    ['includeViewport', 'Viewport clay render'],
-                    ['includeAiResultFrame', 'Imported AI result frame'],
-                    ['includePanoCrop', 'Pano crop'],
-                    ['includeFullPano', 'Styled reference pano'],
-                    ['includeGrayboxPano', 'Graybox pano'],
-                    ['includeCameraMoveVideo', 'Camera move MP4'],
-                    ['includeCameraMoveReferenceFrames', 'Camera move cubemap references'],
-                    ['includeMetadata', 'Metadata JSON'],
-                    ['includePrompt', 'Prompts'],
-                  ] as const).map(([key, label]) => (
-                    <label key={key} className="flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700">
-                      <input
-                        type="checkbox"
-                        checked={selectedShot.exportSettings[key]}
-                        onChange={(event) => updateShot(selectedShot.id, {
-                          exportSettings: { ...selectedShot.exportSettings, [key]: event.target.checked },
-                        })}
-                        className="accent-teal-500"
-                      />
-                      {label}
-                    </label>
+                  <div className="rounded-md bg-surface-muted px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-secondary">
+                    ZIP Package
+                  </div>
+                </div>
+                <div className="w-44 max-w-[11rem] shrink-0 rounded-lg border border-subtle bg-surface-muted p-2 shadow-card">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-secondary">
+                    Package Contents
+                  </div>
+                  <ul className="space-y-0.5">
+                    {packageContents.map((item) => (
+                      <li key={item.name} className="flex items-center gap-1.5 rounded-md border border-subtle bg-surface-raised px-1.5 py-0.5">
+                        <Archive className="h-3 w-3 shrink-0 text-accent" />
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-[10px] font-medium text-primary">{item.name}</div>
+                          <div className="truncate text-[9px] text-secondary">{item.description}</div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 shrink-0 space-y-2">
+              {manifest && (
+                <div data-export-manifest-preview className="max-h-8 space-y-0.5 overflow-hidden opacity-70">
+                  {manifestPreviewPaths.map((path) => (
+                    <div key={path} className="truncate font-mono text-[10px] text-muted">{path}</div>
                   ))}
                 </div>
-              </Panel>
-            </>
-          )}
-        />
-      )}
-    >
-      <div className="flex h-full min-h-0 flex-col bg-white">
-        <div className="border-b border-zinc-200 p-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-semibold text-zinc-900">AI Shot Package</h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Export a ZIP containing reference images, prompts, and metadata for the selected shot.
-              </p>
-            </div>
-            <IconButton onClick={() => void exportShot()} disabled={!selectedShot || isExportingPackage}>
-              <Download className="h-4 w-4" />
-              {isExportingPackage ? 'Building Package...' : 'Export ZIP'}
-            </IconButton>
-          </div>
-        </div>
-        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
-          <div className="min-h-0 overflow-y-auto border-b border-zinc-200 p-5 lg:border-b-0 lg:border-r">
-            <div className="mb-4 flex items-center gap-2 text-zinc-800">
-              <Archive className="h-5 w-5 text-teal-600" />
-              <h3 className="font-semibold">Manifest Preview</h3>
-            </div>
-            <div className="space-y-2">
-              {manifest?.files.map((file) => (
-                <div key={file.path} className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-xs text-zinc-700">
-                  <span className="truncate">{file.path}</span>
-                  <span className={file.required ? 'text-teal-700' : 'text-zinc-500'}>{file.required ? 'required' : 'optional'}</span>
-                </div>
-              ))}
-              {!manifest && <p className="text-sm text-zinc-500">Create a shot before exporting.</p>}
-            </div>
-          </div>
-          <div className="min-h-0 overflow-y-auto p-5">
-            <div className="mb-4 flex items-center gap-2 text-zinc-800">
-              <Check className="h-5 w-5 text-emerald-600" />
-              <h3 className="font-semibold">Last Export</h3>
-            </div>
-            {lastExport.length > 0 ? (
-              <div className="space-y-2">
-                {lastExport.map((path) => (
-                  <div key={path} className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 font-mono text-xs text-emerald-800">
-                    {path}
+              )}
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                data-export-settings-trigger
+                className="inline-flex items-center gap-1.5 text-[11px] font-medium text-secondary transition hover:text-accent"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Export Settings
+              </button>
+              {lastExport.length > 0 && (
+                <div data-export-last-export className="max-h-8 space-y-0.5 overflow-hidden opacity-80">
+                  <div className="flex items-center gap-1.5 text-[10px] font-medium text-primary">
+                    <Check className="h-3 w-3 text-emerald-500" />
+                    Last Export
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500">No package has been exported in this session.</p>
-            )}
+                  {lastExportPreviewPaths.map((path) => (
+                    <div key={path} className="truncate font-mono text-[10px] text-emerald-700 dark:text-emerald-400">{path}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-raised shadow-card">
+            <div className="shrink-0 border-b border-subtle px-3 py-2">
+              <h2 className="text-sm font-semibold text-primary">Select Shots to Export</h2>
+              <p className="text-[11px] text-secondary">{selectedShotIds.size} shot{selectedShotIds.size === 1 ? '' : 's'} selected</p>
+            </div>
+            <div
+              className={`min-h-0 flex-1 space-y-1 p-2 ${
+                fitsCompactShotList ? 'overflow-hidden' : 'overflow-y-auto'
+              }`}
+            >
+              {project.shots.map((shot) => {
+                const warnings = [...getProjectWarnings(project), ...getShotWarnings(project, shot)];
+                const checked = selectedShotIds.has(shot.id);
+                const active = selectedShotId === shot.id;
+                return (
+                  <div
+                    key={shot.id}
+                    data-export-shot-row={checked ? 'selected' : 'default'}
+                    className={`flex items-center gap-2 rounded-lg border px-2 py-1 transition ${
+                      checked
+                        ? 'border-[var(--accent)] bg-surface-raised shadow-[inset_3px_0_0_var(--accent)]'
+                        : 'border-subtle bg-surface-raised hover:border-strong'
+                    } ${active ? 'ring-1 ring-[var(--accent)]' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleShotSelection(shot.id)}
+                      className="accent-[var(--accent)]"
+                      aria-label={`Export Shot ${shot.shotNumber}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => selectShot(shot.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <ShotThumbnail project={project} shot={shot} compact className="h-9 w-16 shrink-0" />
+                      <span className="min-w-0 flex-1 leading-tight">
+                        <span className="block text-xs font-medium text-primary">Shot {shot.shotNumber}</span>
+                        <span className="block truncate text-[11px] text-secondary">{shot.name}</span>
+                      </span>
+                    </button>
+                    {warnings.length > 0 && (
+                      <span className="shrink-0 text-[10px] text-amber-600 dark:text-amber-400">{warnings.length}</span>
+                    )}
+                    {exportingShotId === shot.id && (
+                      <span className="shrink-0 text-[10px] text-accent">Exporting...</span>
+                    )}
+                  </div>
+                );
+              })}
+              {project.shots.length === 0 && (
+                <p className="text-sm text-secondary">No shots yet.</p>
+              )}
+            </div>
+            <div className="shrink-0 border-t border-subtle px-2 py-2">
+              <PrimaryCTA
+                icon={<Download className="h-4 w-4" />}
+                label={isExportingPackage ? 'Building Package...' : 'Export Selected Shots'}
+                hint="Create ZIP packages for each selected shot."
+                onClick={() => void exportSelectedShots()}
+                disabled={isExportingPackage || selectedShotIds.size === 0}
+                highlighted={primaryAction?.id === 'export-final-zip'}
+                layout="inline"
+              />
+            </div>
           </div>
         </div>
       </div>
-    </WorkspaceLayout>
+
+      <PrecisionDrawer open={settingsOpen} title="Export Settings" onClose={() => setSettingsOpen(false)}>
+        {selectedShot ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Width">
+                <TextInput
+                  type="number"
+                  value={selectedShot.exportSettings.width}
+                  onChange={(event) => updateShot(selectedShot.id, {
+                    exportSettings: { ...selectedShot.exportSettings, width: Number(event.target.value) },
+                  })}
+                />
+              </Field>
+              <Field label="Height">
+                <TextInput
+                  type="number"
+                  value={selectedShot.exportSettings.height}
+                  onChange={(event) => updateShot(selectedShot.id, {
+                    exportSettings: { ...selectedShot.exportSettings, height: Number(event.target.value) },
+                  })}
+                />
+              </Field>
+            </div>
+            {([
+              ['includeViewport', 'Viewport clay render'],
+              ['includeAiResultFrame', 'Imported AI result frame'],
+              ['includePanoCrop', 'Pano crop'],
+              ['includeFullPano', 'Styled reference pano'],
+              ['includeGrayboxPano', 'Graybox pano'],
+              ['includeCameraMoveVideo', 'Camera move MP4'],
+              ['includeCameraMoveReferenceFrames', 'Camera move cubemap references'],
+              ['includeMetadata', 'Metadata JSON'],
+              ['includePrompt', 'Prompts'],
+            ] as const).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 rounded-lg border border-subtle px-3 py-2 text-sm text-secondary">
+                <input
+                  type="checkbox"
+                  checked={selectedShot.exportSettings[key]}
+                  onChange={(event) => updateShot(selectedShot.id, {
+                    exportSettings: { ...selectedShot.exportSettings, [key]: event.target.checked },
+                  })}
+                  className="accent-[var(--accent)]"
+                />
+                {label}
+              </label>
+            ))}
+            <IconButton onClick={() => void exportShot()} disabled={isExportingPackage} className="w-full">
+              <FileJson className="h-4 w-4" />
+              Export Final ZIP (current shot)
+            </IconButton>
+            <IconButton onClick={addCamera} className="w-full">
+              Add Camera
+            </IconButton>
+          </div>
+        ) : (
+          <p className="text-sm text-secondary">Select a shot to configure export settings.</p>
+        )}
+      </PrecisionDrawer>
+    </FullBleedLayout>
   );
 }

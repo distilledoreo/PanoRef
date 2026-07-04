@@ -32,6 +32,9 @@ export type BuildShortcutCommand =
   | { kind: 'toggle-lock' }
   | { kind: 'toggle-visibility' }
   | { kind: 'toggle-precision' }
+  | { kind: 'gizmo-translate' }
+  | { kind: 'gizmo-rotate' }
+  | { kind: 'gizmo-scale' }
   | { kind: 'delete' };
 
 export interface BuildShortcutInput {
@@ -76,6 +79,9 @@ export function resolveBuildShortcut(input: BuildShortcutInput): BuildShortcutCo
   if (!input.shiftKey && key === 'l') return { kind: 'toggle-lock' };
   if (!input.shiftKey && key === 'h') return { kind: 'toggle-visibility' };
   if (!input.shiftKey && key === 'i') return { kind: 'toggle-precision' };
+  if (!input.shiftKey && key === 't') return { kind: 'gizmo-translate' };
+  if (!input.shiftKey && key === 'e') return { kind: 'gizmo-rotate' };
+  if (!input.shiftKey && key === 's') return { kind: 'gizmo-scale' };
   if (!input.shiftKey && (key === 'delete' || key === 'backspace')) return { kind: 'delete' };
 
   return undefined;

@@ -1,1 +1,114 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --surface-base: #f5f3ef;
+  --surface-header: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-overlay: rgba(255, 255, 255, 0.92);
+  --surface-muted: #ebe8e3;
+  --border-subtle: #e4e0d9;
+  --border-strong: #d4cfc6;
+  --text-primary: #1c1917;
+  --text-secondary: #78716c;
+  --text-muted: #a8a29e;
+  --accent: #0d9488;
+  --accent-hover: #0f766e;
+  --accent-soft: #ccfbf1;
+  --accent-glow: rgba(13, 148, 136, 0.35);
+  --success: #16a34a;
+  --success-soft: #dcfce7;
+  --warning: #ea580c;
+  --warning-soft: #ffedd5;
+  --danger: #dc2626;
+  --shadow-soft: 0 4px 24px rgba(28, 25, 23, 0.08);
+  --shadow-card: 0 2px 12px rgba(28, 25, 23, 0.06);
+  --tray-glow: 0 10px 36px rgba(28, 25, 23, 0.14);
+  --cta-glow: 0 8px 28px var(--accent-glow);
+  --filmstrip-overlay: rgba(28, 25, 23, 0.78);
+  --filmstrip-border: rgba(255, 255, 255, 0.12);
+  --filmstrip-shadow: 0 8px 32px rgba(28, 25, 23, 0.28);
+  --shots-bottom-chrome-pad: 1.125rem;
+  --shots-bottom-chrome-gap: 0.375rem;
+  --shots-cta-hint-block: 1.125rem;
+  --shots-cta-lane: 15.5rem;
+  --shots-overlay-bottom-safe: 12rem;
+  --reference-cta-lane: 17.5rem;
+  --stage-header-safe: 4.75rem;
+  --radius-card: 14px;
+  --radius-pill: 999px;
+  --thumbnail-fallback-sky: #e8e4de;
+  --thumbnail-fallback-mid: #ddd8d0;
+  --thumbnail-fallback-ground: #d4cec4;
+  --thumbnail-fallback-horizon: rgba(120, 113, 108, 0.28);
+  --thumbnail-fallback-block-a: rgba(168, 162, 158, 0.55);
+  --thumbnail-fallback-block-b: rgba(120, 113, 108, 0.42);
+  --thumbnail-fallback-block-c: rgba(214, 211, 209, 0.65);
+  --thumbnail-fallback-label: #78716c;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --stage-header-safe: 6rem;
+  }
+}
+
+.dark {
+  --surface-base: #0f1419;
+  --surface-header: #151c24;
+  --surface-raised: #1a222d;
+  --surface-overlay: rgba(26, 34, 45, 0.94);
+  --surface-muted: #243040;
+  --border-subtle: #2a3544;
+  --border-strong: #3a4a5c;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-soft: rgba(45, 212, 191, 0.12);
+  --accent-glow: rgba(45, 212, 191, 0.4);
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.12);
+  --warning: #fb923c;
+  --warning-soft: rgba(251, 146, 60, 0.12);
+  --danger: #f87171;
+  --shadow-soft: 0 4px 32px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.35);
+  --tray-glow: 0 12px 40px rgba(45, 212, 191, 0.18), 0 4px 16px rgba(0, 0, 0, 0.5);
+  --cta-glow: 0 0 28px var(--accent-glow), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --filmstrip-overlay: rgba(8, 12, 18, 0.84);
+  --filmstrip-border: rgba(255, 255, 255, 0.1);
+  --filmstrip-shadow: 0 10px 36px rgba(0, 0, 0, 0.55);
+  --thumbnail-fallback-sky: #2a3544;
+  --thumbnail-fallback-mid: #1f2833;
+  --thumbnail-fallback-ground: #171e28;
+  --thumbnail-fallback-horizon: rgba(148, 163, 184, 0.22);
+  --thumbnail-fallback-block-a: rgba(58, 74, 92, 0.85);
+  --thumbnail-fallback-block-b: rgba(42, 53, 68, 0.9);
+  --thumbnail-fallback-block-c: rgba(74, 90, 108, 0.55);
+  --thumbnail-fallback-label: #94a3b8;
+}
+
+body {
+  background: var(--surface-base);
+  color: var(--text-primary);
+}
+
+@layer utilities {
+  .bg-surface-base { background-color: var(--surface-base); }
+  .bg-surface-header { background-color: var(--surface-header); }
+  .bg-surface-raised { background-color: var(--surface-raised); }
+  .bg-surface-overlay { background-color: var(--surface-overlay); }
+  .bg-surface-muted { background-color: var(--surface-muted); }
+  .bg-accent-soft { background-color: var(--accent-soft); }
+  .text-primary { color: var(--text-primary); }
+  .text-secondary { color: var(--text-secondary); }
+  .text-muted { color: var(--text-muted); }
+  .text-accent { color: var(--accent); }
+  .border-subtle { border-color: var(--border-subtle); }
+  .border-strong { border-color: var(--border-strong); }
+  .shadow-soft { box-shadow: var(--shadow-soft); }
+  .shadow-card { box-shadow: var(--shadow-card); }
+}

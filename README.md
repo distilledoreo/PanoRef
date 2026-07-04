@@ -15,7 +15,7 @@ The dev server starts at `http://localhost:3000`. If that port is already occupi
 
 ## Workflow
 
-The **Production Path** rail at the top tracks progress for the selected shot across Build → Reference → Shots → Review → Export. It guides without locking you in — every workspace remains available at any time.
+The top stage rail tracks progress across Build → Reference → Shots → Review → Export. It guides without locking you in — every workspace remains available at any time. Project actions and the current objective live in the compact brand menu so the canvas stays visually close to the reference mocks.
 
 Persisted workflow checkpoints are saved in project JSON under `workflow`:
 
@@ -24,22 +24,15 @@ Persisted workflow checkpoints are saved in project JSON under `workflow`:
 - `aiBriefSentAtByShotId`
 - `finalPackageExportedAtByShotId`
 
-1. **Build:** shape the graybox set in the canvas-first sandbox. The guided sidebar leads with **Render Graybox 360** once blocking and the pano origin look right. Advanced controls hold toybox layers, shortcuts, and the precision drawer.
-2. **Reference:** import a styled canonical pano or **Approve Graybox as Working Reference** when you are iterating without a final AI pano yet. Calibrate yaw and opacity when a canonical pano overlays the graybox.
-3. **Shots:** frame the active shot from the **Shot Drawer** (peek bar at the bottom). Fly the camera, lock it in the viewport, then explicitly **Accept Framing** before moving on. Pano crop and export-frame previews refresh from the locked camera. For camera moves, lock a start view, set **Start**, fly and lock an end view, set **End**, then export an MP4 when the browser supports MP4 recording.
-4. **Review:** export the **AI Brief ZIP**, which marks the brief as sent, then import the external AI result frame. Use the drawer to switch shots without losing production-path context.
-5. **Export:** download the final continuity ZIP for the selected shot. The manifest and warning checks live in **Check Your Work**; package include/exclude toggles stay under **Adjust / Advanced**.
-
-Each workspace sidebar follows the same objective order:
-
-- **Current Objective** — goal, why it matters, proceed signal
-- **Do This Next** — primary action
-- **Check Your Work** — readiness and warnings
-- **Adjust / Advanced** — collapsed secondary controls
+1. **Build:** shape the graybox set in the full-bleed sandbox. The bottom object tray shows the primary primitives, the compact **More** tool opens select/origin/snap and extra primitives, and **Render 360 Reference** captures a 4096×2048 graybox 360 when blocking and pano origin look right. After a graybox exists, **Download Graybox 360** appears beside the primary CTA and downloads the native 2:1 equirectangular PNG (not the letterboxed 16:9 variant). In Select mode, the selected object shows an in-canvas transform gizmo with teal/red/blue move arrows plus rotate and scale controls in the floating object card; drag arrows for axis moves or drag the object body for floor-plane moves. Camera frustums and passive 3D landmark markers stay hidden by default — use the small eye toggle in the top-right to show scene guides when needed. Pano origin placement (`O`) still reveals the origin marker while guides are hidden.
+2. **Reference:** import a styled canonical pano or approve the graybox when iterating without a final AI pano yet. Import and alignment controls appear as contextual cards or in the precision drawer instead of a permanent sidebar.
+3. **Shots:** select an active shot from the bottom filmstrip. Thumbnails use real project media when it exists, starting with the live locked preview and then imported or linked reference assets. The shot opens in a composed/locked state; use **Fly Camera** in the bottom action dock (or the shot menu) to reposition the camera, then **Lock View** or click the viewport to lock it, and explicitly **Accept Framing** before moving on. Fly Camera keeps a broad invisible safety volume around the set: visible scene objects define the travel area, then the camera can move 10m beyond the farthest object on each horizontal side. FOV and resolution stay in the floating shot card and precision drawer. For camera moves, lock a start view, set **Start**, fly and lock an end view, set **End**, then export an MP4 when the browser supports MP4 recording.
+4. **Review:** check each locked graybox shot frame, export the **AI Brief**, which marks the brief as sent, then import the external AI result frame. Review cards render the shot camera's graybox control frame instead of falling back to the full pano, and show imported AI results as result context. Compare, notes, prompts, and result details live in the drawer.
+5. **Export:** choose shots from the media selector and download the final continuity ZIP packages with **Export Selected Shots**. Package include/exclude toggles stay in **Export Settings**.
 
 ## Build Shortcuts
 
-Primitive stamps use game-inventory style number slots: `1` Floor, `2` Wall, `3` Box, `4` Arch, `5` Doorway, `6` Column, `7` Stairs, `8` Tree, `9` Terrain, and `0` Person. Backdrop and Sun remain visible in the tray but are click-only helper primitives.
+Primitive stamps use game-inventory style number slots: `1` Floor, `2` Wall, `3` Box, `4` Arch, `5` Doorway, `6` Column, `7` Stairs, `8` Tree, `9` Terrain, and `0` Person. Backdrop, Sun, Arch, Terrain, and Person are also reachable from the tray's **More** tool when they are not part of the primary visible strip.
 
 Build action shortcuts are `V` or `Esc` for Select, `O` for Origin, `G` for Snap, `D` for Duplicate, `R` / `Shift+R` for rotate right/left, `[` / `]` for scale down/up, `L` for lock, `H` for hide/show, `I` for the precision drawer, and `Delete` / `Backspace` for delete. Shortcuts are ignored while typing in editable fields.
 
@@ -130,9 +123,10 @@ npm run build
 npm run goal:smoke
 ```
 
-Runtime verification should also launch the app, import a canonical pano, render a graybox 360 pano, create the **Main Structure Wide Shot**, export an AI Brief ZIP, import an external AI result frame, export a shot package, and exercise at least one warning state such as exporting before a shot exists.
+Runtime verification should also launch the app, render a graybox 360 pano with **Render 360 Reference**, import a canonical pano, approve reference alignment, frame and accept a shot, confirm the filmstrip/Export thumbnails use real available media, confirm Review cards show graybox shot-camera frames rather than the full pano, export an **AI Brief**, import an external AI result frame, export selected shot packages, and exercise at least one warning state such as exporting before a shot exists.
 For camera-move MP4 export, verify a shot can capture Start and End keyframes from locked camera views, export a playable MP4 when the browser reports MP4 support, preview the saved clip in Shots, and include `inputs/viewport_clay_motion.mp4`, `inputs/camera_move/clay_start.png`, `inputs/camera_move/cubemap/pz.png`, `inputs/camera_move/cubemap/cubemap_stitched.png`, `metadata/camera_keyframes.json`, `metadata/camera_move_reference_frames.json`, and `metadata/camera_move_cubemap_visibility.json` in the final ZIP manifest.
-For the Build sandbox specifically, verify pressing `3` to stamp multiple Boxes, using `Esc` or `V` to return to Select, pressing `0` to stamp Person, confirming Backdrop and Sun are click-only, dragging the selected object in Select mode, toggling grid snap with `G`, moving the amber pano origin with `O`, using selected-piece shortcuts, confirming shortcuts do not fire while editing a name field, and checking that orbit center and click targets stay visually aligned with the cursor on high-DPI displays.
+For the Build sandbox specifically, verify pressing `3` to stamp multiple Boxes, using `Esc` or `V` to return to Select, pressing `0` to stamp Person, confirming Backdrop and Sun are click-only, dragging the selected object in Select mode, dragging the visible transform gizmo arrows for axis moves, using the rotate/scale controls in the selected-object card, toggling grid snap with `G`, moving the amber pano origin with `O`, confirming camera frustums stay hidden until the scene-guides eye toggle is enabled, using selected-piece shortcuts, confirming shortcuts do not fire while editing a name field, and checking that orbit center and click targets stay visually aligned with the cursor on high-DPI displays.
+For Fly Camera specifically, verify sustained movement can travel beyond walls and floors without leaving a reasonable set-adjacent volume; the expected horizontal limit is 10m past the farthest visible non-helper object.
 
 ## Limitations
 

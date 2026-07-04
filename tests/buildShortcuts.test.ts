@@ -43,6 +43,9 @@ describe('Build keyboard shortcuts', () => {
     expect(resolveBuildShortcut({ key: 'l' })).toEqual({ kind: 'toggle-lock' });
     expect(resolveBuildShortcut({ key: 'h' })).toEqual({ kind: 'toggle-visibility' });
     expect(resolveBuildShortcut({ key: 'i' })).toEqual({ kind: 'toggle-precision' });
+    expect(resolveBuildShortcut({ key: 't' })).toEqual({ kind: 'gizmo-translate' });
+    expect(resolveBuildShortcut({ key: 'e' })).toEqual({ kind: 'gizmo-rotate' });
+    expect(resolveBuildShortcut({ key: 's' })).toEqual({ kind: 'gizmo-scale' });
     expect(resolveBuildShortcut({ key: 'Delete' })).toEqual({ kind: 'delete' });
     expect(resolveBuildShortcut({ key: 'Backspace' })).toEqual({ kind: 'delete' });
   });

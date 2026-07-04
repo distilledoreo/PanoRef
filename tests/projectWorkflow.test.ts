@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDefaultProject, createPanoAsset, createPanoReference, createShot } from '../src/domain/defaults';
-import { createShotPackageManifest } from '../src/engine/exportManifest';
+import { createShotPackageManifest, selectExportPathPreview } from '../src/engine/exportManifest';
 import { generateImagePrompt } from '../src/engine/prompts';
 import { ShotPackageError, buildShotPackage } from '../src/engine/packageExport';
 import { serializeProject, parseProject } from '../src/engine/projectIO';
@@ -14,7 +14,7 @@ describe('project workflow logic', () => {
     const project = createDefaultProject();
     expect(project.schemaVersion).toBe('0.1');
     expect(project.scene.objects.length).toBeGreaterThan(0);
-    expect(project.scene.panoOrigin).toEqual([0, 1.6, 0]);
+    expect(project.scene.panoOrigin).toEqual([0, 1.65, 0]);
     expect(project.scene.objects.find((object) => object.name === 'Main Temple Gate')?.transform.position[2]).toBeGreaterThan(0);
     expect(project.scene.objects.find((object) => object.name === 'Man Facing Camera')?.transform.position[2]).toBeGreaterThan(0);
     expect(project.landmarks[0].promptCritical).toBe(true);
@@ -287,6 +287,26 @@ describe('project workflow logic', () => {
     shot.assets.aiResultFrameAssetId = 'asset_ai_result';
     expect(createShotPackageManifest(project, shot).files.map((file) => file.path))
       .toContain('shot_001/outputs/ai_result_frame.png');
+  });
+
+  it('keeps priority export output paths in capped preview lists', () => {
+    const paths = [
+      'shot_001/inputs/viewport_clay.png',
+      'shot_001/inputs/global_reference.png',
+      'shot_001/inputs/global_graybox.png',
+      'shot_001/outputs/ai_result_frame.png',
+      'shot_001/metadata/shot.json',
+    ];
+
+    expect(selectExportPathPreview(paths, 3)).toEqual([
+      'shot_001/inputs/viewport_clay.png',
+      'shot_001/inputs/global_reference.png',
+      'shot_001/outputs/ai_result_frame.png',
+    ]);
+    expect(selectExportPathPreview(paths, 2)).toEqual([
+      'shot_001/inputs/viewport_clay.png',
+      'shot_001/outputs/ai_result_frame.png',
+    ]);
   });
 
   it('adds exported camera move video and keyframe metadata to the package manifest', () => {

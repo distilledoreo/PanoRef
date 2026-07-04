@@ -36,14 +36,14 @@ function ObjectiveBody({
   blockers: string[];
 }) {
   return (
-    <div className="space-y-4 text-[15px] leading-relaxed text-zinc-700">
+    <div className="space-y-4 text-[15px] leading-relaxed text-secondary">
       <div className="space-y-2">
-        <p className="font-medium text-zinc-900">{goal}</p>
+        <p className="font-medium text-primary">{goal}</p>
         <p>{why}</p>
       </div>
-      <p className="border-l-2 border-teal-300 pl-3 text-zinc-600">{proceedSignal}</p>
+      <p className="border-l-2 border-[var(--accent)] pl-3 text-secondary">{proceedSignal}</p>
       {blockers.length > 0 && (
-        <ul className="list-disc space-y-1 pl-5 text-zinc-600">
+        <ul className="list-disc space-y-1 pl-5 text-secondary">
           {blockers.map((blocker) => (
             <li key={blocker}>{blocker}</li>
           ))}
@@ -55,20 +55,20 @@ function ObjectiveBody({
 
 function AlignmentIntroBody() {
   return (
-    <div className="space-y-4 text-[15px] leading-relaxed text-zinc-700">
-      <p className="font-medium text-zinc-900">
+    <div className="space-y-4 text-[15px] leading-relaxed text-secondary">
+      <p className="font-medium text-primary">
         Before you move on, check that your styled pano lines up with the 3D scene.
       </p>
       <p>
-        Use the pano viewer and the alignment controls in the sidebar. Fade the styled pano to see the graybox underneath, then spin yaw until things match.
+        Use the pano viewer and the alignment controls in the drawer. Fade the styled pano to see the graybox underneath, then spin yaw until things match.
       </p>
       <ol className="space-y-2">
-        <li className="flex gap-3"><span className="font-semibold text-teal-700">1</span><span>Look around the viewer.</span></li>
-        <li className="flex gap-3"><span className="font-semibold text-teal-700">2</span><span>Lower opacity to compare with the graybox.</span></li>
-        <li className="flex gap-3"><span className="font-semibold text-teal-700">3</span><span>Adjust yaw if things are rotated wrong.</span></li>
-        <li className="flex gap-3"><span className="font-semibold text-teal-700">4</span><span>Click <strong>Looks good enough</strong> when ready.</span></li>
+        <li className="flex gap-3"><span className="font-semibold text-accent">1</span><span>Look around the viewer.</span></li>
+        <li className="flex gap-3"><span className="font-semibold text-accent">2</span><span>Lower opacity to compare with the graybox.</span></li>
+        <li className="flex gap-3"><span className="font-semibold text-accent">3</span><span>Adjust yaw if things are rotated wrong.</span></li>
+        <li className="flex gap-3"><span className="font-semibold text-accent">4</span><span>Click <strong>Looks good enough</strong> when ready.</span></li>
       </ol>
-      <p className="text-zinc-600">
+      <p className="text-secondary">
         If yaw cannot fix it, open the retry tips and generate a new image.
       </p>
     </div>
@@ -145,13 +145,6 @@ export function WorkflowGuidance() {
   }, [alignmentRetryModalRequest]);
 
   useEffect(() => {
-    if (advancePrompt || alignmentPending) return;
-    if (!seenObjectiveWorkspaces.includes(workspace)) {
-      setObjectiveOpen(true);
-    }
-  }, [workspace, advancePrompt, alignmentPending, seenObjectiveWorkspaces]);
-
-  useEffect(() => {
     if (objectiveModalRequest > 0) {
       if (alignmentPending) {
         setAlignmentIntroOpen(true);
@@ -160,6 +153,20 @@ export function WorkflowGuidance() {
       }
     }
   }, [objectiveModalRequest, alignmentPending]);
+
+  useEffect(() => {
+    if (workspace !== 'reference' || !showReferencePromptBuilder) return;
+    if (seenObjectiveWorkspaces.includes('reference')) return;
+    if (advanceOpen && advancePrompt) return;
+    setObjectiveOpen(true);
+    setAlignmentIntroOpen(false);
+  }, [
+    workspace,
+    showReferencePromptBuilder,
+    seenObjectiveWorkspaces,
+    advanceOpen,
+    advancePrompt?.promptKey,
+  ]);
 
   const closeObjective = () => {
     setObjectiveOpen(false);
@@ -175,9 +182,18 @@ export function WorkflowGuidance() {
 
   const handleAdvanceNext = () => {
     if (!advancePrompt) return;
-    dismissWorkflowAdvance(advancePrompt.promptKey);
+    const { nextStep, promptKey } = advancePrompt;
+    const shouldOpenReferenceObjective = nextStep === 'reference'
+      && hasGrayboxPano(project)
+      && !hasStyledCanonicalPano(project)
+      && !seenObjectiveWorkspaces.includes('reference');
+    dismissWorkflowAdvance(promptKey);
     setAdvanceOpen(false);
-    setWorkspace(advancePrompt.nextStep);
+    setWorkspace(nextStep);
+    if (shouldOpenReferenceObjective) {
+      setObjectiveOpen(true);
+      setAlignmentIntroOpen(false);
+    }
   };
 
   const handleAdvanceDismiss = () => {
@@ -219,7 +235,7 @@ export function WorkflowGuidance() {
           <button
             type="button"
             onClick={closeAlignmentIntro}
-            className="rounded-md bg-teal-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-600"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--accent-hover)]"
           >
             Start checking
           </button>
@@ -238,7 +254,7 @@ export function WorkflowGuidance() {
           <button
             type="button"
             onClick={() => setAlignmentRetryOpen(false)}
-            className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50"
+            className="rounded-lg border border-subtle bg-surface-raised px-4 py-2 text-sm font-medium text-secondary transition hover:border-strong hover:bg-surface-muted hover:text-primary"
           >
             Close
           </button>
@@ -265,7 +281,7 @@ export function WorkflowGuidance() {
           <button
             type="button"
             onClick={closeObjective}
-            className="rounded-md bg-teal-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-600"
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--accent-hover)]"
           >
             Got it
           </button>
@@ -298,14 +314,14 @@ export function WorkflowGuidance() {
             <button
               type="button"
               onClick={handleAdvanceDismiss}
-              className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50"
+              className="rounded-lg border border-subtle bg-surface-raised px-4 py-2 text-sm font-medium text-secondary transition hover:border-strong hover:bg-surface-muted hover:text-primary"
             >
               Not right now
             </button>
             <button
               type="button"
               onClick={handleAdvanceNext}
-              className="inline-flex items-center gap-2 rounded-md bg-teal-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-600"
+              className="inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--accent-hover)]"
             >
               {advancePrompt?.nextLabel ?? 'Continue'}
               <ArrowRight className="h-4 w-4" />
@@ -313,7 +329,7 @@ export function WorkflowGuidance() {
           </>
         )}
       >
-        <p className="text-sm text-zinc-700">{advancePrompt?.body}</p>
+        <p className="text-sm text-secondary">{advancePrompt?.body}</p>
       </Modal>
     </>
   );
@@ -326,7 +342,7 @@ export function ObjectiveHelpButton() {
     <button
       type="button"
       onClick={() => requestObjectiveModal()}
-      className="inline-flex items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-teal-300 hover:text-teal-700"
+      className="inline-flex items-center gap-2 rounded-lg border border-subtle bg-surface-raised px-3 py-2 text-sm font-medium text-secondary transition hover:border-[var(--accent)] hover:text-accent"
       title="Show current objective"
     >
       <Compass className="h-4 w-4" />

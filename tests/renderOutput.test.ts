@@ -30,6 +30,18 @@ describe('rendered shot output', () => {
     expect(source).toMatch(/renderViewportClay[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
   });
 
+  it('defaults graybox 360 renders to 4K equirectangular resolution', () => {
+    const source = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
+    const storeSource = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain('DEFAULT_GRAYBOX_PANO_WIDTH');
+    expect(source).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT');
+    expect(storeSource).toMatch(/renderGrayboxEquirectangularPano\(state\.project/);
+    expect(storeSource).toContain('useThemeStore.getState().theme');
+    expect(storeSource).not.toContain('renderGrayboxEquirectangularPano(state.project, 2048, 1024)');
+    expect(storeSource).not.toMatch(/renderGrayboxPano:[\s\S]*downloadDataUrl/);
+  });
+
   it('applies linked pano rotation to local reference exports', () => {
     const source = readFileSync(new URL('../src/engine/packageExport.ts', import.meta.url), 'utf8');
     expect(source).toContain('renderPanoPerspectiveCrop(linkedPanoAsset.uri, shot.panoCrop, linkedPano.rotation)');

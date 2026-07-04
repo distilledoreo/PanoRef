@@ -2,9 +2,12 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { Euler, PanoViewState } from '../../domain/types';
 import { panoYawToThreeJsYawDegrees } from '../../engine/sync';
+import { useThemeStore } from '../../state/useThemeStore';
 
-const EMPTY_COLOR = 0xe4e7e5;
-const BACKGROUND_COLOR = 0xf4f6f4;
+const THEME_COLORS = {
+  light: { empty: 0xe4e7e5, background: 0xf4f6f4 },
+  dark: { empty: 0x243040, background: 0x0f1419 },
+} as const;
 
 export function PanoViewer({
   imageUrl,
@@ -25,6 +28,7 @@ export function PanoViewer({
   compareRotation?: Euler;
   compareOpacity?: number;
 }) {
+  const theme = useThemeStore((state) => state.theme);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const activeSceneRef = useRef<THREE.Scene | null>(null);
@@ -42,7 +46,7 @@ export function PanoViewer({
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setClearColor(BACKGROUND_COLOR, 1);
+    renderer.setClearColor(THEME_COLORS[theme].background, 1);
     renderer.autoClear = false;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(renderer.domElement);
@@ -56,8 +60,8 @@ export function PanoViewer({
     const camera = new THREE.PerspectiveCamera(view.fovDegrees, container.clientWidth / container.clientHeight, 0.1, 1000);
     cameraRef.current = camera;
 
-    const compareSphere = createSphere(new THREE.MeshBasicMaterial({ color: EMPTY_COLOR }));
-    const activeSphere = createSphere(new THREE.MeshBasicMaterial({ color: EMPTY_COLOR }));
+    const compareSphere = createSphere(new THREE.MeshBasicMaterial({ color: THEME_COLORS[theme].empty }));
+    const activeSphere = createSphere(new THREE.MeshBasicMaterial({ color: THEME_COLORS[theme].empty }));
     compareScene.add(compareSphere);
     activeScene.add(activeSphere);
     compareSphereRef.current = compareSphere;
@@ -97,7 +101,7 @@ export function PanoViewer({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, []);
+  }, [theme]);
 
   const viewRef = useRef(view);
   const activeRotationRef = useRef(panoRotation);
@@ -126,6 +130,7 @@ export function PanoViewer({
     setPanoSphereMaterial({
       sphere: activeSphereRef.current,
       imageUrl,
+      theme,
       opacity: compareImageUrl ? opacityRef.current : 1,
       transparent: Boolean(compareImageUrl),
       isCancelled: () => cancelled,
@@ -133,13 +138,14 @@ export function PanoViewer({
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, compareImageUrl]);
+  }, [imageUrl, compareImageUrl, theme]);
 
   useEffect(() => {
     let cancelled = false;
     setPanoSphereMaterial({
       sphere: compareSphereRef.current,
       imageUrl: compareImageUrl,
+      theme,
       opacity: 1,
       transparent: false,
       isCancelled: () => cancelled,
@@ -147,7 +153,7 @@ export function PanoViewer({
     return () => {
       cancelled = true;
     };
-  }, [compareImageUrl]);
+  }, [compareImageUrl, theme]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -190,26 +196,12 @@ export function PanoViewer({
   }, [onViewChange]);
 
   return (
-    <div className="relative h-full min-h-0 overflow-hidden bg-zinc-50" ref={containerRef}>
+    <div className="relative h-full min-h-0 overflow-hidden bg-surface-base" ref={containerRef}>
       {!imageUrl && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-zinc-50 text-zinc-500">
+        <div className="pointer-events-none absolute inset-0 z-0 flex flex-col items-center justify-center bg-surface-base text-secondary">
           <p className="text-sm font-medium">No panorama selected</p>
           <p className="mt-1 text-xs">Render a graybox pano or import a styled pano.</p>
         </div>
-      )}
-      <div className="pointer-events-none absolute left-4 top-4 rounded-md border border-white/70 bg-white/90 px-3 py-2 text-xs text-zinc-700 shadow-sm backdrop-blur">
-        {label ?? 'Panorama Reference'}
-      </div>
-      {imageUrl && (
-        <>
-          <div className="pointer-events-none absolute left-1/2 top-1/2 h-[52%] max-h-[70vh] w-[52%] max-w-[80vw] -translate-x-1/2 -translate-y-1/2 border border-teal-500/80 shadow-[0_0_0_9999px_rgba(244,246,244,0.18)]" />
-          <div className="pointer-events-none absolute bottom-4 right-4 flex flex-wrap gap-3 rounded-md border border-white/70 bg-white/90 px-3 py-2 font-mono text-xs text-zinc-700 shadow-sm backdrop-blur">
-            <span>YAW {normalizeYaw(view.yawDegrees).toFixed(1)}</span>
-            <span>PITCH {view.pitchDegrees.toFixed(1)}</span>
-            <span>FOV {view.fovDegrees.toFixed(1)}</span>
-            {compareImageUrl && <span>OPACITY {Math.round(clamp01(compareOpacity) * 100)}%</span>}
-          </div>
-        </>
       )}
     </div>
   );
@@ -233,13 +225,14 @@ function configureCamera(camera: THREE.PerspectiveCamera, view: PanoViewState, r
 function setPanoSphereMaterial(params: {
   sphere: THREE.Mesh | null;
   imageUrl?: string;
+  theme: keyof typeof THEME_COLORS;
   opacity: number;
   transparent: boolean;
   isCancelled: () => boolean;
 }) {
   if (!params.sphere) return;
   if (!params.imageUrl) {
-    const material = new THREE.MeshBasicMaterial({ color: EMPTY_COLOR });
+    const material = new THREE.MeshBasicMaterial({ color: THEME_COLORS[params.theme].empty });
     setSphereMaterial(params.sphere, material, params.isCancelled);
     return;
   }

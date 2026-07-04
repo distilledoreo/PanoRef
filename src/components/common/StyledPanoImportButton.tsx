@@ -48,7 +48,7 @@ export function StyledPanoImportButton({
       <IconButton
         onClick={() => fileRef.current?.click()}
         highlighted={highlighted}
-        className={`w-full ${primary && !highlighted ? 'border-teal-500 bg-teal-500 text-white hover:bg-teal-600' : ''} ${className ?? ''}`}
+        className={`w-full ${primary && !highlighted ? 'border-[var(--accent)] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]' : ''} ${className ?? ''}`}
       >
         <ImagePlus className="h-4 w-4" />
         {label}

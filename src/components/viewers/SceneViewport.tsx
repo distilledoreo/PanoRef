@@ -1,9 +1,30 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { objectDisplayName } from '../../domain/defaults';
-import { CameraData, LocationProject, SceneObjectType, Vec3 } from '../../domain/types';
+import { CameraData, LocationProject, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import { createPlacedSceneObject, resolveStampPoint, snapBuildPoint } from '../../engine/sandbox';
+import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
 import { buildScene, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
+import {
+  angleInAxisPlane,
+  applyAxisRotationDelta,
+  applyAxisScaleDelta,
+  axisWorldVector,
+  computeScreenAxisDragDelta,
+  createGizmoGroup,
+  getGizmoWorldPosition,
+  createSelectionOutline,
+  disposeGizmoNodes,
+  findGizmoHit,
+  findSceneObjectMesh,
+  intersectAxisDragPlane,
+  updateTransformGizmo,
+  vec3FromVector3,
+  type GizmoAxis,
+  type GizmoHit,
+  type GizmoMode,
+} from '../../engine/transformGizmo';
+import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
 import {
   cameraFromFlyState,
@@ -11,11 +32,11 @@ import {
   horizontalFlyDirections,
   type FlyCameraState,
 } from '../../engine/sync';
-import { computeCenteredFrameRendererRects, computeFullCssRendererRect, type CssRendererRect } from '../../engine/viewport';
-import { useContinuityStore } from '../../state/useContinuityStore';
+import { computeFullCssRendererRect, type CssRendererRect } from '../../engine/viewport';
+import { useThemeStore } from '../../state/useThemeStore';
 import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 
-type DragKind = 'idle' | 'orbit' | 'object' | 'pano_origin' | 'place' | 'shot_framing';
+type DragKind = 'idle' | 'orbit' | 'gizmo_translate' | 'gizmo_rotate' | 'gizmo_scale' | 'pano_origin' | 'place' | 'shot_framing';
 
 const FLY_SPEED = 6;
 const FLY_SPRINT_MULTIPLIER = 2.4;
@@ -27,8 +48,16 @@ interface DragState {
   y: number;
   moved: boolean;
   forceOrbit?: boolean;
-  objectId?: string;
-  objectOffset?: Vec3;
+  gizmoAxis?: GizmoAxis;
+  gizmoScaleAxis?: GizmoAxis | 'uniform';
+  gizmoStartPosition?: Vec3;
+  gizmoStartRotation?: Vec3;
+  gizmoStartDimensions?: Vec3;
+  gizmoAxisStartPoint?: THREE.Vector3;
+  gizmoRotateStartAngle?: number;
+  gizmoUniformStartDistance?: number;
+  gizmoScreenStartX?: number;
+  gizmoScreenStartY?: number;
   pendingSelectId?: string;
 }
 
@@ -39,11 +68,17 @@ export function SceneViewport({
   placementType,
   placementLabel,
   originPlacementActive = false,
+  showSceneGuides = false,
+  showTransformGizmo = false,
+  gizmoMode = 'translate',
   snapToGrid = true,
   shotFraming,
   onSelectObject,
   onPlaceObject,
   onMoveObject,
+  onMoveObjectInSpace,
+  onRotateObject,
+  onScaleObject,
   onMovePanoOrigin,
   minHeightClassName = 'min-h-[420px]',
 }: {
@@ -53,6 +88,9 @@ export function SceneViewport({
   placementType?: SceneObjectType;
   placementLabel?: string;
   originPlacementActive?: boolean;
+  showSceneGuides?: boolean;
+  showTransformGizmo?: boolean;
+  gizmoMode?: GizmoMode;
   snapToGrid?: boolean;
   shotFraming?: {
     camera: CameraData;
@@ -65,21 +103,34 @@ export function SceneViewport({
   onSelectObject?: (id?: string) => void;
   onPlaceObject?: (type: SceneObjectType, point: Vec3) => void;
   onMoveObject?: (id: string, point: Vec3) => void;
+  onMoveObjectInSpace?: (id: string, point: Vec3) => void;
+  onRotateObject?: (id: string, rotation: Vec3) => void;
+  onScaleObject?: (id: string, dimensions: Vec3) => void;
   onMovePanoOrigin?: (origin: Vec3) => void;
   minHeightClassName?: string;
 }) {
+  const theme = useThemeStore((state) => state.theme);
+  const [mannequinRevision, setMannequinRevision] = useState(getHumanMannequinRevision);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const frameRef = useRef<number>(0);
-  const orbitRef = useRef({ yaw: -35, pitch: 22, distance: 11, target: new THREE.Vector3(0, 1.2, 0) });
+  const orbitRef = useRef({ yaw: -34, pitch: 28, distance: 15.5, target: new THREE.Vector3(0, 1.15, 1.25) });
   const dragRef = useRef<DragState>({ kind: 'idle', x: 0, y: 0, moved: false });
   const lastFloorPointRef = useRef<Vec3 | undefined>();
   const selectedObjectIdRef = useRef(selectedObjectId);
   const projectRef = useRef(project);
   const snapToGridRef = useRef(snapToGrid);
-  const callbacksRef = useRef({ onSelectObject, onPlaceObject, onMoveObject, onMovePanoOrigin });
+  const callbacksRef = useRef({
+    onSelectObject,
+    onPlaceObject,
+    onMoveObject,
+    onMoveObjectInSpace,
+    onRotateObject,
+    onScaleObject,
+    onMovePanoOrigin,
+  });
   const previewPointRef = useRef<Vec3 | undefined>();
   const previewMeshRef = useRef<THREE.Object3D | null>(null);
   const placementTypeRef = useRef(placementType);
@@ -91,15 +142,78 @@ export function SceneViewport({
     pitchDegrees: 0,
   });
   const flyKeysRef = useRef(new Set<string>());
+  const flyBoundsRef = useRef(computeSceneFlyBounds(project.scene));
   const lastFrameTimeRef = useRef(performance.now());
   const flyDirtyRef = useRef(false);
+  const gizmoRef = useRef<THREE.Group | null>(null);
+  const selectionOutlineRef = useRef<THREE.BoxHelper | null>(null);
+  const showSceneGuidesRef = useRef(showSceneGuides);
+  const showTransformGizmoRef = useRef(showTransformGizmo);
+  const gizmoModeRef = useRef(gizmoMode);
+  const originPlacementActiveRef = useRef(originPlacementActive);
 
   selectedObjectIdRef.current = selectedObjectId;
   projectRef.current = project;
+  flyBoundsRef.current = computeSceneFlyBounds(project.scene);
   snapToGridRef.current = snapToGrid;
   placementTypeRef.current = placementType;
   shotFramingRef.current = shotFraming;
-  callbacksRef.current = { onSelectObject, onPlaceObject, onMoveObject, onMovePanoOrigin };
+  showSceneGuidesRef.current = showSceneGuides;
+  showTransformGizmoRef.current = showTransformGizmo;
+  gizmoModeRef.current = gizmoMode;
+  originPlacementActiveRef.current = originPlacementActive;
+  callbacksRef.current = {
+    onSelectObject,
+    onPlaceObject,
+    onMoveObject,
+    onMoveObjectInSpace,
+    onRotateObject,
+    onScaleObject,
+    onMovePanoOrigin,
+  };
+
+  const clearTransformGizmo = useCallback(() => {
+    const scene = sceneRef.current;
+    const nodes = [gizmoRef.current, selectionOutlineRef.current].filter(Boolean) as THREE.Object3D[];
+    if (scene) {
+      nodes.forEach((node) => scene.remove(node));
+    }
+    if (nodes.length > 0) disposeGizmoNodes(nodes);
+    gizmoRef.current = null;
+    selectionOutlineRef.current = null;
+  }, []);
+
+  const syncTransformGizmo = useCallback(() => {
+    const scene = sceneRef.current;
+    if (!scene || shotFramingRef.current || !showTransformGizmoRef.current || !selectedObjectIdRef.current) {
+      clearTransformGizmo();
+      return;
+    }
+
+    const object = projectRef.current.scene.objects.find((item) => item.id === selectedObjectIdRef.current);
+    const mesh = findSceneObjectMesh(scene, selectedObjectIdRef.current);
+    if (!object || !mesh) {
+      clearTransformGizmo();
+      return;
+    }
+
+    const needsNewGizmo = !gizmoRef.current || gizmoRef.current.userData.gizmoMode !== gizmoModeRef.current;
+    if (needsNewGizmo) {
+      if (gizmoRef.current) {
+        scene.remove(gizmoRef.current);
+        disposeGizmoNodes([gizmoRef.current]);
+      }
+      gizmoRef.current = createGizmoGroup(gizmoModeRef.current);
+      scene.add(gizmoRef.current);
+    }
+
+    if (!selectionOutlineRef.current) {
+      selectionOutlineRef.current = createSelectionOutline(mesh);
+      scene.add(selectionOutlineRef.current);
+    }
+
+    updateTransformGizmo(gizmoRef.current, selectionOutlineRef.current!, mesh, object);
+  }, [clearTransformGizmo]);
 
   const emitFramingCamera = useCallback(() => {
     const framing = shotFramingRef.current;
@@ -136,7 +250,7 @@ export function SceneViewport({
       previewMeshRef.current = null;
     }
 
-    const activePlacementType = placementTypeRef.current ?? getBuildInteractionState().placementType;
+    const activePlacementType = placementTypeRef.current;
     if (!activePlacementType || !point) return;
 
     const count = projectRef.current.scene.objects.filter((object) => object.type === activePlacementType).length + 1;
@@ -146,10 +260,10 @@ export function SceneViewport({
       point,
       snapToGrid: snapToGridRef.current,
     });
-    const preview = createPreviewMesh(previewObject);
+    const preview = createPreviewMesh(previewObject, theme);
     scene.add(preview);
     previewMeshRef.current = preview;
-  }, []);
+  }, [theme]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -210,11 +324,14 @@ export function SceneViewport({
       const sprinting = keys.has('ControlLeft') || keys.has('ControlRight');
       const speed = FLY_SPEED * (sprinting ? FLY_SPRINT_MULTIPLIER : 1);
       const step = (speed * deltaSeconds) / length;
-      fly.position = [
-        fly.position[0] + moveX * step,
-        fly.position[1] + moveY * step,
-        fly.position[2] + moveZ * step,
-      ];
+      fly.position = clampFlyCameraPosition(
+        [
+          fly.position[0] + moveX * step,
+          fly.position[1] + moveY * step,
+          fly.position[2] + moveZ * step,
+        ],
+        flyBoundsRef.current,
+      );
       flyDirtyRef.current = true;
     };
 
@@ -244,16 +361,11 @@ export function SceneViewport({
           framing.frameAspectRatio,
         );
 
-        const { clear, frame } = computeCenteredFrameRendererRects(cssWidth, cssHeight, framing.frameAspectRatio);
-        activeRenderer.setScissorTest(true);
-        activeRenderer.setClearColor(0xf3f6f4, 1);
-        setRendererRect(activeRenderer, 'viewport', clear);
-        setRendererRect(activeRenderer, 'scissor', clear);
-        activeRenderer.clear();
-        setRendererRect(activeRenderer, 'viewport', frame);
-        setRendererRect(activeRenderer, 'scissor', frame);
-        activeRenderer.render(activeScene, activeCamera);
+        const viewport = computeFullCssRendererRect(cssWidth, cssHeight);
+        setRendererRect(activeRenderer, 'viewport', viewport);
+        setRendererRect(activeRenderer, 'scissor', viewport);
         activeRenderer.setScissorTest(false);
+        activeRenderer.render(activeScene, activeCamera);
       } else {
         const viewport = computeFullCssRendererRect(cssWidth, cssHeight);
         setRendererRect(activeRenderer, 'viewport', viewport);
@@ -278,6 +390,101 @@ export function SceneViewport({
       canvas.setPointerCapture(event.pointerId);
     };
 
+    const beginGizmoDrag = (
+      gizmoHit: GizmoHit,
+      object: SceneObject,
+      pointer: ReturnType<typeof getPointerState>,
+      event: PointerEvent,
+    ) => {
+      const {
+        onMoveObjectInSpace,
+        onRotateObject,
+        onScaleObject,
+        onSelectObject,
+      } = callbacksRef.current;
+      const gizmo = gizmoRef.current;
+      const camera = cameraRef.current;
+      if (!gizmo || !camera || !pointer) return false;
+
+      onSelectObject?.(object.id);
+
+      if (gizmoHit.kind === 'translate' && onMoveObjectInSpace) {
+        const axisOrigin = getGizmoWorldPosition(gizmo);
+        const axisDirection = axisWorldVector(gizmoHit.axis, gizmo);
+        const axisStartPoint = intersectAxisDragPlane(
+          pointer.raycaster,
+          axisOrigin,
+          axisDirection,
+          camera,
+        );
+        if (!axisStartPoint) return false;
+        dragRef.current = {
+          kind: 'gizmo_translate',
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          objectId: object.id,
+          gizmoAxis: gizmoHit.axis,
+          gizmoStartPosition: [...object.transform.position] as Vec3,
+          gizmoAxisStartPoint: axisStartPoint,
+        };
+        canvas.setPointerCapture(event.pointerId);
+        return true;
+      }
+
+      if (gizmoHit.kind === 'rotate' && onRotateObject) {
+        const axisOrigin = getGizmoWorldPosition(gizmo);
+        const axisDirection = axisWorldVector(gizmoHit.axis, gizmo);
+        const startAngle = angleInAxisPlane(pointer.raycaster, axisOrigin, axisDirection);
+        if (startAngle === undefined) return false;
+        dragRef.current = {
+          kind: 'gizmo_rotate',
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          objectId: object.id,
+          gizmoAxis: gizmoHit.axis,
+          gizmoStartRotation: [...object.transform.rotation] as Vec3,
+          gizmoRotateStartAngle: startAngle,
+        };
+        canvas.setPointerCapture(event.pointerId);
+        return true;
+      }
+
+      if (gizmoHit.kind === 'scale' && onScaleObject) {
+        if (gizmoHit.axis === 'uniform') {
+          dragRef.current = {
+            kind: 'gizmo_scale',
+            x: event.clientX,
+            y: event.clientY,
+            moved: false,
+            objectId: object.id,
+            gizmoScaleAxis: 'uniform',
+            gizmoStartDimensions: [...object.dimensions] as Vec3,
+            gizmoUniformStartDistance: event.clientY,
+          };
+          canvas.setPointerCapture(event.pointerId);
+          return true;
+        }
+        dragRef.current = {
+          kind: 'gizmo_scale',
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          objectId: object.id,
+          gizmoAxis: gizmoHit.axis,
+          gizmoScaleAxis: gizmoHit.axis,
+          gizmoStartDimensions: [...object.dimensions] as Vec3,
+          gizmoScreenStartX: event.clientX,
+          gizmoScreenStartY: event.clientY,
+        };
+        canvas.setPointerCapture(event.pointerId);
+        return true;
+      }
+
+      return false;
+    };
+
     const onPointerDown = (event: PointerEvent) => {
       const framing = shotFramingRef.current;
       if (framing?.flyActive && event.button === 0) {
@@ -291,6 +498,8 @@ export function SceneViewport({
         return;
       }
 
+      if (framing) return;
+
       if (event.button === 1 || event.button === 2 || (event.button === 0 && event.shiftKey)) {
         event.preventDefault();
         beginOrbitDrag(event, true);
@@ -299,11 +508,19 @@ export function SceneViewport({
 
       if (event.button !== 0) return;
 
-      const pointer = getPointerState(event, canvas, cameraRef.current, orbitRef.current, sceneRef.current);
+      const pointer = getPointerState(
+        event,
+        canvas,
+        cameraRef.current,
+        orbitRef.current,
+        sceneRef.current,
+        snapToGridRef.current,
+      );
       if (!pointer) return;
       const floorPoint = pointer.floorPoint;
       const hit = getSceneHit(pointer.raycaster, sceneRef.current);
-      const { placementType: activePlacementType, originPlacementActive: originPlacement } = getBuildInteractionState();
+      const activePlacementType = placementTypeRef.current;
+      const originPlacement = originPlacementActiveRef.current;
       const { onMoveObject, onMovePanoOrigin, onSelectObject } = callbacksRef.current;
       const activeProject = projectRef.current;
       const activeSnapToGrid = snapToGridRef.current;
@@ -340,28 +557,23 @@ export function SceneViewport({
         ? activeProject.scene.objects.find((object) => object.id === hit.objectId)
         : undefined;
       const inSelectMode = !activePlacementType && !originPlacement;
+      const gizmoHit = inSelectMode && showTransformGizmoRef.current
+        ? findGizmoHit(pointer.raycaster, gizmoRef.current, gizmoModeRef.current)
+        : undefined;
       if (
         inSelectMode
-        && hitObject
-        && !hitObject.locked
-        && floorPoint
-        && onMoveObject
+        && gizmoHit
+        && selectedObjectIdRef.current
+        && gizmoRef.current
+        && cameraRef.current
       ) {
+        const object = activeProject.scene.objects.find((item) => item.id === selectedObjectIdRef.current);
+        if (object && !object.locked && beginGizmoDrag(gizmoHit, object, pointer, event)) {
+          return;
+        }
+      }
+      if (inSelectMode && hitObject && !hitObject.locked) {
         onSelectObject?.(hitObject.id);
-        dragRef.current = {
-          kind: 'object',
-          x: event.clientX,
-          y: event.clientY,
-          moved: false,
-          objectId: hitObject.id,
-          objectOffset: [
-            hitObject.transform.position[0] - floorPoint[0],
-            hitObject.transform.position[1],
-            hitObject.transform.position[2] - floorPoint[2],
-          ],
-        };
-        canvas.setPointerCapture(event.pointerId);
-        return;
       }
 
       beginOrbitDrag(event);
@@ -369,8 +581,15 @@ export function SceneViewport({
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      const pointer = getPointerState(event, canvas, cameraRef.current, orbitRef.current, sceneRef.current);
-      if (getBuildInteractionState().placementType && pointer?.floorPoint) {
+      const pointer = getPointerState(
+        event,
+        canvas,
+        cameraRef.current,
+        orbitRef.current,
+        sceneRef.current,
+        snapToGridRef.current,
+      );
+      if (placementTypeRef.current && pointer?.floorPoint) {
         lastFloorPointRef.current = pointer.floorPoint;
         updatePreviewMesh(pointer.floorPoint);
       }
@@ -383,16 +602,111 @@ export function SceneViewport({
       drag.x = event.clientX;
       drag.y = event.clientY;
 
-      const { onMoveObject, onMovePanoOrigin } = callbacksRef.current;
+      const { onMovePanoOrigin } = callbacksRef.current;
       const activeProject = projectRef.current;
       const activeSnapToGrid = snapToGridRef.current;
 
-      if (drag.kind === 'object' && drag.objectId && drag.objectOffset && pointer?.floorPoint && onMoveObject) {
-        onMoveObject(drag.objectId, [
-          pointer.floorPoint[0] + drag.objectOffset[0],
-          drag.objectOffset[1],
-          pointer.floorPoint[2] + drag.objectOffset[2],
-        ]);
+      const {
+        onMoveObjectInSpace,
+        onRotateObject,
+        onScaleObject,
+      } = callbacksRef.current;
+
+      if (
+        drag.kind === 'gizmo_translate'
+        && drag.objectId
+        && drag.gizmoAxis
+        && drag.gizmoStartPosition
+        && drag.gizmoAxisStartPoint
+        && gizmoRef.current
+        && cameraRef.current
+        && pointer
+        && onMoveObjectInSpace
+      ) {
+        const axisOrigin = getGizmoWorldPosition(gizmoRef.current);
+        const axisDirection = axisWorldVector(drag.gizmoAxis, gizmoRef.current);
+        const intersection = intersectAxisDragPlane(
+          pointer.raycaster,
+          axisOrigin,
+          axisDirection,
+          cameraRef.current,
+        );
+        if (intersection) {
+          const delta = intersection.clone().sub(drag.gizmoAxisStartPoint);
+          const projected = axisDirection.clone().multiplyScalar(delta.dot(axisDirection));
+          const next = new THREE.Vector3().fromArray(drag.gizmoStartPosition).add(projected);
+          onMoveObjectInSpace(drag.objectId, vec3FromVector3(next));
+          syncTransformGizmo();
+        }
+        return;
+      }
+
+      if (
+        drag.kind === 'gizmo_rotate'
+        && drag.objectId
+        && drag.gizmoAxis
+        && drag.gizmoStartRotation
+        && drag.gizmoRotateStartAngle !== undefined
+        && gizmoRef.current
+        && pointer
+        && onRotateObject
+      ) {
+        const axisOrigin = getGizmoWorldPosition(gizmoRef.current);
+        const axisDirection = axisWorldVector(drag.gizmoAxis, gizmoRef.current);
+        const currentAngle = angleInAxisPlane(
+          pointer.raycaster,
+          axisOrigin,
+          axisDirection,
+        );
+        if (currentAngle !== undefined) {
+          const delta = currentAngle - drag.gizmoRotateStartAngle;
+          onRotateObject(
+            drag.objectId,
+            applyAxisRotationDelta(drag.gizmoStartRotation, drag.gizmoAxis, delta),
+          );
+          syncTransformGizmo();
+        }
+        return;
+      }
+
+      if (
+        drag.kind === 'gizmo_scale'
+        && drag.objectId
+        && drag.gizmoScaleAxis
+        && drag.gizmoStartDimensions
+        && onScaleObject
+      ) {
+        if (drag.gizmoScaleAxis === 'uniform' && drag.gizmoUniformStartDistance !== undefined) {
+          const delta = (drag.gizmoUniformStartDistance - event.clientY) * 0.01;
+          onScaleObject(drag.objectId, applyAxisScaleDelta(drag.gizmoStartDimensions, 'uniform', delta));
+          syncTransformGizmo();
+          return;
+        }
+        if (
+          drag.gizmoAxis
+          && drag.gizmoScaleAxis
+          && drag.gizmoScaleAxis !== 'uniform'
+          && drag.gizmoScreenStartX !== undefined
+          && drag.gizmoScreenStartY !== undefined
+          && gizmoRef.current
+          && cameraRef.current
+        ) {
+          const delta = computeScreenAxisDragDelta(
+            drag.gizmoAxis,
+            gizmoRef.current,
+            cameraRef.current,
+            canvas,
+            drag.gizmoScreenStartX,
+            drag.gizmoScreenStartY,
+            event.clientX,
+            event.clientY,
+          );
+          onScaleObject(
+            drag.objectId,
+            applyAxisScaleDelta(drag.gizmoStartDimensions, drag.gizmoScaleAxis, delta),
+          );
+          syncTransformGizmo();
+        }
         return;
       }
 
@@ -419,9 +733,6 @@ export function SceneViewport({
     const onPointerUp = (event: PointerEvent) => {
       const drag = dragRef.current;
       if (drag.kind === 'shot_framing') {
-        if (!drag.moved) {
-          shotFramingRef.current?.onLockCamera?.();
-        }
         dragRef.current = { kind: 'idle', x: 0, y: 0, moved: false };
         if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
         return;
@@ -435,15 +746,22 @@ export function SceneViewport({
 
       if (event.button !== 0) return;
 
-      const pointer = getPointerState(event, canvas, cameraRef.current, orbitRef.current, sceneRef.current);
+      const pointer = getPointerState(
+        event,
+        canvas,
+        cameraRef.current,
+        orbitRef.current,
+        sceneRef.current,
+        snapToGridRef.current,
+      );
       const { onPlaceObject, onSelectObject } = callbacksRef.current;
       if (drag.kind === 'place') {
-        const { placementType: activePlacementType } = getBuildInteractionState();
+        const activePlacementType = placementTypeRef.current;
         const floorPoint = pointer?.floorPoint ?? lastFloorPointRef.current;
         if (activePlacementType && floorPoint) {
           onPlaceObject?.(activePlacementType, floorPoint);
         }
-        if (!getBuildInteractionState().placementType) {
+        if (!placementTypeRef.current) {
           lastFloorPointRef.current = undefined;
           clearPreviewMesh();
         } else if (lastFloorPointRef.current) {
@@ -512,11 +830,18 @@ export function SceneViewport({
       flyKeysRef.current.clear();
       resizeObserver.disconnect();
       window.removeEventListener('resize', syncViewportSize);
+      clearTransformGizmo();
       if (sceneRef.current) disposeScene(sceneRef.current);
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [emitFramingCamera]);
+  }, [clearTransformGizmo, emitFramingCamera, syncTransformGizmo, theme]);
+
+  useEffect(() => {
+    return subscribeHumanMannequinReady(() => {
+      setMannequinRevision(getHumanMannequinRevision());
+    });
+  }, []);
 
   useEffect(() => {
     if (!shotFraming?.flyActive) {
@@ -547,30 +872,43 @@ export function SceneViewport({
   useEffect(() => {
     previewMeshRef.current = null;
     if (sceneRef.current) disposeScene(sceneRef.current);
+    clearTransformGizmo();
     sceneRef.current = buildScene(project, {
-      selectedObjectId,
+      selectedObjectId: shotFraming ? undefined : selectedObjectId,
       selectedShotId,
-      hideShotFrustums: Boolean(shotFraming),
+      hideShotFrustums: Boolean(shotFraming) || !showSceneGuides,
+      showSceneGuides: shotFraming ? false : showSceneGuides,
+      showPanoOrigin: shotFraming ? false : (showSceneGuides || originPlacementActive),
+      showHelpers: shotFraming ? false : showSceneGuides,
+      theme,
     });
     if (previewPointRef.current && placementTypeRef.current) {
       updatePreviewMesh(previewPointRef.current);
     }
-  }, [project, selectedObjectId, selectedShotId, shotFraming, updatePreviewMesh]);
+    syncTransformGizmo();
+  }, [
+    clearTransformGizmo,
+    originPlacementActive,
+    project,
+    selectedObjectId,
+    selectedShotId,
+    shotFraming,
+    showSceneGuides,
+    syncTransformGizmo,
+    theme,
+    updatePreviewMesh,
+    mannequinRevision,
+  ]);
+
+  useEffect(() => {
+    syncTransformGizmo();
+  }, [gizmoMode, selectedObjectId, showTransformGizmo, syncTransformGizmo]);
 
   useEffect(() => {
     if (previewPointRef.current) updatePreviewMesh(previewPointRef.current);
     else clearPreviewMesh();
   }, [placementType, snapToGrid, clearPreviewMesh, updatePreviewMesh]);
 
-  const modeLabel = shotFraming
-    ? shotFraming.flyActive
-      ? 'Fly Camera'
-      : 'Camera Locked'
-    : placementType
-      ? `Stamping ${placementLabel ?? objectDisplayName(placementType)}`
-      : originPlacementActive
-        ? 'Origin'
-        : 'Select';
   const cursorClass = shotFraming
     ? 'cursor-crosshair'
     : placementType
@@ -581,36 +919,19 @@ export function SceneViewport({
 
   return (
     <div
-      className={`relative h-full ${minHeightClassName} overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 shadow-sm ${cursorClass}`}
+      className={`relative h-full ${minHeightClassName} overflow-hidden bg-surface-base ${cursorClass}`}
       data-testid="scene-viewport"
       ref={containerRef}
     >
-      <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-md border border-white/20 bg-zinc-950/75 px-3 py-2 text-xs text-zinc-100 shadow-sm backdrop-blur">
-        {modeLabel}
-      </div>
       {shotFraming && (
-        <>
-          <ShotViewfinderOverlay
-            containerRef={containerRef}
-            aspectRatio={shotFraming.frameAspectRatio}
-            fovDegrees={shotFraming.camera.fovDegrees}
-            resolutionLabel={shotFraming.frameResolutionLabel}
-          />
-          <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
-            <div className="h-5 w-5">
-              <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/90 shadow-sm" />
-              <span className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-white/90 shadow-sm" />
-            </div>
-          </div>
-        </>
+        <ShotViewfinderOverlay
+          containerRef={containerRef}
+          aspectRatio={shotFraming.frameAspectRatio}
+          fovDegrees={shotFraming.camera.fovDegrees}
+          resolutionLabel={shotFraming.frameResolutionLabel}
+          variant="full"
+        />
       )}
-      <div className="pointer-events-none absolute bottom-4 right-4 z-20 rounded-md border border-white/20 bg-white/85 px-3 py-2 text-xs text-zinc-700 shadow-sm backdrop-blur">
-        {shotFraming
-          ? shotFraming.flyActive
-            ? 'Drag to look · WASD fly · Space up · Shift down · left-click to lock'
-            : 'Camera locked · Fly Camera to adjust · scroll changes FOV'
-          : 'Stamp: click to place · Select: drag pieces · Shift/middle/right-drag orbits · scroll zoom'}
-      </div>
     </div>
   );
 }
@@ -646,6 +967,7 @@ function getPointerState(
   camera: THREE.PerspectiveCamera | null,
   orbit: { yaw: number; pitch: number; distance: number; target: THREE.Vector3 },
   scene: THREE.Scene | null,
+  snapToGrid: boolean,
 ) {
   if (!camera) return undefined;
   updateCamera(camera, orbit);
@@ -661,7 +983,7 @@ function getPointerState(
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(pointer, camera);
   const floorPoint = resolveStampPoint(raycaster, {
-    snapToGrid: useContinuityStore.getState().gridSnap,
+    snapToGrid,
     scene,
   });
   return {
@@ -670,18 +992,11 @@ function getPointerState(
   };
 }
 
-function getBuildInteractionState() {
-  const { buildMode, activePrimitive } = useContinuityStore.getState();
-  return {
-    placementType: buildMode === 'place' ? activePrimitive : undefined,
-    originPlacementActive: buildMode === 'pano_origin',
-  };
-}
-
 function getSceneHit(raycaster: THREE.Raycaster, scene: THREE.Scene | null) {
   if (!scene) return undefined;
   const hits = raycaster.intersectObjects(scene.children, true);
   for (const hit of hits) {
+    if (isTransformGizmoNode(hit.object) || hit.object.name === 'SelectionOutline') continue;
     if (findPanoOrigin(hit.object)) return { isPanoOrigin: true, objectId: undefined };
     const objectId = findSceneObjectId(hit.object);
     if (objectId) return { isPanoOrigin: false, objectId };
@@ -701,6 +1016,15 @@ function findSceneObjectId(object: THREE.Object3D): string | undefined {
     current = current.parent;
   }
   return undefined;
+}
+
+function isTransformGizmoNode(object: THREE.Object3D): boolean {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (current.userData.isTransformGizmo) return true;
+    current = current.parent;
+  }
+  return false;
 }
 
 function findPanoOrigin(object: THREE.Object3D): boolean {

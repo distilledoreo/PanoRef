@@ -33,7 +33,9 @@ import {
   multiplyScalar,
 } from '../engine/sync';
 import { renderGrayboxEquirectangularPano } from '../engine/renderers';
-import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition } from '../engine/sandbox';
+
+import { useThemeStore } from './useThemeStore';
+import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition, snapBuildPoint } from '../engine/sandbox';
 
 export type BuildMode = 'select' | 'place' | 'pano_origin';
 
@@ -63,6 +65,7 @@ interface ContinuityStore {
   selectObject: (id?: string) => void;
   updateObject: (id: string, updates: Partial<SceneObject>) => void;
   moveObjectToGroundPoint: (id: string, point: Vec3) => void;
+  moveObjectPosition: (id: string, point: Vec3) => void;
   duplicateObject: (id: string) => SceneObject | undefined;
   toggleObjectVisibility: (id: string) => void;
   toggleObjectLocked: (id: string) => void;
@@ -124,7 +127,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   gridSnap: true,
   isRenderingGraybox: false,
   isExportingPackage: false,
-  shotCameraFlying: true,
+  shotCameraFlying: false,
   dismissedWorkflowAdvanceKeys: [],
   seenObjectiveWorkspaces: [],
   objectiveModalRequest: 0,
@@ -243,6 +246,24 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       }),
     };
   }),
+  moveObjectPosition: (id, point) => set((state) => {
+    const object = state.project.scene.objects.find((item) => item.id === id);
+    if (!object || object.locked) return state;
+    const snapped = state.gridSnap
+      ? [snapBuildPoint(point, true)[0], point[1], snapBuildPoint(point, true)[2]] as Vec3
+      : point;
+    return {
+      project: touchProject({
+        ...state.project,
+        scene: {
+          ...state.project.scene,
+          objects: state.project.scene.objects.map((item) => item.id === id
+            ? { ...item, transform: { ...item.transform, position: snapped } }
+            : item),
+        },
+      }),
+    };
+  }),
   duplicateObject: (id) => {
     const state = get();
     const object = state.project.scene.objects.find((item) => item.id === id);
@@ -304,13 +325,14 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     set({ isRenderingGraybox: true });
     try {
       const state = get();
-      const render = await renderGrayboxEquirectangularPano(state.project, 2048, 1024);
+      const theme = useThemeStore.getState().theme;
+      const render = await renderGrayboxEquirectangularPano(state.project, undefined, undefined, theme);
       const asset = createPanoAsset({
         name: 'global_graybox.png',
         uri: render.dataUrl,
         width: render.width,
         height: render.height,
-        metadata: { source: 'graybox_scene' },
+        metadata: { source: 'graybox_scene', theme },
       });
       const pano = createPanoReference({
         name: 'Graybox 360',
@@ -418,7 +440,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   },
   selectShot: (id) => set((state) => {
     const shot = state.project.shots.find((item) => item.id === id);
-    if (!shot) return { selectedShotId: id, shotCameraFlying: false };
+    if (!shot) return { selectedShotId: id, shotCameraFlying: true };
     return {
       selectedShotId: id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
