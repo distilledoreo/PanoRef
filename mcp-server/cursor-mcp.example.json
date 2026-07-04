@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "continuity-stage": {
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "cwd": "C:/Users/disti/Documents/App Development/PanoRef",
+      "env": {
+        "CONTINUITY_WORKSPACE": "C:/Users/disti/Documents/ContinuityProjects",
+        "CONTINUITY_STAGE_URL": "http://127.0.0.1:3000"
+      }
+    }
+  }
+}
