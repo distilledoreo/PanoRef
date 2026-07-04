@@ -12,7 +12,9 @@
     "test": "vitest run",
     "goal:smoke": "node scripts/goal-workflow-smoke.mjs",
     "mcp": "tsx mcp-server/index.ts",
-    "mcp:render-bridge": "node scripts/continuity-render-bridge.mjs"
+    "mcp:render-bridge": "node scripts/continuity-render-bridge.mjs",
+    "mcp:tunnel:setup": "pwsh -NoProfile -File scripts/setup-chatgpt-tunnel.ps1",
+    "mcp:tunnel": "pwsh -NoProfile -File scripts/start-chatgpt-tunnel.ps1"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

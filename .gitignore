@@ -6,3 +6,5 @@ artifacts/
 *.err.log
 .env
 .env.local
+mcp-server/.env.local
+mcp-server/tunnel-profiles/
