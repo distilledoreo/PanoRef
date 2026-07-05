@@ -38,8 +38,37 @@ if (-not $env:CHROME_PATH) {
   $env:CHROME_PATH = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 }
 
+$healthAddr = '127.0.0.1:8080'
+$healthUrl = "http://$healthAddr"
+$portInUse = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
+
+if ($portInUse) {
+  try {
+    $ready = Invoke-WebRequest -Uri "$healthUrl/readyz" -UseBasicParsing -TimeoutSec 2
+    if ($ready.Content -eq 'ready') {
+      Write-Host "Continuity Stage MCP tunnel is already running."
+      Write-Host "Health UI: $healthUrl/ui"
+      Write-Host "Status: ready (MCP probe ok)"
+      Write-Host ""
+      Write-Host "Only one tunnel can use port 8080. Keep the existing terminal open,"
+      Write-Host "or stop it with Ctrl+C there before starting a new one."
+      exit 0
+    }
+  } catch {
+    # Fall through and try to start; tunnel-client will report the bind error.
+  }
+
+  $ownerPid = ($portInUse | Select-Object -First 1).OwningProcess
+  $owner = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+  $ownerName = if ($owner) { $owner.ProcessName } else { "PID $ownerPid" }
+  Write-Host "Port 8080 is already in use by $ownerName."
+  Write-Host "Stop that process or close the other tunnel terminal, then rerun:"
+  Write-Host "  npm run mcp:tunnel"
+  exit 1
+}
+
 Write-Host "Starting Continuity Stage MCP tunnel..."
-Write-Host "Health UI: http://127.0.0.1:8080/ui"
+Write-Host "Health UI: $healthUrl/ui"
 Write-Host "Keep this terminal open while using ChatGPT."
 Write-Host "For rendering, also run: npm run dev"
 Write-Host ""

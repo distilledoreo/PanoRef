@@ -12,6 +12,9 @@
     "test": "vitest run",
     "goal:smoke": "node scripts/goal-workflow-smoke.mjs",
     "mcp": "tsx mcp-server/index.ts",
+    "mcp:http": "tsx mcp-server/http.ts",
+    "mcp:cloudflare:setup": "pwsh -NoProfile -File scripts/setup-chatgpt-cloudflare.ps1",
+    "mcp:cloudflare": "pwsh -NoProfile -File scripts/start-chatgpt-cloudflare.ps1",
     "mcp:render-bridge": "node scripts/continuity-render-bridge.mjs",
     "mcp:tunnel:setup": "pwsh -NoProfile -File scripts/setup-chatgpt-tunnel.ps1",
     "mcp:tunnel": "pwsh -NoProfile -File scripts/start-chatgpt-tunnel.ps1"

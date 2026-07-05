@@ -8,8 +8,8 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $envLocal = Join-Path $repoRoot 'mcp-server\.env.local'
 $envExample = Join-Path $repoRoot 'mcp-server\env.local.example'
 $profileDir = Join-Path $repoRoot 'mcp-server\tunnel-profiles'
-$runMcpCmd = Join-Path $repoRoot 'scripts\run-mcp.cmd'
 $tunnelClient = Join-Path $repoRoot 'tunnel-client.exe'
+$writeProfileScript = Join-Path $repoRoot 'scripts\write-tunnel-profile.ps1'
 
 if (-not (Test-Path $tunnelClient)) {
   $onPath = Get-Command tunnel-client -ErrorAction SilentlyContinue
@@ -54,20 +54,9 @@ if (-not $workspace) {
 New-Item -ItemType Directory -Force -Path $workspace | Out-Null
 New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
 
-# tunnel-client splits --mcp-command on spaces, so wrap the .cmd path in cmd.exe /c "..."
-$mcpCommand = "cmd.exe /c `"$runMcpCmd`""
-
-$initArgs = @(
-  'init',
-  '--sample', 'sample_mcp_stdio_local',
-  '--profile', 'continuity-stage',
-  '--profile-dir', $profileDir,
-  '--tunnel-id', $tunnelId,
-  '--mcp-command', $mcpCommand
-)
-if ($Force) { $initArgs += '--force' }
-
-& $tunnelClient @initArgs
+# tunnel-client splits stdio commands on spaces at runtime, so use a launcher
+# in the user profile directory (no spaces in path).
+& pwsh -NoProfile -File $writeProfileScript -RepoRoot $repoRoot -TunnelId $tunnelId -ProfileDir $profileDir
 
 $env:CONTROL_PLANE_API_KEY = $apiKey
 $env:CONTROL_PLANE_TUNNEL_ID = $tunnelId
@@ -80,4 +69,18 @@ if ($envMap['CHROME_PATH']) { $env:CHROME_PATH = $envMap['CHROME_PATH'] }
 Write-Host ""
 Write-Host "ChatGPT tunnel profile installed."
 Write-Host "Start it with: npm run mcp:tunnel"
-Write-Host "Then in ChatGPT: Settings -> Apps & Connectors -> Create -> Connection type: Tunnel -> Tunnel ID: $tunnelId"
+Write-Host ""
+Write-Host "Secure MCP Tunnel is running and linked to Platform org $tunnelId."
+Write-Host "Use it with Codex, Responses API, or other OpenAI products that accept Platform-org tunnels."
+Write-Host ""
+Write-Host "ChatGPT Apps on Plus (personal account):"
+Write-Host "  Secure MCP Tunnel usually will NOT appear in the ChatGPT Apps tunnel picker."
+Write-Host "  Plus accounts are not ChatGPT workspaces; Platform org != ChatGPT workspace."
+Write-Host "  For ChatGPT Apps development on Plus, expose HTTP MCP via ngrok/Cloudflare Tunnel instead:"
+Write-Host "    npm run mcp:http"
+Write-Host "    ngrok http 8787"
+Write-Host "    Connector URL: https://<your-ngrok-host>/mcp"
+Write-Host ""
+Write-Host "ChatGPT Business/Enterprise:"
+Write-Host "  Create the tunnel with your ChatGPT workspace ID in Platform Tunnels, then:"
+Write-Host "  https://chatgpt.com/#settings/Connectors -> Connection type: Tunnel -> $tunnelId"

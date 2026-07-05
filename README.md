@@ -36,6 +36,34 @@ Primitive stamps use game-inventory style number slots: `1` Floor, `2` Wall, `3`
 
 Build action shortcuts are `V` or `Esc` for Select, `O` for Origin, `G` for Snap, `D` for Duplicate, `R` / `Shift+R` for rotate right/left, `[` / `]` for scale down/up, `L` for lock, `H` for hide/show, `I` for the precision drawer, and `Delete` / `Backspace` for delete. Shortcuts are ignored while typing in editable fields.
 
+## MCP Server
+
+Continuity Stage includes an MCP server for agent-authored storyboard setup and rendering workflows.
+
+For local stdio clients such as Cursor, configure the command from `mcp-server/cursor-mcp.example.json` or run:
+
+```bash
+npm run mcp
+```
+
+For ChatGPT Apps on a personal Plus account, use the streamable HTTP server and expose it with Cloudflare quick tunnel:
+
+```bash
+npm run mcp:http
+npm run mcp:cloudflare
+```
+
+The HTTP server listens on `http://127.0.0.1:8787/mcp` by default. `npm run mcp:cloudflare` checks that the HTTP server is responding, starts a Cloudflare quick tunnel, prints an `https://....trycloudflare.com/mcp` connector URL, and temporarily writes that URL to `mcp-server/.connector-url` while the tunnel is running. In ChatGPT connector settings, choose URL connection type and No Authentication.
+
+For OpenAI secure MCP tunnel usage, copy `mcp-server/env.local.example` to `mcp-server/.env.local`, set `CONTROL_PLANE_API_KEY` and `CONTROL_PLANE_TUNNEL_ID`, then run:
+
+```bash
+npm run mcp:tunnel:setup
+npm run mcp:tunnel
+```
+
+The secure tunnel helper writes a profile under `mcp-server/tunnel-profiles/` and a launcher at `%USERPROFILE%\continuity-stage-mcp.cmd` so paths with spaces do not break the stdio command. The tunnel health UI is `http://127.0.0.1:8080/ui`; if port 8080 is already serving a ready tunnel, the start script reports the existing tunnel instead of launching a second one.
+
 ## Project Format
 
 Saved projects are JSON files using schema version `0.1`.
@@ -124,6 +152,7 @@ npm run goal:smoke
 ```
 
 Runtime verification should also launch the app, render a graybox 360 pano with **Render 360 Reference**, import a canonical pano, approve reference alignment, frame and accept a shot, confirm the filmstrip/Export thumbnails use real available media, confirm Review cards show graybox shot-camera frames rather than the full pano, export an **AI Brief**, import an external AI result frame, export selected shot packages, and exercise at least one warning state such as exporting before a shot exists.
+For MCP changes, verify `npm run mcp:http` starts the streamable HTTP endpoint, `POST /mcp` accepts an MCP `initialize` JSON-RPC request with `Accept: application/json, text/event-stream`, and the response includes an `mcp-session-id`. When Cloudflare is installed, `npm run mcp:cloudflare` should print a public connector URL ending in `/mcp`.
 For camera-move MP4 export, verify a shot can capture Start and End keyframes from locked camera views, export a playable MP4 when the browser reports MP4 support, preview the saved clip in Shots, and include `inputs/viewport_clay_motion.mp4`, `inputs/camera_move/clay_start.png`, `inputs/camera_move/cubemap/pz.png`, `inputs/camera_move/cubemap/cubemap_stitched.png`, `metadata/camera_keyframes.json`, `metadata/camera_move_reference_frames.json`, and `metadata/camera_move_cubemap_visibility.json` in the final ZIP manifest.
 For the Build sandbox specifically, verify pressing `3` to stamp multiple Boxes, using `Esc` or `V` to return to Select, pressing `0` to stamp Person, confirming Backdrop and Sun are click-only, dragging the selected object in Select mode, dragging the visible transform gizmo arrows for axis moves, using the rotate/scale controls in the selected-object card, toggling grid snap with `G`, moving the amber pano origin with `O`, confirming camera frustums stay hidden until the scene-guides eye toggle is enabled, using selected-piece shortcuts, confirming shortcuts do not fire while editing a name field, and checking that orbit center and click targets stay visually aligned with the cursor on high-DPI displays.
 For Fly Camera specifically, verify sustained movement can travel beyond walls and floors without leaving a reasonable set-adjacent volume; the expected horizontal limit is 10m past the farthest visible non-helper object.
