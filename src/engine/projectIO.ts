@@ -28,7 +28,25 @@ export function parseProject(json: string): LocationProject {
 
 function normalizeSceneObject(object: SceneObject & { projectionStamp?: unknown }): SceneObject {
   const { projectionStamp: _ignored, ...normalized } = object;
-  return normalized;
+  const surfaceStyle = normalized.surfaceStyle === 'solid' || normalized.surfaceStyle === 'checkerboard'
+    ? normalized.surfaceStyle
+    : normalized.surfaceStyle === 'default'
+      ? 'default'
+      : undefined;
+  return {
+    ...normalized,
+    surfaceStyle,
+    color: normalizeHexColor(normalized.color),
+    secondaryColor: normalizeHexColor(normalized.secondaryColor),
+  };
+}
+
+function normalizeHexColor(value?: string): string | undefined {
+  if (!value || typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed.toLowerCase();
+  if (/^[0-9a-fA-F]{6}$/.test(trimmed)) return `#${trimmed.toLowerCase()}`;
+  return undefined;
 }
 
 function normalizePanoReference(pano: PanoReference): PanoReference {

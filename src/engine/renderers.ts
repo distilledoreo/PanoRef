@@ -123,7 +123,7 @@ export async function renderGrayboxEquirectangularPano(
   cubeRenderTarget.dispose();
   material.dispose();
   plane.geometry.dispose();
-  renderer.dispose();
+  disposeRenderer(renderer);
 
   return { dataUrl, width, height };
 }
@@ -169,7 +169,7 @@ export async function renderShotCameraMoveMp4(
   const captureStream = renderer.domElement.captureStream?.bind(renderer.domElement);
   if (!captureStream) {
     disposeScene(scene);
-    renderer.dispose();
+    disposeRenderer(renderer);
     throw new Error('Canvas video capture is not supported in this browser.');
   }
 
@@ -223,7 +223,7 @@ export async function renderShotCameraMoveMp4(
   } finally {
     stream.getTracks().forEach((track) => track.stop());
     disposeScene(scene);
-    renderer.dispose();
+    disposeRenderer(renderer);
   }
 
   const blob = new Blob(chunks, { type: mimeType });
@@ -307,7 +307,7 @@ export async function renderViewportClay(
   const dataUrl = renderer.domElement.toDataURL('image/png');
 
   disposeScene(scene);
-  renderer.dispose();
+  disposeRenderer(renderer);
 
   return { dataUrl, width, height };
 }
@@ -390,7 +390,7 @@ export async function renderPanoPerspectiveCrop(
   plane.geometry.dispose();
   material.dispose();
   texture.dispose();
-  renderer.dispose();
+  disposeRenderer(renderer);
 
   return { dataUrl, width: crop.width, height: crop.height };
 }
@@ -489,7 +489,7 @@ async function renderPanoCubemapFace(
   plane.geometry.dispose();
   material.dispose();
   texture.dispose();
-  renderer.dispose();
+  disposeRenderer(renderer);
 
   return { dataUrl, width: faceSize, height: faceSize };
 }
@@ -504,6 +504,16 @@ function createRenderer(width: number, height: number): THREE.WebGLRenderer {
   renderer.setSize(width, height, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   return renderer;
+}
+
+/** Release GPU resources so offline graybox/shot renders can be re-run without exhausting WebGL contexts. */
+function disposeRenderer(renderer: THREE.WebGLRenderer) {
+  renderer.dispose();
+  renderer.forceContextLoss();
+  const canvas = renderer.domElement;
+  if (canvas.parentElement) {
+    canvas.parentElement.removeChild(canvas);
+  }
 }
 
 function loadTexture(imageUrl: string): Promise<THREE.Texture> {

@@ -322,6 +322,10 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     }),
   })),
   renderGrayboxPano: async () => {
+    // Guard against stacked clicks while a render is already in flight.
+    if (get().isRenderingGraybox) {
+      throw new Error('A graybox render is already in progress.');
+    }
     set({ isRenderingGraybox: true });
     try {
       const state = get();
@@ -334,6 +338,9 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         height: render.height,
         metadata: { source: 'graybox_scene', theme },
       });
+      const hadOnlyGrayboxCanonical = state.project.panoRefs.every(
+        (existing) => !existing.isCanonical || existing.type === 'graybox_render',
+      );
       const pano = createPanoReference({
         name: 'Graybox 360',
         assetId: asset.id,
@@ -342,30 +349,38 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         rotation: state.project.scene.panoRotation,
         width: render.width,
         height: render.height,
-        isCanonical: state.project.panoRefs.length === 0,
+        // Stay canonical when replacing a prior graybox-only reference set.
+        isCanonical: state.project.panoRefs.length === 0 || hadOnlyGrayboxCanonical,
         notes: 'Rendered from the Build workspace graybox set.',
       });
 
-      set((current) => ({
-        project: touchProject(linkAllShotsToCanonicalPano({
-          ...current.project,
-          assets: {
-            assets: {
-              ...current.project.assets.assets,
-              [asset.id]: asset,
-            },
-          },
-          panoRefs: [
-            ...current.project.panoRefs.map((existing) => (
-              pano.isCanonical ? { ...existing, isCanonical: false } : existing
-            )),
-            pano,
-          ],
-        })),
-        activePanoId: pano.id,
-      }));
+      set((current) => {
+        const staleGrayboxes = current.project.panoRefs.filter((existing) => existing.type === 'graybox_render');
+        const staleAssetIds = new Set(staleGrayboxes.map((existing) => existing.imageAssetId));
+        const nextAssets = { ...current.project.assets.assets };
+        for (const assetId of staleAssetIds) {
+          delete nextAssets[assetId];
+        }
+        nextAssets[asset.id] = asset;
+
+        const remainingPanos = current.project.panoRefs
+          .filter((existing) => existing.type !== 'graybox_render')
+          .map((existing) => (
+            pano.isCanonical ? { ...existing, isCanonical: false } : existing
+          ));
+
+        return {
+          project: touchProject(linkAllShotsToCanonicalPano({
+            ...current.project,
+            assets: { assets: nextAssets },
+            panoRefs: [...remainingPanos, pano],
+          })),
+          activePanoId: pano.isCanonical ? pano.id : current.activePanoId,
+        };
+      });
       return pano;
     } finally {
+      // Always re-enable the CTA so a failed or cancelled render never sticks disabled.
       set({ isRenderingGraybox: false });
     }
   },

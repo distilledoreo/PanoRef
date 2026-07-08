@@ -88,15 +88,26 @@ describe('ui revamp fidelity surfaces', () => {
     const guidance = readFileSync(new URL('../src/components/common/WorkflowGuidance.tsx', import.meta.url), 'utf8');
     const referenceGuide = readFileSync(new URL('../src/components/common/GrayboxReferenceGuide.tsx', import.meta.url), 'utf8');
     const defaults = readFileSync(new URL('../src/domain/defaults.ts', import.meta.url), 'utf8');
+    const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
+    const renderers = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
     expect(build).toContain('Download Graybox 360');
+    expect(build).toContain('Re-render 360 Reference');
+    expect(build).toContain('handleRenderGraybox');
+    expect(build).toContain('data-object-surface-style');
+    expect(build).toContain('1m × 1m checkerboard');
     expect(build).not.toContain('grayboxDownloadPrompt');
     expect(build).toContain('letterboxEnabled: false');
     expect(guidance).toContain('showReferencePromptBuilder');
     expect(guidance).toContain('seenObjectiveWorkspaces.includes(\'reference\')');
+    expect(guidance).toMatch(/advanceOpen && Boolean\(advancePrompt\)[\s\S]*onClose=\{handleAdvanceDismiss\}/);
     expect(referenceGuide).toContain('Your graybox 360 is ready');
     expect(referenceGuide).toContain('Download the graybox image.');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT = 2048');
+    expect(store).toContain("existing.type !== 'graybox_render'");
+    expect(store).toContain('isRenderingGraybox: false');
+    expect(renderers).toContain('disposeRenderer');
+    expect(renderers).toContain('forceContextLoss');
   });
 
   it('anchors shots floating card above the bottom overlay safe area', () => {

@@ -1,7 +1,17 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { createDefaultProject } from '../src/domain/defaults';
-import { buildScene, createObject3D, createPreviewMesh, disposeScene } from '../src/engine/sceneObjects';
+import { createDefaultProject, createSceneObject } from '../src/domain/defaults';
+import {
+  CHECKERBOARD_TILE_METERS,
+  buildScene,
+  createObject3D,
+  createPreviewMesh,
+  defaultSecondaryColor,
+  defaultSolidColorForObject,
+  disposeScene,
+  resolveObjectMaterial,
+  resolveSurfaceStyle,
+} from '../src/engine/sceneObjects';
 
 describe('scene object disposal', () => {
   it('keeps shared build materials alive across scene rebuilds', () => {
@@ -40,5 +50,35 @@ describe('scene object disposal', () => {
     expect(wallMesh).not.toBe(preview);
     expect(preview.name).toBe('Placement Preview');
     expect(preview.userData.previewObject).toBe(true);
+  });
+});
+
+describe('object surface styles', () => {
+  it('defaults to clay materials and supports solid + 1m checkerboard surfaces', () => {
+    const box = createSceneObject('box', 1);
+    expect(resolveSurfaceStyle(box)).toBe('default');
+
+    const solid = {
+      ...box,
+      surfaceStyle: 'solid' as const,
+      color: '#7aa2c4',
+    };
+    const solidMaterial = resolveObjectMaterial(solid);
+    expect(solidMaterial.color.getHexString()).toBe('7aa2c4');
+
+    const checker = {
+      ...box,
+      surfaceStyle: 'checkerboard' as const,
+      color: '#e8e8e8',
+      secondaryColor: '#444444',
+    };
+    const checkerMaterial = resolveObjectMaterial(checker);
+    expect(CHECKERBOARD_TILE_METERS).toBe(1);
+    expect(checkerMaterial.customProgramCacheKey?.()).toContain('checkerboard-1m');
+    expect(defaultSolidColorForObject(box)).toMatch(/^#[0-9a-f]{6}$/);
+    expect(defaultSecondaryColor('#ffffff')).toMatch(/^#[0-9a-f]{6}$/);
+
+    const mesh = createObject3D(checker);
+    expect(mesh).toBeTruthy();
   });
 });

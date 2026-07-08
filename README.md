@@ -15,7 +15,7 @@ The dev server starts at `http://localhost:3000`. If that port is already occupi
 
 ## Workflow
 
-The top stage rail tracks progress across Build → Reference → Shots → Review → Export. It guides without locking you in — every workspace remains available at any time. Project actions and the current objective live in the compact brand menu so the canvas stays visually close to the reference mocks.
+The top stage rail tracks progress across Build → Reference → Shots → Review → Export. It guides without locking you in — every workspace remains available at any time. Open an existing project with the folder button in the top-right header, or use the compact brand menu for Open Project, Save Project, Package Export, and the current objective while keeping the canvas visually close to the reference mocks. Project import accepts saved Continuity Stage `.json` files and reports a clear error if the selected file is not a supported project.
 
 Persisted workflow checkpoints are saved in project JSON under `workflow`:
 
@@ -39,6 +39,8 @@ Build action shortcuts are `V` or `Esc` for Select, `O` for Origin, `G` for Snap
 ## Project Format
 
 Saved projects are JSON files using schema version `0.1`.
+
+Use **Save Project** from the brand menu to download the current JSON project. Use the top-right **Open project** folder button, or **Open Project** in the brand menu, to import a saved project back into the app.
 
 Top-level fields include:
 
@@ -124,6 +126,7 @@ npm run goal:smoke
 ```
 
 Runtime verification should also launch the app, render a graybox 360 pano with **Render 360 Reference**, import a canonical pano, approve reference alignment, frame and accept a shot, confirm the filmstrip/Export thumbnails use real available media, confirm Review cards show graybox shot-camera frames rather than the full pano, export an **AI Brief**, import an external AI result frame, export selected shot packages, and exercise at least one warning state such as exporting before a shot exists.
+For project import specifically, verify the top-right folder button opens a saved Continuity Stage JSON file, shows a project-opened status, updates the project name in the brand menu, and shows an error status for invalid JSON or unsupported schema files.
 For camera-move MP4 export, verify a shot can capture Start and End keyframes from locked camera views, export a playable MP4 when the browser reports MP4 support, preview the saved clip in Shots, and include `inputs/viewport_clay_motion.mp4`, `inputs/camera_move/clay_start.png`, `inputs/camera_move/cubemap/pz.png`, `inputs/camera_move/cubemap/cubemap_stitched.png`, `metadata/camera_keyframes.json`, `metadata/camera_move_reference_frames.json`, and `metadata/camera_move_cubemap_visibility.json` in the final ZIP manifest.
 For the Build sandbox specifically, verify pressing `3` to stamp multiple Boxes, using `Esc` or `V` to return to Select, pressing `0` to stamp Person, confirming Backdrop and Sun are click-only, dragging the selected object in Select mode, dragging the visible transform gizmo arrows for axis moves, using the rotate/scale controls in the selected-object card, toggling grid snap with `G`, moving the amber pano origin with `O`, confirming camera frustums stay hidden until the scene-guides eye toggle is enabled, using selected-piece shortcuts, confirming shortcuts do not fire while editing a name field, and checking that orbit center and click targets stay visually aligned with the cursor on high-DPI displays.
 For Fly Camera specifically, verify sustained movement can travel beyond walls and floors without leaving a reasonable set-adjacent volume; the expected horizontal limit is 10m past the farthest visible non-helper object.

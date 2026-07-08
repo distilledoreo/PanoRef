@@ -1,9 +1,23 @@
 import * as THREE from 'three';
-import { Landmark, LocationProject, SceneObject, SceneObjectType } from '../domain/types';
+import { Landmark, LocationProject, ObjectSurfaceStyle, SceneObject, SceneObjectType } from '../domain/types';
 import { createHumanMannequinObject } from './humanMannequinModel';
 import { degreesToRadians } from './sync';
 
 export type SceneVisualTheme = 'light' | 'dark';
+
+/** World-space checker tile size in meters (1m × 1m scale reference). */
+export const CHECKERBOARD_TILE_METERS = 1;
+
+const DEFAULT_SOLID_PALETTE = [
+  '#c8cdc8',
+  '#7aa2c4',
+  '#c79a48',
+  '#5f9b7a',
+  '#c47a7a',
+  '#8b7ab8',
+  '#d4a574',
+  '#6a9e8f',
+] as const;
 
 function createArchitectureMaterial(color: number, roughness: number): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
@@ -45,6 +59,86 @@ const SHARED_MATERIALS = new Set<THREE.Material>([
   landmarkMaterial,
   ...Object.values(mannequinMaterialByTheme),
 ]);
+
+export function defaultSolidColorForObject(object: Pick<SceneObject, 'id' | 'category' | 'type'>): string {
+  if (object.type === 'floor') return '#d8ddd8';
+  if (object.category === 'environment') return '#9aab96';
+  if (object.category === 'helper') return '#c79a48';
+  if (object.category === 'landmark') return '#5f9b7a';
+  const hash = object.id.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return DEFAULT_SOLID_PALETTE[hash % DEFAULT_SOLID_PALETTE.length];
+}
+
+export function defaultSecondaryColor(primaryHex: string): string {
+  const color = new THREE.Color(primaryHex);
+  color.offsetHSL(0, 0, color.getHSL({ h: 0, s: 0, l: 0 }).l > 0.45 ? -0.28 : 0.22);
+  return `#${color.getHexString()}`;
+}
+
+function createSolidMaterial(hex: string): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: new THREE.Color(hex),
+    roughness: 0.76,
+    metalness: 0.03,
+  });
+}
+
+/**
+ * 1m × 1m world-space checkerboard so scale reads consistently across objects of any size.
+ * Uses object-local axes so tiles stay aligned to each primitive's faces.
+ */
+function createCheckerboardMaterial(primaryHex: string, secondaryHex: string): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.82,
+    metalness: 0.02,
+  });
+  const colorA = new THREE.Color(primaryHex);
+  const colorB = new THREE.Color(secondaryHex);
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.checkerColorA = { value: colorA };
+    shader.uniforms.checkerColorB = { value: colorB };
+    shader.uniforms.checkerSize = { value: CHECKERBOARD_TILE_METERS };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vCheckerWorldPos;`,
+      )
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+vCheckerWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform vec3 checkerColorA;
+uniform vec3 checkerColorB;
+uniform float checkerSize;
+varying vec3 vCheckerWorldPos;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+// True 1m world-space checkerboard so scale reads consistently after transform/scale.
+vec3 scaled = vCheckerWorldPos / max(checkerSize, 1e-4);
+float checker = mod(floor(scaled.x) + floor(scaled.y) + floor(scaled.z), 2.0);
+vec3 tileColor = mix(checkerColorA, checkerColorB, checker);
+diffuseColor.rgb *= tileColor;`,
+      );
+  };
+  material.customProgramCacheKey = () => `checkerboard-1m:${primaryHex}:${secondaryHex}`;
+  return material;
+}
+
+export function resolveSurfaceStyle(object: SceneObject): ObjectSurfaceStyle {
+  if (object.surfaceStyle === 'solid' || object.surfaceStyle === 'checkerboard') {
+    return object.surfaceStyle;
+  }
+  return 'default';
+}
 
 export function buildScene(
   project: LocationProject,
@@ -152,6 +246,15 @@ export function resolveObjectMaterial(
   object: SceneObject,
   theme: SceneVisualTheme = 'light',
 ): THREE.MeshStandardMaterial {
+  const style = resolveSurfaceStyle(object);
+  if (style === 'solid') {
+    return createSolidMaterial(object.color ?? defaultSolidColorForObject(object));
+  }
+  if (style === 'checkerboard') {
+    const primary = object.color ?? defaultSolidColorForObject(object);
+    const secondary = object.secondaryColor ?? defaultSecondaryColor(primary);
+    return createCheckerboardMaterial(primary, secondary);
+  }
   if (object.type === 'floor') return theme === 'dark' ? darkFloorMaterial : lightFloorMaterial;
   return materialByTheme[theme][object.category];
 }
@@ -159,6 +262,7 @@ export function resolveObjectMaterial(
 export function createObject3D(object: SceneObject, _selected = false, theme: SceneVisualTheme = 'light'): THREE.Object3D {
   let node: THREE.Object3D;
   const material = resolveObjectMaterial(object, theme);
+  const style = resolveSurfaceStyle(object);
   const [w, h, d] = object.dimensions;
 
   switch (object.type) {
@@ -181,16 +285,19 @@ export function createObject3D(object: SceneObject, _selected = false, theme: Sc
       node = createStairs(object, material);
       break;
     case 'tree_blob':
-      node = createTreeBlob(object, theme);
+      node = style === 'default' ? createTreeBlob(object, theme) : createTreeBlob(object, theme, material);
       break;
     case 'terrain_mass':
       node = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), material);
       break;
     case 'human_dummy':
-      node = createHumanMannequinObject(object, mannequinMaterialByTheme[theme]);
+      node = createHumanMannequinObject(
+        object,
+        style === 'default' ? mannequinMaterialByTheme[theme] : material,
+      );
       break;
     case 'sun_marker':
-      node = createSunMarker(object, theme);
+      node = createSunMarker(object, theme, style === 'default' ? undefined : material);
       break;
     default:
       node = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -252,17 +359,29 @@ function createStairs(object: SceneObject, material: THREE.Material): THREE.Grou
   return group;
 }
 
-function createTreeBlob(object: SceneObject, theme: SceneVisualTheme): THREE.Group {
+function createTreeBlob(
+  object: SceneObject,
+  theme: SceneVisualTheme,
+  overrideMaterial?: THREE.Material,
+): THREE.Group {
   const [w, h, d] = object.dimensions;
   const group = new THREE.Group();
+  const trunkMaterial = overrideMaterial ?? new THREE.MeshStandardMaterial({
+    color: theme === 'dark' ? 0x6f5b47 : 0x7c5a3a,
+    roughness: 0.9,
+  });
+  const crownMaterial = overrideMaterial ?? new THREE.MeshStandardMaterial({
+    color: theme === 'dark' ? 0x7f8d84 : 0x6fa36c,
+    roughness: 0.85,
+  });
   const trunk = new THREE.Mesh(
     new THREE.CylinderGeometry(w * 0.12, w * 0.16, h * 0.45, 12),
-    new THREE.MeshStandardMaterial({ color: theme === 'dark' ? 0x6f5b47 : 0x7c5a3a, roughness: 0.9 }),
+    trunkMaterial,
   );
   trunk.position.y = -h * 0.18;
   const crown = new THREE.Mesh(
     new THREE.SphereGeometry(Math.max(w, d) * 0.48, 20, 14),
-    new THREE.MeshStandardMaterial({ color: theme === 'dark' ? 0x7f8d84 : 0x6fa36c, roughness: 0.85 }),
+    crownMaterial,
   );
   crown.scale.y = 0.85;
   crown.position.y = h * 0.18;
@@ -270,10 +389,15 @@ function createTreeBlob(object: SceneObject, theme: SceneVisualTheme): THREE.Gro
   return group;
 }
 
-function createSunMarker(_object: SceneObject, theme: SceneVisualTheme): THREE.Group {
+function createSunMarker(
+  _object: SceneObject,
+  theme: SceneVisualTheme,
+  overrideMaterial?: THREE.Material,
+): THREE.Group {
   const group = new THREE.Group();
-  const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), materialByTheme[theme].helper);
-  const ray = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.4, 8), materialByTheme[theme].helper);
+  const material = overrideMaterial ?? materialByTheme[theme].helper;
+  const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), material);
+  const ray = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.4, 8), material);
   ray.rotation.z = Math.PI / 2;
   ray.position.x = -0.65;
   group.add(sphere, ray);

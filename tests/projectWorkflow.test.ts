@@ -30,6 +30,12 @@ describe('project workflow logic', () => {
     expect(parsed.scene.objects[0].name).toBe(project.scene.objects[0].name);
   });
 
+  it('rejects unsupported project JSON during import parsing', () => {
+    const project = createDefaultProject();
+    expect(() => parseProject(JSON.stringify({ ...project, schemaVersion: '9.9' })))
+      .toThrow('Unsupported project schema version.');
+  });
+
   it('migrates legacy in-app skinned frame fields to imported AI result fields', () => {
     const project = createDefaultProject();
     const shot = createShot({

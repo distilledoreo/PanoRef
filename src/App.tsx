@@ -35,6 +35,10 @@ const workspaceItems: Array<{ id: Workspace; label: string; icon: React.Componen
 export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [projectImportStatus, setProjectImportStatus] = useState<{
+    tone: 'success' | 'error';
+    message: string;
+  }>();
   const { theme, toggleTheme } = useThemeStore();
   const {
     project,
@@ -44,10 +48,31 @@ export default function App() {
     requestObjectiveModal,
   } = useContinuityStore();
 
+  const openProjectPicker = () => {
+    setProjectImportStatus(undefined);
+    fileRef.current?.click();
+  };
+
   const importProject = async (file?: File) => {
     if (!file) return;
-    const text = await readFileAsText(file);
-    setProject(parseProject(text));
+    try {
+      const text = await readFileAsText(file);
+      const importedProject = parseProject(text);
+      setProject(importedProject);
+      setProjectImportStatus({
+        tone: 'success',
+        message: `Project opened: ${importedProject.name}`,
+      });
+    } catch (error) {
+      setProjectImportStatus({
+        tone: 'error',
+        message: error instanceof Error
+          ? `Could not open project: ${error.message}`
+          : 'Could not open project: invalid project file.',
+      });
+    } finally {
+      if (fileRef.current) fileRef.current.value = '';
+    }
   };
 
   return (
@@ -92,7 +117,7 @@ export default function App() {
                   icon={<FolderOpen className="h-4 w-4" />}
                   label="Open Project"
                   onClick={() => {
-                    fileRef.current?.click();
+                    openProjectPicker();
                     setProjectMenuOpen(false);
                   }}
                 />
@@ -168,16 +193,43 @@ export default function App() {
             <input
               ref={fileRef}
               type="file"
-              accept="application/json"
+              accept=".json,application/json"
+              aria-label="Open project JSON"
+              data-project-import-input
               className="hidden"
               onChange={(event) => void importProject(event.target.files?.[0])}
             />
+            <IconHeaderButton onClick={openProjectPicker} title="Open project">
+              <FolderOpen className="h-4 w-4" />
+            </IconHeaderButton>
+            <IconHeaderButton
+              onClick={() => downloadProject(project)}
+              title="Save project"
+              data-project-export-button
+            >
+              <FileJson className="h-4 w-4" />
+            </IconHeaderButton>
             <IconHeaderButton onClick={toggleTheme} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>
               {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
             </IconHeaderButton>
           </div>
         </div>
       </header>
+
+      {projectImportStatus && (
+        <div
+          className={`pointer-events-none absolute right-7 top-20 z-50 max-w-sm rounded-[var(--radius-card)] border px-3 py-2 text-sm shadow-card backdrop-blur ${
+            projectImportStatus.tone === 'success'
+              ? 'border-[var(--accent)] bg-surface-overlay text-primary'
+              : 'border-red-400/70 bg-surface-overlay text-primary'
+          }`}
+          role={projectImportStatus.tone === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+          data-project-import-status={projectImportStatus.tone}
+        >
+          {projectImportStatus.message}
+        </div>
+      )}
 
       <WorkflowGuidance />
 
@@ -211,17 +263,20 @@ function IconHeaderButton({
   children,
   title,
   onClick,
+  className,
+  ...rest
 }: {
   children: React.ReactNode;
   title: string;
   onClick: () => void;
-}) {
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="button"
+      {...rest}
       onClick={onClick}
       title={title}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-subtle/80 bg-surface-overlay/80 text-secondary shadow-card backdrop-blur-sm transition hover:border-strong hover:text-primary"
+      className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border border-subtle/80 bg-surface-overlay/80 text-secondary shadow-card backdrop-blur-sm transition hover:border-strong hover:text-primary ${className ?? ''}`}
     >
       {children}
     </button>

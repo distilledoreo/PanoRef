@@ -28,7 +28,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
+import { ObjectSurfaceStyle, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import type { GizmoMode } from '../../engine/transformGizmo';
 import { objectDisplayName } from '../../domain/defaults';
 import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
@@ -39,6 +39,12 @@ import {
 } from '../../engine/buildShortcuts';
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
+import {
+  CHECKERBOARD_TILE_METERS,
+  defaultSecondaryColor,
+  defaultSolidColorForObject,
+  resolveSurfaceStyle,
+} from '../../engine/sceneObjects';
 import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
 import { useThemeStore } from '../../state/useThemeStore';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
@@ -78,6 +84,7 @@ export function BuildWorkspace() {
   const [layersOpen, setLayersOpen] = useState(false);
   const [showSceneGuides, setShowSceneGuides] = useState(false);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('translate');
+  const [grayboxRenderError, setGrayboxRenderError] = useState<string | undefined>();
   const {
     project,
     selectedObjectId,
@@ -100,6 +107,16 @@ export function BuildWorkspace() {
     renderGrayboxPano,
     isRenderingGraybox,
   } = useContinuityStore();
+
+  const handleRenderGraybox = useCallback(() => {
+    if (isRenderingGraybox) return;
+    setGrayboxRenderError(undefined);
+    void renderGrayboxPano().catch((error: unknown) => {
+      setGrayboxRenderError(
+        error instanceof Error ? error.message : 'Could not render graybox 360.',
+      );
+    });
+  }, [isRenderingGraybox, renderGrayboxPano]);
   const selectedObject = project.scene.objects.find((object) => object.id === selectedObjectId);
   const grayboxPano = getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
@@ -348,15 +365,23 @@ export function BuildWorkspace() {
           onGridSnapChange={setGridSnap}
         />
 
-        <div className="pointer-events-none absolute bottom-6 right-6 z-10 flex flex-col items-end gap-2">
+        <div className="pointer-events-none absolute bottom-6 right-6 z-20 flex flex-col items-end gap-2">
           <PrimaryCTA
             icon={<Globe className="h-5 w-5" />}
-            label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
-            onClick={() => void renderGrayboxPano()}
+            label={isRenderingGraybox ? 'Rendering...' : grayboxPano ? 'Re-render 360 Reference' : 'Render 360 Reference'}
+            onClick={handleRenderGraybox}
             disabled={isRenderingGraybox}
             highlighted={primaryAction?.id === 'render-graybox'}
             appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
           />
+          {grayboxRenderError && (
+            <p
+              role="alert"
+              className="pointer-events-auto max-w-xs rounded-xl border border-red-400/60 bg-surface-overlay px-3 py-2 text-xs text-primary shadow-card backdrop-blur"
+            >
+              {grayboxRenderError}
+            </p>
+          )}
           {grayboxAsset && grayboxPano && (
             <button
               type="button"
@@ -600,6 +625,28 @@ function PrecisionControls({
   object: SceneObject;
   onChange: (updates: Partial<SceneObject>) => void;
 }) {
+  const surfaceStyle = resolveSurfaceStyle(object);
+  const primaryColor = object.color ?? defaultSolidColorForObject(object);
+  const secondaryColor = object.secondaryColor ?? defaultSecondaryColor(primaryColor);
+
+  const setSurfaceStyle = (next: ObjectSurfaceStyle) => {
+    if (next === 'default') {
+      onChange({
+        surfaceStyle: 'default',
+        color: undefined,
+        secondaryColor: undefined,
+      });
+      return;
+    }
+    onChange({
+      surfaceStyle: next,
+      color: object.color ?? defaultSolidColorForObject(object),
+      secondaryColor: next === 'checkerboard'
+        ? (object.secondaryColor ?? defaultSecondaryColor(object.color ?? defaultSolidColorForObject(object)))
+        : object.secondaryColor,
+    });
+  };
+
   return (
     <div className="space-y-3">
       <Field label="Name">
@@ -610,6 +657,55 @@ function PrecisionControls({
           {primitiveTypes.map((type) => <option key={type} value={type}>{objectDisplayName(type)}</option>)}
         </Select>
       </Field>
+      <Field label="Surface">
+        <Select
+          value={surfaceStyle}
+          onChange={(event) => setSurfaceStyle(event.target.value as ObjectSurfaceStyle)}
+          data-object-surface-style
+        >
+          <option value="default">Default clay</option>
+          <option value="solid">Solid color</option>
+          <option value="checkerboard">1m × 1m checkerboard</option>
+        </Select>
+      </Field>
+      {surfaceStyle !== 'default' && (
+        <Field label={surfaceStyle === 'checkerboard' ? 'Light tile' : 'Color'}>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={primaryColor}
+              onChange={(event) => onChange({ color: event.target.value })}
+              className="h-9 w-12 cursor-pointer rounded-lg border border-subtle bg-surface-raised p-1"
+              aria-label="Object color"
+              data-object-color
+            />
+            <TextInput
+              value={primaryColor}
+              onChange={(event) => onChange({ color: event.target.value })}
+              className="font-mono text-xs"
+            />
+          </div>
+        </Field>
+      )}
+      {surfaceStyle === 'checkerboard' && (
+        <Field label={`Dark tile (${CHECKERBOARD_TILE_METERS}m grid)`}>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={secondaryColor}
+              onChange={(event) => onChange({ secondaryColor: event.target.value })}
+              className="h-9 w-12 cursor-pointer rounded-lg border border-subtle bg-surface-raised p-1"
+              aria-label="Checkerboard secondary color"
+              data-object-secondary-color
+            />
+            <TextInput
+              value={secondaryColor}
+              onChange={(event) => onChange({ secondaryColor: event.target.value })}
+              className="font-mono text-xs"
+            />
+          </div>
+        </Field>
+      )}
       <Field label="Position">
         <Vec3Input
           value={object.transform.position}
