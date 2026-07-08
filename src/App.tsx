@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Boxes,
   Camera,
@@ -23,6 +23,7 @@ import { ReviewWorkspace } from './components/workspaces/ReviewWorkspace';
 import { ExportWorkspace } from './components/workspaces/ExportWorkspace';
 import { WorkflowGuidance } from './components/common/WorkflowGuidance';
 import SplashScreen from './components/common/SplashScreen';
+import { TextInput } from './components/common/Field';
 
 const workspaceItems: Array<{ id: Workspace; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'build', label: 'Build', icon: Boxes },
@@ -32,8 +33,11 @@ const workspaceItems: Array<{ id: Workspace; label: string; icon: React.Componen
   { id: 'export', label: 'Export', icon: Upload },
 ];
 
+const IMPORT_STATUS_DISMISS_MS = 4000;
+
 export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [projectImportStatus, setProjectImportStatus] = useState<{
     tone: 'success' | 'error';
@@ -45,6 +49,7 @@ export default function App() {
     workspace,
     setWorkspace,
     setProject,
+    updateProjectInfo,
     requestObjectiveModal,
   } = useContinuityStore();
 
@@ -75,6 +80,33 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!projectImportStatus) return;
+    const timer = window.setTimeout(() => setProjectImportStatus(undefined), IMPORT_STATUS_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [projectImportStatus]);
+
+  useEffect(() => {
+    if (!projectMenuOpen) return;
+
+    const onPointerDown = (event: MouseEvent | PointerEvent) => {
+      const target = event.target as Node | null;
+      if (projectMenuRef.current && target && !projectMenuRef.current.contains(target)) {
+        setProjectMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProjectMenuOpen(false);
+    };
+
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [projectMenuOpen]);
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-surface-base text-primary">
       <main className="absolute inset-0">
@@ -87,12 +119,14 @@ export default function App() {
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-40">
         <div className="flex h-[72px] items-center justify-between gap-4 px-7 pt-3">
-          <div className="pointer-events-auto relative min-w-0">
+          <div ref={projectMenuRef} className="pointer-events-auto relative min-w-0">
             <button
               type="button"
               onClick={() => setProjectMenuOpen((open) => !open)}
               className="flex min-w-0 items-center gap-3 rounded-2xl pr-3 transition hover:bg-surface-overlay/60"
               title="Project actions"
+              aria-expanded={projectMenuOpen}
+              aria-haspopup="menu"
             >
               <span className="flex h-11 w-11 shrink-0 items-center justify-center text-accent">
                 <Boxes className="h-9 w-9" strokeWidth={2.2} />
@@ -100,10 +134,23 @@ export default function App() {
               <span className="truncate text-xl font-semibold tracking-normal text-primary">Continuity Stage</span>
             </button>
             {projectMenuOpen && (
-              <div className="absolute left-0 top-[calc(100%+10px)] z-50 w-64 overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-2 shadow-soft backdrop-blur">
+              <div
+                role="menu"
+                className="absolute left-0 top-[calc(100%+10px)] z-50 w-72 overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-2 shadow-soft backdrop-blur"
+              >
                 <div className="border-b border-subtle px-3 py-2">
-                  <div className="truncate text-sm font-semibold text-primary">{project.name}</div>
-                  <div className="text-xs text-secondary">Project actions</div>
+                  <label className="block text-xs text-secondary" htmlFor="project-name-input">
+                    Project name
+                  </label>
+                  <TextInput
+                    id="project-name-input"
+                    value={project.name}
+                    onChange={(event) => updateProjectInfo({ name: event.target.value })}
+                    aria-label="Project name"
+                    data-project-name-input
+                    className="mt-1 h-8 border-subtle bg-surface-raised px-2 py-1 text-sm font-semibold"
+                  />
+                  <div className="mt-1 text-xs text-secondary">Project actions</div>
                 </div>
                 <ProjectMenuButton
                   icon={<Compass className="h-4 w-4" />}
@@ -250,6 +297,7 @@ function ProjectMenuButton({
   return (
     <button
       type="button"
+      role="menuitem"
       onClick={onClick}
       className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-secondary transition hover:bg-surface-muted hover:text-primary"
     >

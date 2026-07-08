@@ -8,6 +8,7 @@ import { getProjectWarnings, getShotWarnings } from '../src/engine/warnings';
 import { getLatestGrayboxPano, getPanoAsset } from '../src/domain/selectors';
 import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
 import { addCameraMoveCubemapCropPaths, buildCameraMoveCubemapVisibility, cameraMoveCubemapVisibleStitchedPath } from '../src/engine/cameraMoveCubemap';
+import { useContinuityStore } from '../src/state/useContinuityStore';
 
 describe('project workflow logic', () => {
   it('creates a valid default local-first project', () => {
@@ -499,5 +500,31 @@ describe('project workflow logic', () => {
     });
     project.shots.push(shot);
     expect(getShotWarnings(project, shot).some((warning) => warning.id.endsWith('missing-landmarks'))).toBe(true);
+  });
+
+  it('resets session fly and busy flags when opening a project', () => {
+    const incoming = createDefaultProject();
+    incoming.name = 'Imported Audit Project';
+    useContinuityStore.setState({
+      shotCameraFlying: true,
+      isRenderingGraybox: true,
+      isExportingPackage: true,
+      buildMode: 'place',
+      activePrimitive: 'wall',
+      gridSnap: false,
+      panoView: { yawDegrees: 90, pitchDegrees: 12, fovDegrees: 40 },
+    });
+
+    useContinuityStore.getState().setProject(incoming);
+    const state = useContinuityStore.getState();
+
+    expect(state.project.name).toBe('Imported Audit Project');
+    expect(state.shotCameraFlying).toBe(false);
+    expect(state.isRenderingGraybox).toBe(false);
+    expect(state.isExportingPackage).toBe(false);
+    expect(state.buildMode).toBe('select');
+    expect(state.activePrimitive).toBe('box');
+    expect(state.gridSnap).toBe(true);
+    expect(state.selectedShotId).toBe(incoming.shots[0]?.id);
   });
 });

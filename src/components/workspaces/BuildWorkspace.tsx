@@ -35,6 +35,7 @@ import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
 import {
   CLICK_ONLY_BUILD_PRIMITIVES,
   HOTKEYED_BUILD_PRIMITIVES,
+  getPrimitiveShortcutLabel,
   resolveBuildShortcut,
 } from '../../engine/buildShortcuts';
 import { downloadPanoImage } from '../../engine/panoImage';
@@ -365,44 +366,60 @@ export function BuildWorkspace() {
           onGridSnapChange={setGridSnap}
         />
 
-        <div className="pointer-events-none absolute bottom-6 right-6 z-20 flex flex-col items-end gap-2">
-          <PrimaryCTA
-            icon={<Globe className="h-5 w-5" />}
-            label={isRenderingGraybox ? 'Rendering...' : grayboxPano ? 'Re-render 360 Reference' : 'Render 360 Reference'}
-            onClick={handleRenderGraybox}
-            disabled={isRenderingGraybox}
-            highlighted={primaryAction?.id === 'render-graybox'}
-            appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
-          />
+        {/* Isolated stacking context so the viewport canvas cannot swallow CTA clicks. */}
+        <div
+          data-build-graybox-cta
+          className="pointer-events-auto absolute bottom-6 right-6 z-30 flex flex-col items-end gap-2"
+        >
+          {grayboxAsset && grayboxPano ? (
+            <>
+              <PrimaryCTA
+                icon={<FileDown className="h-5 w-5" />}
+                label={`Download Graybox 360 (${grayboxPano.width}×${grayboxPano.height})`}
+                hint="Downloads the latest rendered equirectangular PNG."
+                onClick={() => void downloadPanoImage(
+                  grayboxAsset.uri,
+                  grayboxPano.width,
+                  grayboxPano.height,
+                  grayboxAsset.name || 'global_graybox.png',
+                  {
+                    letterboxEnabled: false,
+                    targetWidth: project.settings.defaultShotWidth,
+                    targetHeight: project.settings.defaultShotHeight,
+                  },
+                  downloadDataUrl,
+                )}
+                disabled={isRenderingGraybox}
+                appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
+              />
+              <button
+                type="button"
+                data-build-rerender-graybox
+                onClick={handleRenderGraybox}
+                disabled={isRenderingGraybox}
+                className="inline-flex items-center gap-2 rounded-[18px] border border-subtle bg-surface-overlay px-4 py-2 text-xs font-medium text-secondary shadow-card backdrop-blur-sm transition hover:border-[var(--accent)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Globe className="h-3.5 w-3.5" />
+                {isRenderingGraybox ? 'Rendering...' : 'Re-render after scene changes'}
+              </button>
+            </>
+          ) : (
+            <PrimaryCTA
+              icon={<Globe className="h-5 w-5" />}
+              label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
+              onClick={handleRenderGraybox}
+              disabled={isRenderingGraybox}
+              highlighted={primaryAction?.id === 'render-graybox'}
+              appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
+            />
+          )}
           {grayboxRenderError && (
             <p
               role="alert"
-              className="pointer-events-auto max-w-xs rounded-xl border border-red-400/60 bg-surface-overlay px-3 py-2 text-xs text-primary shadow-card backdrop-blur"
+              className="max-w-xs rounded-xl border border-red-400/60 bg-surface-overlay px-3 py-2 text-xs text-primary shadow-card backdrop-blur"
             >
               {grayboxRenderError}
             </p>
-          )}
-          {grayboxAsset && grayboxPano && (
-            <button
-              type="button"
-              onClick={() => void downloadPanoImage(
-                grayboxAsset.uri,
-                grayboxPano.width,
-                grayboxPano.height,
-                grayboxAsset.name || 'global_graybox.png',
-                {
-                  letterboxEnabled: false,
-                  targetWidth: project.settings.defaultShotWidth,
-                  targetHeight: project.settings.defaultShotHeight,
-                },
-                downloadDataUrl,
-              )}
-              disabled={isRenderingGraybox}
-              className="pointer-events-auto inline-flex items-center gap-2 rounded-[18px] border border-subtle bg-surface-overlay px-4 py-2 text-xs font-medium text-secondary shadow-card backdrop-blur-sm transition hover:border-[var(--accent)] hover:text-accent disabled:opacity-45"
-            >
-              <FileDown className="h-3.5 w-3.5" />
-              Download Graybox 360 ({grayboxPano.width}×{grayboxPano.height})
-            </button>
           )}
         </div>
 
@@ -514,21 +531,30 @@ function BuildObjectTray({
       )}
       <div className="pointer-events-auto rounded-[22px] border border-subtle bg-surface-overlay px-3 py-2.5 shadow-[var(--tray-glow)] backdrop-blur dark:border-[var(--accent)]/25">
         <div className="flex items-center gap-1">
-          {primaryTrayItems.map(({ type, label, icon: Icon }) => (
-            <div key={type}>
-              <TrayButton
-                active={buildMode === 'place' && activePrimitive === type}
-                label={label}
-                onClick={() => onPrimitiveChange(type)}
-              >
-                <Icon className="h-5 w-5" />
-              </TrayButton>
-            </div>
-          ))}
+          {primaryTrayItems.map(({ type, label, icon: Icon }) => {
+            const shortcut = getPrimitiveShortcutLabel(type);
+            return (
+              <div key={type}>
+                <TrayButton
+                  active={buildMode === 'place' && activePrimitive === type}
+                  label={label}
+                  shortcut={shortcut}
+                  onClick={() => onPrimitiveChange(type)}
+                >
+                  <Icon className="h-5 w-5" />
+                </TrayButton>
+              </div>
+            );
+          })}
           <TrayButton active={toolsOpen} label="More" onClick={() => setToolsOpen((open) => !open)}>
             <Wrench className="h-5 w-5" />
           </TrayButton>
         </div>
+        {toolsOpen && (
+          <p className="mt-2 border-t border-subtle pt-2 text-[10px] leading-relaxed text-muted" data-build-shortcuts-hint>
+            Keys: 1–9/0 stamp · V/Esc select · O origin · G snap · D dup · R rotate · [ ] scale · T/E/S gizmo · I precision · Del delete
+          </p>
+        )}
       </div>
     </div>
   );
@@ -538,12 +564,14 @@ function TrayButton({
   active,
   label,
   compact,
+  shortcut,
   children,
   onClick,
 }: {
   active?: boolean;
   label: string;
   compact?: boolean;
+  shortcut?: string;
   children: React.ReactNode;
   onClick: () => void;
 }) {
@@ -551,12 +579,18 @@ function TrayButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition ${
+      title={shortcut ? `${label} (${shortcut})` : label}
+      className={`relative flex shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition ${
         compact ? 'w-full' : 'w-16'
       } ${
         active ? 'bg-accent-soft text-accent' : 'text-secondary hover:bg-surface-muted hover:text-primary'
       }`}
     >
+      {shortcut && (
+        <span className="absolute right-1 top-0.5 rounded bg-surface-muted px-1 text-[9px] font-semibold tabular-nums text-muted">
+          {shortcut}
+        </span>
+      )}
       {children}
       <span className="text-[10px] font-medium">{label}</span>
     </button>

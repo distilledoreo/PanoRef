@@ -74,7 +74,7 @@ describe('object surface styles', () => {
     };
     const checkerMaterial = resolveObjectMaterial(checker);
     expect(CHECKERBOARD_TILE_METERS).toBe(1);
-    expect(checkerMaterial.customProgramCacheKey?.()).toContain('checkerboard-1m');
+    expect(checkerMaterial.customProgramCacheKey?.()).toContain('checkerboard-1m-face');
     expect(defaultSolidColorForObject(box)).toMatch(/^#[0-9a-f]{6}$/);
     expect(defaultSecondaryColor('#ffffff')).toMatch(/^#[0-9a-f]{6}$/);
 

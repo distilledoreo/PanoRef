@@ -19,12 +19,16 @@ describe('workflow guidance UI', () => {
     expect(app).toContain('title="Save project"');
     expect(app).toContain('data-project-import-input');
     expect(app).toContain('data-project-export-button');
+    expect(app).toContain('data-project-name-input');
     expect(app).toContain('downloadProject(project)');
     expect(app).toContain('accept=".json,application/json"');
     expect(app).toContain('Project opened:');
     expect(app).toContain('Could not open project:');
     expect(app).toContain('data-project-import-status');
+    expect(app).toContain('IMPORT_STATUS_DISMISS_MS');
     expect(app).toContain("fileRef.current.value = ''");
+    expect(app).toContain('setProjectMenuOpen(false)');
+    expect(app).toContain("event.key === 'Escape'");
     expect(app).toMatch(/label="Open Project"[\s\S]*openProjectPicker\(\)/);
     expect(app).toMatch(/label="Save Project"[\s\S]*downloadProject\(project\)/);
   });

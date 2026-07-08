@@ -6,6 +6,8 @@
 **Pre-revamp baseline:** `0ef6776` (parent of first revamp commit `7efa83b`)  
 **`main` at audit time:** `abd1dfc` (ui-revamp already merged via PR #3 / #4)
 
+> **Follow-up (2026-07-08):** P0–P2 recommendations from this audit were implemented on `misc-bugfixes`, including `setProject` session reset, brand-menu rename/outside-close, auto-dismiss import toast, on-chrome Reference alignment, warning popovers, build shortcut badges, shots download-vs-accept CTA wording, export settings scope label, face-aligned 1m checkerboard, and Build graybox CTA rework (Download primary + Re-render secondary).
+
 ---
 
 ## Executive summary

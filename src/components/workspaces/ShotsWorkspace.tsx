@@ -467,12 +467,22 @@ export function ShotsWorkspace() {
               )}
             </div>
             <PrimaryCTA
-              icon={<Film className="h-5 w-5" />}
-              label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}
-              hint="Preview this shot from the reference."
+              icon={<Download className="h-5 w-5" />}
+              label={
+                isExportingFrame || isRenderingFrame
+                  ? 'Preparing frame...'
+                  : 'Download Shot Frame'
+              }
+              hint={
+                shotCameraFlying
+                  ? 'Lock the camera first, then download a clay PNG.'
+                  : framingAccepted
+                    ? 'Downloads a clay PNG of the locked shot camera.'
+                    : 'Downloads a clay PNG — use Accept Framing when the view is right.'
+              }
               onClick={() => void exportCameraFrame()}
-              disabled={!selectedShot || isExportingFrame || isRenderingFrame}
-              highlighted={primaryAction?.id === 'accept-framing' || primaryAction?.id === 'lock-camera'}
+              disabled={!selectedShot || isExportingFrame || isRenderingFrame || shotCameraFlying}
+              highlighted={false}
               layout="inline"
             />
           </div>

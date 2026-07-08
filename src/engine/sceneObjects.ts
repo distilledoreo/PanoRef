@@ -84,8 +84,9 @@ function createSolidMaterial(hex: string): THREE.MeshStandardMaterial {
 }
 
 /**
- * 1m × 1m world-space checkerboard so scale reads consistently across objects of any size.
- * Uses object-local axes so tiles stay aligned to each primitive's faces.
+ * 1m × 1m world-space checkerboard with square tiles on each face.
+ * Uses face-dominant axes (from screen-space derivatives of world position) so tiles stay
+ * square meters on floors and walls, not 3D diagonal rhomboids.
  */
 function createCheckerboardMaterial(primaryHex: string, secondaryHex: string): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({
@@ -122,14 +123,30 @@ varying vec3 vCheckerWorldPos;`,
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-// True 1m world-space checkerboard so scale reads consistently after transform/scale.
-vec3 scaled = vCheckerWorldPos / max(checkerSize, 1e-4);
-float checker = mod(floor(scaled.x) + floor(scaled.y) + floor(scaled.z), 2.0);
-vec3 tileColor = mix(checkerColorA, checkerColorB, checker);
+// Face-aligned 1m squares: project world position onto the two dominant face axes.
+vec3 p = vCheckerWorldPos / max(checkerSize, 1e-4);
+vec3 faceNormal = normalize(cross(dFdx(vCheckerWorldPos), dFdy(vCheckerWorldPos)));
+vec3 an = abs(faceNormal);
+float u;
+float v;
+if (an.y >= an.x && an.y >= an.z) {
+  u = p.x;
+  v = p.z;
+} else if (an.x >= an.y && an.x >= an.z) {
+  u = p.z;
+  v = p.y;
+} else {
+  u = p.x;
+  v = p.y;
+}
+float checker = mod(floor(u) + floor(v), 2.0);
+// Avoid negative-mod glitches at tile boundaries.
+if (checker < 0.0) checker += 2.0;
+vec3 tileColor = mix(checkerColorA, checkerColorB, step(0.5, checker));
 diffuseColor.rgb *= tileColor;`,
       );
   };
-  material.customProgramCacheKey = () => `checkerboard-1m:${primaryHex}:${secondaryHex}`;
+  material.customProgramCacheKey = () => `checkerboard-1m-face:${primaryHex}:${secondaryHex}`;
   return material;
 }
 

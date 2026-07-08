@@ -154,13 +154,23 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   setProject: (project) => {
     const linkedProject = linkAllShotsToCanonicalPano(project);
     const canonical = linkedProject.panoRefs.find((pano) => pano.isCanonical) ?? linkedProject.panoRefs[0];
+    const firstShot = linkedProject.shots[0];
     set({
       project: linkedProject,
       activePanoId: canonical?.id,
       selectedObjectId: project.scene.objects[0]?.id,
-      selectedShotId: linkedProject.shots[0]?.id,
+      selectedShotId: firstShot?.id,
       selectedLandmarkId: linkedProject.landmarks[0]?.id,
       buildMode: 'select',
+      activePrimitive: 'box',
+      gridSnap: true,
+      // Full session reset so import never inherits fly/busy state from the previous project.
+      shotCameraFlying: false,
+      isRenderingGraybox: false,
+      isExportingPackage: false,
+      panoView: firstShot
+        ? panoViewFromCamera(firstShot.camera)
+        : { yawDegrees: 0, pitchDegrees: 0, fovDegrees: 65 },
       dismissedWorkflowAdvanceKeys: [],
       seenObjectiveWorkspaces: [],
       objectiveModalRequest: 0,
@@ -328,6 +338,10 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     }
     set({ isRenderingGraybox: true });
     try {
+      // Yield so the CTA can paint "Rendering..." before the heavy WebGL work blocks the main thread.
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
       const state = get();
       const theme = useThemeStore.getState().theme;
       const render = await renderGrayboxEquirectangularPano(state.project, undefined, undefined, theme);

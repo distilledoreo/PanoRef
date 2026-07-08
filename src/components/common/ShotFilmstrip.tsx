@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { LocationProject, Shot } from '../../domain/types';
 import { getShotWarnings } from '../../engine/warnings';
 import { ShotThumbnail } from './ShotThumbnail';
-import { StatusIcon, WarningPopover } from './StatusBadge';
+import { WarningPopover } from './StatusBadge';
 
 export function ShotFilmstrip({
   project,
@@ -68,11 +68,6 @@ export function ShotFilmstrip({
           const selected = shot.id === selectedShotId;
           const warnings = getShotWarnings(project, shot);
           const customThumbnail = renderThumbnail?.(shot);
-          const warningLevel = warnings.some((w) => w.severity === 'danger')
-            ? 'danger'
-            : warnings.some((w) => w.severity === 'warning')
-              ? 'warning'
-              : 'ready';
 
           const card = (
             <div className="relative">
@@ -104,11 +99,6 @@ export function ShotFilmstrip({
                   </div>
                 )}
               </button>
-              {isOverlay && warnings.length > 0 && (
-                <span className="pointer-events-none absolute -right-1 -top-1 z-10">
-                  <StatusIcon level={warningLevel} className="h-4 w-4" />
-                </span>
-              )}
               {isOverlay && (
                 <span
                   aria-hidden
@@ -122,10 +112,12 @@ export function ShotFilmstrip({
 
           return (
             <div key={shot.id} className="shrink-0">
-              {isOverlay ? card : (
+              {warnings.length > 0 ? (
                 <WarningPopover warnings={warnings}>
                   {card}
                 </WarningPopover>
+              ) : (
+                card
               )}
             </div>
           );

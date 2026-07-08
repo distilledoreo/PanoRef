@@ -271,12 +271,71 @@ export function ReferenceWorkspace() {
             </div>
 
             {canCalibrate && activePano && (
-              <div className="pointer-events-none absolute right-5 top-5 z-20">
-                <button type="button" onClick={() => setPrecisionOpen(true)} className="pointer-events-auto">
-                  <ContextualPanel className="text-sm text-secondary">
-                    Alignment controls
-                  </ContextualPanel>
-                </button>
+              <div
+                data-reference-alignment-chrome
+                className="pointer-events-none absolute right-5 top-5 z-20 w-[min(18rem,calc(100%-2.5rem))]"
+              >
+                <ContextualPanel className="pointer-events-auto space-y-3 shadow-soft">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Alignment</div>
+                      <p className="mt-0.5 text-xs text-secondary">Fade and yaw to match the graybox.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPrecisionOpen(true)}
+                      className="shrink-0 text-[11px] font-medium text-accent hover:underline"
+                    >
+                      More
+                    </button>
+                  </div>
+                  <label className="block text-[11px] font-medium text-secondary">
+                    Graybox fade
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={Math.round(compareOpacity * 100)}
+                      onChange={(event) => setCompareOpacity(Number(event.target.value) / 100)}
+                      className="mt-1 w-full accent-[var(--accent)]"
+                      aria-label="Graybox compare opacity"
+                    />
+                  </label>
+                  <label className="block text-[11px] font-medium text-secondary">
+                    Yaw ({Math.round(activePano.rotation[1])}°)
+                    <input
+                      type="range"
+                      min="-180"
+                      max="180"
+                      step="1"
+                      value={activePano.rotation[1]}
+                      onChange={(event) => setActiveYaw(Number(event.target.value))}
+                      className="mt-1 w-full accent-[var(--accent)]"
+                      aria-label="Styled pano yaw"
+                      data-reference-yaw-slider
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[-5, 5].map((delta) => (
+                      <button
+                        key={delta}
+                        type="button"
+                        onClick={() => setActiveYaw(activePano.rotation[1] + delta)}
+                        className="rounded-lg border border-subtle px-2 py-1 text-[11px] font-medium text-secondary hover:border-accent hover:text-accent"
+                      >
+                        {delta > 0 ? '+' : ''}{delta}°
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setActiveYaw(0)}
+                      className="rounded-lg border border-subtle px-2 py-1 text-[11px] font-medium text-secondary hover:border-accent hover:text-accent"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </ContextualPanel>
               </div>
             )}
 
