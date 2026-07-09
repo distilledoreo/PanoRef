@@ -10,6 +10,7 @@ import {
   Globe,
   Moon,
   Package,
+  Save,
   Sun,
   Upload,
 } from 'lucide-react';
@@ -294,7 +295,10 @@ export default function App() {
             </>
           )}
 
-          <div className="pointer-events-auto flex items-center gap-1.5">
+          <div
+            className="pointer-events-auto flex items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm"
+            data-header-actions
+          >
             <input
               ref={fileRef}
               type="file"
@@ -306,21 +310,26 @@ export default function App() {
             />
             {!isPanoViewer && (
               <>
-                <IconHeaderButton onClick={openProjectPicker} title="Open project">
+                <HeaderToolbarButton onClick={openProjectPicker} title="Open project">
                   <FolderOpen className="h-4 w-4" />
-                </IconHeaderButton>
-                <IconHeaderButton
+                </HeaderToolbarButton>
+                <span className="h-4 w-px shrink-0 bg-border-subtle/80" aria-hidden />
+                <HeaderToolbarButton
                   onClick={() => downloadProject(project)}
                   title="Save project"
                   data-project-export-button
                 >
-                  <FileJson className="h-4 w-4" />
-                </IconHeaderButton>
+                  <Save className="h-4 w-4" />
+                </HeaderToolbarButton>
+                <span className="h-4 w-px shrink-0 bg-border-subtle/80" aria-hidden />
               </>
             )}
-            <IconHeaderButton onClick={toggleTheme} title={theme === 'light' ? 'Dark mode' : 'Light mode'}>
+            <HeaderToolbarButton
+              onClick={toggleTheme}
+              title={theme === 'light' ? 'Dark mode' : 'Light mode'}
+            >
               {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-            </IconHeaderButton>
+            </HeaderToolbarButton>
           </div>
         </div>
       </header>
@@ -370,7 +379,7 @@ function ProjectMenuButton({
   );
 }
 
-function IconHeaderButton({
+function HeaderToolbarButton({
   children,
   title,
   onClick,
@@ -387,7 +396,7 @@ function IconHeaderButton({
       {...rest}
       onClick={onClick}
       title={title}
-      className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border border-subtle/80 bg-surface-overlay/80 text-secondary shadow-card backdrop-blur-sm transition hover:border-strong hover:text-primary ${className ?? ''}`}
+      className={`inline-flex h-9 w-9 items-center justify-center text-secondary transition hover:bg-surface-muted/80 hover:text-primary ${className ?? ''}`}
     >
       {children}
     </button>
