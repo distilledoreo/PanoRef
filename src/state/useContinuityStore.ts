@@ -956,7 +956,8 @@ function applyBuildSceneChange(
   const objects = change.objects ?? state.project.scene.objects;
   const panoOrigin = change.panoOrigin ?? state.project.scene.panoOrigin;
   const panoRotation = change.panoRotation ?? state.project.scene.panoRotation;
-  const selectedObjectId = change.selectedObjectId !== undefined
+  // Use hasOwnProperty so removeObject can intentionally clear selection with `undefined`.
+  const selectedObjectId = Object.prototype.hasOwnProperty.call(change, 'selectedObjectId')
     ? change.selectedObjectId
     : state.selectedObjectId;
 

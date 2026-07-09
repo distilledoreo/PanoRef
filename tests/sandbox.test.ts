@@ -248,6 +248,28 @@ describe('sandbox build interactions', () => {
     expect(useContinuityStore.getState().buildHistoryPast).toHaveLength(0);
   });
 
+  it('clears selection when removing the selected object', () => {
+    const project = createDefaultProject();
+    const object = project.scene.objects[1];
+
+    useContinuityStore.setState({
+      project,
+      selectedObjectId: object.id,
+      buildHistoryPast: [],
+      buildHistoryFuture: [],
+      buildHistoryBatchDepth: 0,
+      buildHistoryBatchCaptured: false,
+      buildHistoryCoalesceActive: false,
+    });
+
+    useContinuityStore.getState().removeObject(object.id);
+
+    expect(useContinuityStore.getState().selectedObjectId).toBeUndefined();
+    expect(
+      useContinuityStore.getState().project.scene.objects.some((item) => item.id === object.id),
+    ).toBe(false);
+  });
+
   it('clears build history stacks and runtime flags when opening a project', () => {
     const project = createDefaultProject();
     useContinuityStore.setState({
