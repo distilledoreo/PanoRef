@@ -35,7 +35,9 @@ export type BuildShortcutCommand =
   | { kind: 'gizmo-translate' }
   | { kind: 'gizmo-rotate' }
   | { kind: 'gizmo-scale' }
-  | { kind: 'delete' };
+  | { kind: 'delete' }
+  | { kind: 'undo' }
+  | { kind: 'redo' };
 
 export interface BuildShortcutInput {
   key: string;
@@ -59,7 +61,15 @@ export function getPrimitiveShortcutLabel(type: SceneObjectType): string | undef
 }
 
 export function resolveBuildShortcut(input: BuildShortcutInput): BuildShortcutCommand | undefined {
-  if (input.ctrlKey || input.metaKey || input.altKey || isEditableShortcutTarget(input.target)) {
+  if (isEditableShortcutTarget(input.target)) {
+    return undefined;
+  }
+
+  // History chords (Ctrl/Cmd) must be handled before the generic modifier block.
+  const history = resolveBuildHistoryShortcut(input);
+  if (history) return history;
+
+  if (input.ctrlKey || input.metaKey || input.altKey) {
     return undefined;
   }
 
@@ -84,6 +94,19 @@ export function resolveBuildShortcut(input: BuildShortcutInput): BuildShortcutCo
   if (!input.shiftKey && key === 's') return { kind: 'gizmo-scale' };
   if (!input.shiftKey && (key === 'delete' || key === 'backspace')) return { kind: 'delete' };
 
+  return undefined;
+}
+
+/** Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redo. */
+export function resolveBuildHistoryShortcut(input: BuildShortcutInput): BuildShortcutCommand | undefined {
+  if (isEditableShortcutTarget(input.target)) return undefined;
+  if (input.altKey) return undefined;
+  if (!input.ctrlKey && !input.metaKey) return undefined;
+
+  const key = input.key.toLowerCase();
+  if (key === 'z' && input.shiftKey) return { kind: 'redo' };
+  if (key === 'z') return { kind: 'undo' };
+  if (key === 'y' && !input.shiftKey) return { kind: 'redo' };
   return undefined;
 }
 

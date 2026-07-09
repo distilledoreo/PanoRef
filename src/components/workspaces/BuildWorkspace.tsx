@@ -14,6 +14,7 @@ import {
   Lock,
   Mountain,
   Move3D,
+  Redo2,
   RotateCcw,
   RotateCw,
   Ruler,
@@ -22,6 +23,7 @@ import {
   Sun,
   Trash2,
   TreeDeciduous,
+  Undo2,
   Unlock,
   User,
   Wrench,
@@ -107,7 +109,15 @@ export function BuildWorkspace() {
     setPanoOrigin,
     renderGrayboxPano,
     isRenderingGraybox,
+    beginBuildHistoryBatch,
+    endBuildHistoryBatch,
+    undoBuild,
+    redoBuild,
+    buildHistoryPast,
+    buildHistoryFuture,
   } = useContinuityStore();
+  const canUndo = buildHistoryPast.length > 0;
+  const canRedo = buildHistoryFuture.length > 0;
 
   const handleRenderGraybox = useCallback(() => {
     if (isRenderingGraybox) return;
@@ -153,6 +163,14 @@ export function BuildWorkspace() {
       if (!command) return;
       event.preventDefault();
 
+      if (command.kind === 'undo') {
+        undoBuild();
+        return;
+      }
+      if (command.kind === 'redo') {
+        redoBuild();
+        return;
+      }
       if (command.kind === 'primitive') {
         blurActiveElement();
         setActivePrimitive(command.type);
@@ -197,6 +215,7 @@ export function BuildWorkspace() {
     buildMode,
     duplicateObject,
     gridSnap,
+    redoBuild,
     removeObject,
     rotateSelected,
     scaleSelected,
@@ -206,6 +225,7 @@ export function BuildWorkspace() {
     setGridSnap,
     toggleObjectLocked,
     toggleObjectVisibility,
+    undoBuild,
   ]);
 
   useEffect(() => {
@@ -239,9 +259,35 @@ export function BuildWorkspace() {
           }}
           onScaleObject={(id, dimensions) => updateObject(id, { dimensions })}
           onMovePanoOrigin={setPanoOrigin}
+          onEditBatchStart={beginBuildHistoryBatch}
+          onEditBatchEnd={endBuildHistoryBatch}
         />
 
-        <div className="pointer-events-none absolute right-5 top-5 z-10">
+        <div className="pointer-events-none absolute right-5 top-5 z-10 flex flex-col items-end gap-2">
+          <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-subtle bg-surface-overlay p-1 shadow-card backdrop-blur">
+            <button
+              type="button"
+              title="Undo Build edit (Ctrl+Z)"
+              aria-label="Undo last Build change"
+              data-build-undo
+              disabled={!canUndo}
+              onClick={() => undoBuild()}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition hover:bg-surface-muted hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              <Undo2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              title="Redo Build edit (Ctrl+Shift+Z)"
+              aria-label="Redo last Build change"
+              data-build-redo
+              disabled={!canRedo}
+              onClick={() => redoBuild()}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition hover:bg-surface-muted hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              <Redo2 className="h-4 w-4" />
+            </button>
+          </div>
           <button
             type="button"
             title={showSceneGuides ? 'Hide scene guides' : 'Show camera guides'}
@@ -290,7 +336,7 @@ export function BuildWorkspace() {
               <div className="flex items-center gap-2">
                 <TextInput
                   value={selectedObject.name}
-                  onChange={(event) => updateObject(selectedObject.id, { name: event.target.value })}
+                  onChange={(event) => updateObject(selectedObject.id, { name: event.target.value }, { history: 'coalesce' })}
                   aria-label="Selected object name"
                   className="h-8 min-w-36 border-subtle bg-surface-muted"
                 />
@@ -450,7 +496,9 @@ export function BuildWorkspace() {
           <div className="space-y-4">
             <PrecisionControls
               object={selectedObject}
-              onChange={(updates) => updateObject(selectedObject.id, updates)}
+              onChange={(updates, history = 'coalesce') => (
+                updateObject(selectedObject.id, updates, { history })
+              )}
             />
             {grayboxAsset && grayboxPano && (
               <button
@@ -552,7 +600,7 @@ function BuildObjectTray({
         </div>
         {toolsOpen && (
           <p className="mt-2 border-t border-subtle pt-2 text-[10px] leading-relaxed text-muted" data-build-shortcuts-hint>
-            Keys: 1–9/0 stamp · V/Esc select · O origin · G snap · D dup · R rotate · [ ] scale · T/E/S gizmo · I precision · Del delete
+            Keys: 1–9/0 stamp · V/Esc select · O origin · G snap · D dup · R rotate · [ ] scale · T/E/S gizmo · I precision · Del delete · Ctrl+Z build undo · Ctrl+Shift+Z build redo
           </p>
         )}
       </div>
@@ -657,7 +705,7 @@ function PrecisionControls({
   onChange,
 }: {
   object: SceneObject;
-  onChange: (updates: Partial<SceneObject>) => void;
+  onChange: (updates: Partial<SceneObject>, history?: 'step' | 'coalesce') => void;
 }) {
   const surfaceStyle = resolveSurfaceStyle(object);
   const primaryColor = object.color ?? defaultSolidColorForObject(object);
@@ -669,7 +717,7 @@ function PrecisionControls({
         surfaceStyle: 'default',
         color: undefined,
         secondaryColor: undefined,
-      });
+      }, 'step');
       return;
     }
     onChange({
@@ -678,16 +726,16 @@ function PrecisionControls({
       secondaryColor: next === 'checkerboard'
         ? (object.secondaryColor ?? defaultSecondaryColor(object.color ?? defaultSolidColorForObject(object)))
         : object.secondaryColor,
-    });
+    }, 'step');
   };
 
   return (
     <div className="space-y-3">
       <Field label="Name">
-        <TextInput value={object.name} onChange={(event) => onChange({ name: event.target.value })} />
+        <TextInput value={object.name} onChange={(event) => onChange({ name: event.target.value }, 'coalesce')} />
       </Field>
       <Field label="Type">
-        <Select value={object.type} onChange={(event) => onChange({ type: event.target.value as SceneObjectType })}>
+        <Select value={object.type} onChange={(event) => onChange({ type: event.target.value as SceneObjectType }, 'step')}>
           {primitiveTypes.map((type) => <option key={type} value={type}>{objectDisplayName(type)}</option>)}
         </Select>
       </Field>
@@ -708,14 +756,14 @@ function PrecisionControls({
             <input
               type="color"
               value={primaryColor}
-              onChange={(event) => onChange({ color: event.target.value })}
+              onChange={(event) => onChange({ color: event.target.value }, 'coalesce')}
               className="h-9 w-12 cursor-pointer rounded-lg border border-subtle bg-surface-raised p-1"
               aria-label="Object color"
               data-object-color
             />
             <TextInput
               value={primaryColor}
-              onChange={(event) => onChange({ color: event.target.value })}
+              onChange={(event) => onChange({ color: event.target.value }, 'coalesce')}
               className="font-mono text-xs"
             />
           </div>
@@ -727,14 +775,14 @@ function PrecisionControls({
             <input
               type="color"
               value={secondaryColor}
-              onChange={(event) => onChange({ secondaryColor: event.target.value })}
+              onChange={(event) => onChange({ secondaryColor: event.target.value }, 'coalesce')}
               className="h-9 w-12 cursor-pointer rounded-lg border border-subtle bg-surface-raised p-1"
               aria-label="Checkerboard secondary color"
               data-object-secondary-color
             />
             <TextInput
               value={secondaryColor}
-              onChange={(event) => onChange({ secondaryColor: event.target.value })}
+              onChange={(event) => onChange({ secondaryColor: event.target.value }, 'coalesce')}
               className="font-mono text-xs"
             />
           </div>
@@ -743,18 +791,18 @@ function PrecisionControls({
       <Field label="Position">
         <Vec3Input
           value={object.transform.position}
-          onChange={(position) => onChange({ transform: { ...object.transform, position } })}
+          onChange={(position) => onChange({ transform: { ...object.transform, position } }, 'coalesce')}
         />
       </Field>
       <Field label="Rotation">
         <Vec3Input
           value={object.transform.rotation}
           step={1}
-          onChange={(rotation) => onChange({ transform: { ...object.transform, rotation } })}
+          onChange={(rotation) => onChange({ transform: { ...object.transform, rotation } }, 'coalesce')}
         />
       </Field>
       <Field label="Dimensions">
-        <Vec3Input value={object.dimensions} onChange={(dimensions) => onChange({ dimensions })} />
+        <Vec3Input value={object.dimensions} onChange={(dimensions) => onChange({ dimensions }, 'coalesce')} />
       </Field>
     </div>
   );

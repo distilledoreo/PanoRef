@@ -3,6 +3,7 @@ import {
   BUILD_PRIMITIVE_SHORTCUTS,
   getPrimitiveShortcutLabel,
   isEditableShortcutTarget,
+  resolveBuildHistoryShortcut,
   resolveBuildShortcut,
 } from '../src/engine/buildShortcuts';
 
@@ -57,6 +58,20 @@ describe('Build keyboard shortcuts', () => {
     expect(resolveBuildShortcut({ key: 'v', target: { isContentEditable: true } as unknown as EventTarget })).toBeUndefined();
     expect(resolveBuildShortcut({ key: 'd', ctrlKey: true })).toBeUndefined();
     expect(resolveBuildShortcut({ key: 'd', metaKey: true })).toBeUndefined();
+  });
+
+  it('resolves undo/redo history chords', () => {
+    expect(resolveBuildShortcut({ key: 'z', ctrlKey: true })).toEqual({ kind: 'undo' });
+    expect(resolveBuildShortcut({ key: 'z', metaKey: true })).toEqual({ kind: 'undo' });
+    expect(resolveBuildShortcut({ key: 'z', ctrlKey: true, shiftKey: true })).toEqual({ kind: 'redo' });
+    expect(resolveBuildShortcut({ key: 'y', ctrlKey: true })).toEqual({ kind: 'redo' });
+    expect(resolveBuildHistoryShortcut({ key: 'z', ctrlKey: true })).toEqual({ kind: 'undo' });
+    expect(resolveBuildHistoryShortcut({ key: 'z' })).toBeUndefined();
+    expect(resolveBuildShortcut({
+      key: 'z',
+      ctrlKey: true,
+      target: { tagName: 'INPUT' } as unknown as EventTarget,
+    })).toBeUndefined();
   });
 
   it('detects nested editable shortcut targets structurally', () => {

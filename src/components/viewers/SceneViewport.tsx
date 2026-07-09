@@ -80,6 +80,8 @@ export function SceneViewport({
   onRotateObject,
   onScaleObject,
   onMovePanoOrigin,
+  onEditBatchStart,
+  onEditBatchEnd,
   minHeightClassName = 'min-h-[420px]',
 }: {
   project: LocationProject;
@@ -107,6 +109,9 @@ export function SceneViewport({
   onRotateObject?: (id: string, rotation: Vec3) => void;
   onScaleObject?: (id: string, dimensions: Vec3) => void;
   onMovePanoOrigin?: (origin: Vec3) => void;
+  /** Wrap continuous gizmo / origin drags so undo records one step per gesture. */
+  onEditBatchStart?: () => void;
+  onEditBatchEnd?: () => void;
   minHeightClassName?: string;
 }) {
   const theme = useThemeStore((state) => state.theme);
@@ -130,7 +135,10 @@ export function SceneViewport({
     onRotateObject,
     onScaleObject,
     onMovePanoOrigin,
+    onEditBatchStart,
+    onEditBatchEnd,
   });
+  const editBatchActiveRef = useRef(false);
   const previewPointRef = useRef<Vec3 | undefined>();
   const previewMeshRef = useRef<THREE.Object3D | null>(null);
   const placementTypeRef = useRef(placementType);
@@ -170,6 +178,8 @@ export function SceneViewport({
     onRotateObject,
     onScaleObject,
     onMovePanoOrigin,
+    onEditBatchStart,
+    onEditBatchEnd,
   };
 
   const clearTransformGizmo = useCallback(() => {
@@ -390,6 +400,18 @@ export function SceneViewport({
       canvas.setPointerCapture(event.pointerId);
     };
 
+    const startEditBatch = () => {
+      if (editBatchActiveRef.current) return;
+      editBatchActiveRef.current = true;
+      callbacksRef.current.onEditBatchStart?.();
+    };
+
+    const endEditBatch = () => {
+      if (!editBatchActiveRef.current) return;
+      editBatchActiveRef.current = false;
+      callbacksRef.current.onEditBatchEnd?.();
+    };
+
     const beginGizmoDrag = (
       gizmoHit: GizmoHit,
       object: SceneObject,
@@ -418,6 +440,7 @@ export function SceneViewport({
           camera,
         );
         if (!axisStartPoint) return false;
+        startEditBatch();
         dragRef.current = {
           kind: 'gizmo_translate',
           x: event.clientX,
@@ -437,6 +460,7 @@ export function SceneViewport({
         const axisDirection = axisWorldVector(gizmoHit.axis, gizmo);
         const startAngle = angleInAxisPlane(pointer.raycaster, axisOrigin, axisDirection);
         if (startAngle === undefined) return false;
+        startEditBatch();
         dragRef.current = {
           kind: 'gizmo_rotate',
           x: event.clientX,
@@ -453,6 +477,7 @@ export function SceneViewport({
 
       if (gizmoHit.kind === 'scale' && onScaleObject) {
         if (gizmoHit.axis === 'uniform') {
+          startEditBatch();
           dragRef.current = {
             kind: 'gizmo_scale',
             x: event.clientX,
@@ -466,6 +491,7 @@ export function SceneViewport({
           canvas.setPointerCapture(event.pointerId);
           return true;
         }
+        startEditBatch();
         dragRef.current = {
           kind: 'gizmo_scale',
           x: event.clientX,
@@ -541,6 +567,7 @@ export function SceneViewport({
       }
 
       if (originPlacement && floorPoint && onMovePanoOrigin) {
+        startEditBatch();
         onMovePanoOrigin(getOriginPoint(floorPoint, activeProject.scene.panoOrigin[1], activeSnapToGrid));
         dragRef.current = { kind: 'pano_origin', x: event.clientX, y: event.clientY, moved: false };
         canvas.setPointerCapture(event.pointerId);
@@ -548,6 +575,7 @@ export function SceneViewport({
       }
 
       if (hit?.isPanoOrigin && floorPoint && onMovePanoOrigin) {
+        startEditBatch();
         dragRef.current = { kind: 'pano_origin', x: event.clientX, y: event.clientY, moved: false };
         canvas.setPointerCapture(event.pointerId);
         return;
@@ -770,7 +798,12 @@ export function SceneViewport({
       } else if (drag.kind === 'orbit' && !drag.moved) {
         onSelectObject?.(drag.pendingSelectId);
       }
+      const wasEditDrag = drag.kind === 'gizmo_translate'
+        || drag.kind === 'gizmo_rotate'
+        || drag.kind === 'gizmo_scale'
+        || drag.kind === 'pano_origin';
       dragRef.current = { kind: 'idle', x: 0, y: 0, moved: false };
+      if (wasEditDrag) endEditBatch();
       if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     };
 
@@ -808,9 +841,15 @@ export function SceneViewport({
 
     const onContextMenu = (event: MouseEvent) => event.preventDefault();
 
+    const onPointerCancel = () => {
+      dragRef.current = { kind: 'idle', x: 0, y: 0, moved: false };
+      endEditBatch();
+    };
+
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerCancel);
     canvas.addEventListener('pointerleave', onPointerLeave);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('contextmenu', onContextMenu);
@@ -818,10 +857,12 @@ export function SceneViewport({
     window.addEventListener('keyup', onKeyUp);
 
     return () => {
+      endEditBatch();
       cancelAnimationFrame(frameRef.current);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerCancel);
       canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('contextmenu', onContextMenu);
