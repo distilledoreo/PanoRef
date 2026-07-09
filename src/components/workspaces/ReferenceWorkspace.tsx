@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, FileDown, Hand, Sparkles, Star } from 'lucide-react';
+import { Check, FileDown, Hand, Sparkles, Star, Trash2 } from 'lucide-react';
 import { STYLED_PANO } from '../../domain/copy';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
@@ -37,6 +37,7 @@ export function ReferenceWorkspace() {
     updatePanoReference,
     updateProjectSettings,
     importCanonicalPano,
+    removePanoReference,
     approveGrayboxForReference,
     acceptReferenceAlignment,
     requestAlignmentIntro,
@@ -357,21 +358,58 @@ export function ReferenceWorkspace() {
               highlightNextStep={primaryAction?.id === 'confirm-alignment'}
             />
           )}
-          <div className="space-y-2">
+          <div className="space-y-2" data-pano-reference-list>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-secondary">Pano References</h3>
-            {project.panoRefs.map((pano) => (
-              <button
-                key={pano.id}
-                type="button"
-                onClick={() => setActivePano(pano.id)}
-                className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                  pano.id === activePano?.id ? 'border-[var(--accent)] bg-accent-soft' : 'border-subtle'
-                }`}
-              >
-                <div className="font-medium text-primary">{pano.name}</div>
-                <div className="text-xs text-secondary">{pano.type}</div>
-              </button>
-            ))}
+            {project.panoRefs.length === 0 && (
+              <p className="text-sm text-secondary">No pano references yet.</p>
+            )}
+            {project.panoRefs.map((pano) => {
+              const isActive = pano.id === activePano?.id;
+              const isUploaded = pano.type === 'ai_global_reference' || pano.type === 'external_reference';
+              const typeLabel = pano.type === 'graybox_render'
+                ? 'Graybox render'
+                : pano.type === 'ai_global_reference'
+                  ? 'Uploaded styled pano'
+                  : pano.type === 'external_reference'
+                    ? 'External reference'
+                    : pano.type;
+              return (
+                <div
+                  key={pano.id}
+                  className={`flex items-stretch gap-1 rounded-lg border transition ${
+                    isActive ? 'border-[var(--accent)] bg-accent-soft' : 'border-subtle'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setActivePano(pano.id)}
+                    className="min-w-0 flex-1 px-3 py-2 text-left text-sm"
+                  >
+                    <div className="truncate font-medium text-primary">
+                      {pano.name}
+                      {pano.isCanonical ? ' · canonical' : ''}
+                    </div>
+                    <div className="truncate text-xs text-secondary">{typeLabel}</div>
+                  </button>
+                  <button
+                    type="button"
+                    title={isUploaded ? 'Remove uploaded pano' : 'Remove pano reference'}
+                    aria-label={`Remove ${pano.name}`}
+                    data-remove-pano={pano.id}
+                    onClick={() => {
+                      const label = isUploaded ? 'uploaded pano' : 'pano reference';
+                      if (!window.confirm(`Remove this ${label}? Shots will re-link to the remaining canonical pano if one exists.`)) {
+                        return;
+                      }
+                      removePanoReference(pano.id);
+                    }}
+                    className="inline-flex shrink-0 items-center justify-center px-2.5 text-secondary transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
           {activePano && (
             <>
@@ -382,6 +420,19 @@ export function ReferenceWorkspace() {
                 <IconButton onClick={() => void downloadActivePano()} className="w-full">
                   <FileDown className="h-4 w-4" />
                   Download Active Pano
+                </IconButton>
+              )}
+              {(activePano.type === 'ai_global_reference' || activePano.type === 'external_reference') && (
+                <IconButton
+                  onClick={() => {
+                    if (!window.confirm('Remove this uploaded pano reference?')) return;
+                    removePanoReference(activePano.id);
+                  }}
+                  className="w-full border-red-200 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400"
+                  data-remove-active-pano
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Remove Uploaded Pano
                 </IconButton>
               )}
             </>

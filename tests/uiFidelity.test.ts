@@ -124,6 +124,16 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).toContain('Graybox fade');
   });
 
+  it('exposes remove controls for pano references in reference settings', () => {
+    const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
+    const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
+    expect(reference).toContain('data-pano-reference-list');
+    expect(reference).toContain('data-remove-pano');
+    expect(reference).toContain('Remove Uploaded Pano');
+    expect(reference).toContain('removePanoReference');
+    expect(store).toContain('removePanoReference:');
+  });
+
   it('clarifies shots frame download vs accept framing', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     expect(shots).toContain('Download Shot Frame');

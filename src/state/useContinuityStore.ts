@@ -73,6 +73,7 @@ interface ContinuityStore {
   setPanoOrigin: (origin: Vec3) => void;
   renderGrayboxPano: () => Promise<PanoReference>;
   importCanonicalPano: (params: { name: string; dataUrl: string; width?: number; height?: number; importNote?: string }) => void;
+  removePanoReference: (id: string) => void;
   setActivePano: (id?: string) => void;
   updatePanoReference: (id: string, updates: Partial<PanoReference>) => void;
   setPanoView: (updates: Partial<PanoViewState>) => void;
@@ -436,6 +437,71 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     };
   }),
   setActivePano: (id) => set({ activePanoId: id }),
+  removePanoReference: (id) => set((state) => {
+    const target = state.project.panoRefs.find((pano) => pano.id === id);
+    if (!target) return state;
+
+    let remaining = state.project.panoRefs
+      .filter((pano) => pano.id !== id)
+      .map((pano) => (
+        pano.sourcePanoId === id ? { ...pano, sourcePanoId: undefined } : pano
+      ));
+
+    // Keep exactly one canonical when anything remains.
+    if (remaining.length > 0 && !remaining.some((pano) => pano.isCanonical)) {
+      const preferred = [...remaining]
+        .reverse()
+        .find((pano) => pano.type !== 'graybox_render')
+        ?? remaining[remaining.length - 1];
+      remaining = remaining.map((pano) => ({ ...pano, isCanonical: pano.id === preferred.id }));
+    } else if (remaining.length === 0) {
+      remaining = [];
+    }
+
+    const assetStillReferenced = remaining.some((pano) => pano.imageAssetId === target.imageAssetId);
+    const nextAssets = { ...state.project.assets.assets };
+    if (!assetStillReferenced) {
+      delete nextAssets[target.imageAssetId];
+    }
+
+    const workflow = { ...state.project.workflow };
+    if (workflow.referenceAlignmentAcceptedForPanoId === id) {
+      workflow.referenceAlignmentAcceptedForPanoId = undefined;
+    }
+
+    let nextProject = {
+      ...state.project,
+      panoRefs: remaining,
+      assets: { assets: nextAssets },
+      workflow,
+      shots: state.project.shots.map((shot) => {
+        const linkedToRemoved = shot.linkedPanoId === id || shot.panoCrop?.panoId === id;
+        if (!linkedToRemoved) return shot;
+        return {
+          ...shot,
+          linkedPanoId: undefined,
+          panoCrop: undefined,
+          updatedAt: new Date().toISOString(),
+        };
+      }),
+    };
+
+    nextProject = linkAllShotsToCanonicalPano(nextProject);
+
+    const nextActiveId = state.activePanoId === id
+      ? (remaining.find((pano) => pano.isCanonical)?.id ?? remaining[0]?.id)
+      : state.activePanoId && remaining.some((pano) => pano.id === state.activePanoId)
+        ? state.activePanoId
+        : remaining.find((pano) => pano.isCanonical)?.id ?? remaining[0]?.id;
+
+    return {
+      project: touchProject(nextProject),
+      activePanoId: nextActiveId,
+      seenAlignmentIntroForPanoId: state.seenAlignmentIntroForPanoId === id
+        ? undefined
+        : state.seenAlignmentIntroForPanoId,
+    };
+  }),
   updatePanoReference: (id, updates) => set((state) => ({
     project: touchProject({
       ...state.project,
