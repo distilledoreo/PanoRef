@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, FileDown, Hand, Sparkles, Star } from 'lucide-react';
+import { Check, FileDown, Hand, Sparkles, Star, Trash2 } from 'lucide-react';
 import { STYLED_PANO } from '../../domain/copy';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
@@ -37,6 +37,7 @@ export function ReferenceWorkspace() {
     updatePanoReference,
     updateProjectSettings,
     importCanonicalPano,
+    removePanoReference,
     approveGrayboxForReference,
     acceptReferenceAlignment,
     requestAlignmentIntro,
@@ -271,12 +272,71 @@ export function ReferenceWorkspace() {
             </div>
 
             {canCalibrate && activePano && (
-              <div className="pointer-events-none absolute right-5 top-5 z-20">
-                <button type="button" onClick={() => setPrecisionOpen(true)} className="pointer-events-auto">
-                  <ContextualPanel className="text-sm text-secondary">
-                    Alignment controls
-                  </ContextualPanel>
-                </button>
+              <div
+                data-reference-alignment-chrome
+                className="pointer-events-none absolute right-5 top-5 z-20 w-[min(18rem,calc(100%-2.5rem))]"
+              >
+                <ContextualPanel className="pointer-events-auto space-y-3 shadow-soft">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Alignment</div>
+                      <p className="mt-0.5 text-xs text-secondary">Fade and yaw to match the graybox.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPrecisionOpen(true)}
+                      className="shrink-0 text-[11px] font-medium text-accent hover:underline"
+                    >
+                      More
+                    </button>
+                  </div>
+                  <label className="block text-[11px] font-medium text-secondary">
+                    Graybox fade
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={Math.round(compareOpacity * 100)}
+                      onChange={(event) => setCompareOpacity(Number(event.target.value) / 100)}
+                      className="mt-1 w-full accent-[var(--accent)]"
+                      aria-label="Graybox compare opacity"
+                    />
+                  </label>
+                  <label className="block text-[11px] font-medium text-secondary">
+                    Yaw ({Math.round(activePano.rotation[1])}°)
+                    <input
+                      type="range"
+                      min="-180"
+                      max="180"
+                      step="1"
+                      value={activePano.rotation[1]}
+                      onChange={(event) => setActiveYaw(Number(event.target.value))}
+                      className="mt-1 w-full accent-[var(--accent)]"
+                      aria-label="Styled pano yaw"
+                      data-reference-yaw-slider
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[-5, 5].map((delta) => (
+                      <button
+                        key={delta}
+                        type="button"
+                        onClick={() => setActiveYaw(activePano.rotation[1] + delta)}
+                        className="rounded-lg border border-subtle px-2 py-1 text-[11px] font-medium text-secondary hover:border-accent hover:text-accent"
+                      >
+                        {delta > 0 ? '+' : ''}{delta}°
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setActiveYaw(0)}
+                      className="rounded-lg border border-subtle px-2 py-1 text-[11px] font-medium text-secondary hover:border-accent hover:text-accent"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </ContextualPanel>
               </div>
             )}
 
@@ -298,21 +358,58 @@ export function ReferenceWorkspace() {
               highlightNextStep={primaryAction?.id === 'confirm-alignment'}
             />
           )}
-          <div className="space-y-2">
+          <div className="space-y-2" data-pano-reference-list>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-secondary">Pano References</h3>
-            {project.panoRefs.map((pano) => (
-              <button
-                key={pano.id}
-                type="button"
-                onClick={() => setActivePano(pano.id)}
-                className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                  pano.id === activePano?.id ? 'border-[var(--accent)] bg-accent-soft' : 'border-subtle'
-                }`}
-              >
-                <div className="font-medium text-primary">{pano.name}</div>
-                <div className="text-xs text-secondary">{pano.type}</div>
-              </button>
-            ))}
+            {project.panoRefs.length === 0 && (
+              <p className="text-sm text-secondary">No pano references yet.</p>
+            )}
+            {project.panoRefs.map((pano) => {
+              const isActive = pano.id === activePano?.id;
+              const isUploaded = pano.type === 'ai_global_reference' || pano.type === 'external_reference';
+              const typeLabel = pano.type === 'graybox_render'
+                ? 'Graybox render'
+                : pano.type === 'ai_global_reference'
+                  ? 'Uploaded styled pano'
+                  : pano.type === 'external_reference'
+                    ? 'External reference'
+                    : pano.type;
+              return (
+                <div
+                  key={pano.id}
+                  className={`flex items-stretch gap-1 rounded-lg border transition ${
+                    isActive ? 'border-[var(--accent)] bg-accent-soft' : 'border-subtle'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setActivePano(pano.id)}
+                    className="min-w-0 flex-1 px-3 py-2 text-left text-sm"
+                  >
+                    <div className="truncate font-medium text-primary">
+                      {pano.name}
+                      {pano.isCanonical ? ' · canonical' : ''}
+                    </div>
+                    <div className="truncate text-xs text-secondary">{typeLabel}</div>
+                  </button>
+                  <button
+                    type="button"
+                    title={isUploaded ? 'Remove uploaded pano' : 'Remove pano reference'}
+                    aria-label={`Remove ${pano.name}`}
+                    data-remove-pano={pano.id}
+                    onClick={() => {
+                      const label = isUploaded ? 'uploaded pano' : 'pano reference';
+                      if (!window.confirm(`Remove this ${label}? Shots will re-link to the remaining canonical pano if one exists.`)) {
+                        return;
+                      }
+                      removePanoReference(pano.id);
+                    }}
+                    className="inline-flex shrink-0 items-center justify-center px-2.5 text-secondary transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
           {activePano && (
             <>
@@ -323,6 +420,19 @@ export function ReferenceWorkspace() {
                 <IconButton onClick={() => void downloadActivePano()} className="w-full">
                   <FileDown className="h-4 w-4" />
                   Download Active Pano
+                </IconButton>
+              )}
+              {(activePano.type === 'ai_global_reference' || activePano.type === 'external_reference') && (
+                <IconButton
+                  onClick={() => {
+                    if (!window.confirm('Remove this uploaded pano reference?')) return;
+                    removePanoReference(activePano.id);
+                  }}
+                  className="w-full border-red-200 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400"
+                  data-remove-active-pano
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Remove Uploaded Pano
                 </IconButton>
               )}
             </>

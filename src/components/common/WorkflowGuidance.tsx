@@ -309,6 +309,7 @@ export function WorkflowGuidance() {
       <Modal
         open={advanceOpen && Boolean(advancePrompt)}
         title={advancePrompt?.title ?? 'Ready for the next step'}
+        onClose={handleAdvanceDismiss}
         footer={(
           <>
             <button

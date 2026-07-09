@@ -76,10 +76,11 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).not.toMatch(/startFlyCamera[\s\S]*setFramePreviewUrl\(undefined\)/);
   });
 
-  it('keeps filmstrip overlay dots decorative instead of misleading option buttons', () => {
+  it('keeps filmstrip overlay dots decorative and surfaces warning details on demand', () => {
     const filmstrip = readFileSync(new URL('../src/components/common/ShotFilmstrip.tsx', import.meta.url), 'utf8');
     expect(filmstrip).toContain('aria-hidden');
     expect(filmstrip).toContain('pointer-events-none');
+    expect(filmstrip).toContain('WarningPopover');
     expect(filmstrip).not.toContain('Shot ${shot.shotNumber} options');
   });
 
@@ -88,15 +89,62 @@ describe('ui revamp fidelity surfaces', () => {
     const guidance = readFileSync(new URL('../src/components/common/WorkflowGuidance.tsx', import.meta.url), 'utf8');
     const referenceGuide = readFileSync(new URL('../src/components/common/GrayboxReferenceGuide.tsx', import.meta.url), 'utf8');
     const defaults = readFileSync(new URL('../src/domain/defaults.ts', import.meta.url), 'utf8');
+    const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
+    const renderers = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
     expect(build).toContain('Download Graybox 360');
+    expect(build).toContain('Re-render after scene changes');
+    expect(build).toContain('data-build-rerender-graybox');
+    expect(build).toContain('data-build-graybox-cta');
+    expect(build).toContain('handleRenderGraybox');
+    expect(build).toContain('data-object-surface-style');
+    expect(build).toContain('1m × 1m checkerboard');
+    expect(build).toContain('getPrimitiveShortcutLabel');
+    expect(build).toContain('data-build-shortcuts-hint');
     expect(build).not.toContain('grayboxDownloadPrompt');
     expect(build).toContain('letterboxEnabled: false');
     expect(guidance).toContain('showReferencePromptBuilder');
     expect(guidance).toContain('seenObjectiveWorkspaces.includes(\'reference\')');
+    expect(guidance).toMatch(/advanceOpen && Boolean\(advancePrompt\)[\s\S]*onClose=\{handleAdvanceDismiss\}/);
     expect(referenceGuide).toContain('Your graybox 360 is ready');
     expect(referenceGuide).toContain('Download the graybox image.');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT = 2048');
+    expect(store).toContain("existing.type !== 'graybox_render'");
+    expect(store).toContain('isRenderingGraybox: false');
+    expect(store).toContain('shotCameraFlying: false');
+    expect(store).toMatch(/setProject:[\s\S]*isExportingPackage: false/);
+    expect(renderers).toContain('disposeRenderer');
+    expect(renderers).toContain('forceContextLoss');
+  });
+
+  it('surfaces reference alignment yaw/opacity on viewer chrome', () => {
+    const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
+    expect(reference).toContain('data-reference-alignment-chrome');
+    expect(reference).toContain('data-reference-yaw-slider');
+    expect(reference).toContain('Graybox fade');
+  });
+
+  it('exposes remove controls for pano references in reference settings', () => {
+    const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
+    const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
+    expect(reference).toContain('data-pano-reference-list');
+    expect(reference).toContain('data-remove-pano');
+    expect(reference).toContain('Remove Uploaded Pano');
+    expect(reference).toContain('removePanoReference');
+    expect(store).toContain('removePanoReference:');
+  });
+
+  it('clarifies shots frame download vs accept framing', () => {
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    expect(shots).toContain('Download Shot Frame');
+    expect(shots).toContain('Accept Framing');
+    expect(shots).not.toContain("label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}");
+  });
+
+  it('labels export settings as active-shot scope only', () => {
+    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
+    expect(exportWorkspace).toContain('data-export-settings-scope');
+    expect(exportWorkspace).toContain('active shot');
   });
 
   it('anchors shots floating card above the bottom overlay safe area', () => {
@@ -269,7 +317,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('bottom-[var(--shots-overlay-bottom-safe)]');
     expect(shots).toContain('pb-[var(--shots-bottom-chrome-pad)]');
     expect(shots).toContain('gap-[var(--shots-bottom-chrome-gap)]');
-    expect(shots).toContain('Preview this shot from the reference.');
+    expect(shots).toContain('Downloads a clay PNG');
     expect(shots).toContain('compact');
     expect(primaryCta).toContain('data-primary-cta-hint');
     expect(primaryCta).toContain('items-end');

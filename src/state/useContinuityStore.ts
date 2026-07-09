@@ -73,6 +73,7 @@ interface ContinuityStore {
   setPanoOrigin: (origin: Vec3) => void;
   renderGrayboxPano: () => Promise<PanoReference>;
   importCanonicalPano: (params: { name: string; dataUrl: string; width?: number; height?: number; importNote?: string }) => void;
+  removePanoReference: (id: string) => void;
   setActivePano: (id?: string) => void;
   updatePanoReference: (id: string, updates: Partial<PanoReference>) => void;
   setPanoView: (updates: Partial<PanoViewState>) => void;
@@ -154,13 +155,23 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   setProject: (project) => {
     const linkedProject = linkAllShotsToCanonicalPano(project);
     const canonical = linkedProject.panoRefs.find((pano) => pano.isCanonical) ?? linkedProject.panoRefs[0];
+    const firstShot = linkedProject.shots[0];
     set({
       project: linkedProject,
       activePanoId: canonical?.id,
       selectedObjectId: project.scene.objects[0]?.id,
-      selectedShotId: linkedProject.shots[0]?.id,
+      selectedShotId: firstShot?.id,
       selectedLandmarkId: linkedProject.landmarks[0]?.id,
       buildMode: 'select',
+      activePrimitive: 'box',
+      gridSnap: true,
+      // Full session reset so import never inherits fly/busy state from the previous project.
+      shotCameraFlying: false,
+      isRenderingGraybox: false,
+      isExportingPackage: false,
+      panoView: firstShot
+        ? panoViewFromCamera(firstShot.camera)
+        : { yawDegrees: 0, pitchDegrees: 0, fovDegrees: 65 },
       dismissedWorkflowAdvanceKeys: [],
       seenObjectiveWorkspaces: [],
       objectiveModalRequest: 0,
@@ -322,8 +333,16 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     }),
   })),
   renderGrayboxPano: async () => {
+    // Guard against stacked clicks while a render is already in flight.
+    if (get().isRenderingGraybox) {
+      throw new Error('A graybox render is already in progress.');
+    }
     set({ isRenderingGraybox: true });
     try {
+      // Yield so the CTA can paint "Rendering..." before the heavy WebGL work blocks the main thread.
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
       const state = get();
       const theme = useThemeStore.getState().theme;
       const render = await renderGrayboxEquirectangularPano(state.project, undefined, undefined, theme);
@@ -334,6 +353,9 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         height: render.height,
         metadata: { source: 'graybox_scene', theme },
       });
+      const hadOnlyGrayboxCanonical = state.project.panoRefs.every(
+        (existing) => !existing.isCanonical || existing.type === 'graybox_render',
+      );
       const pano = createPanoReference({
         name: 'Graybox 360',
         assetId: asset.id,
@@ -342,30 +364,38 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         rotation: state.project.scene.panoRotation,
         width: render.width,
         height: render.height,
-        isCanonical: state.project.panoRefs.length === 0,
+        // Stay canonical when replacing a prior graybox-only reference set.
+        isCanonical: state.project.panoRefs.length === 0 || hadOnlyGrayboxCanonical,
         notes: 'Rendered from the Build workspace graybox set.',
       });
 
-      set((current) => ({
-        project: touchProject(linkAllShotsToCanonicalPano({
-          ...current.project,
-          assets: {
-            assets: {
-              ...current.project.assets.assets,
-              [asset.id]: asset,
-            },
-          },
-          panoRefs: [
-            ...current.project.panoRefs.map((existing) => (
-              pano.isCanonical ? { ...existing, isCanonical: false } : existing
-            )),
-            pano,
-          ],
-        })),
-        activePanoId: pano.id,
-      }));
+      set((current) => {
+        const staleGrayboxes = current.project.panoRefs.filter((existing) => existing.type === 'graybox_render');
+        const staleAssetIds = new Set(staleGrayboxes.map((existing) => existing.imageAssetId));
+        const nextAssets = { ...current.project.assets.assets };
+        for (const assetId of staleAssetIds) {
+          delete nextAssets[assetId];
+        }
+        nextAssets[asset.id] = asset;
+
+        const remainingPanos = current.project.panoRefs
+          .filter((existing) => existing.type !== 'graybox_render')
+          .map((existing) => (
+            pano.isCanonical ? { ...existing, isCanonical: false } : existing
+          ));
+
+        return {
+          project: touchProject(linkAllShotsToCanonicalPano({
+            ...current.project,
+            assets: { assets: nextAssets },
+            panoRefs: [...remainingPanos, pano],
+          })),
+          activePanoId: pano.isCanonical ? pano.id : current.activePanoId,
+        };
+      });
       return pano;
     } finally {
+      // Always re-enable the CTA so a failed or cancelled render never sticks disabled.
       set({ isRenderingGraybox: false });
     }
   },
@@ -407,6 +437,71 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     };
   }),
   setActivePano: (id) => set({ activePanoId: id }),
+  removePanoReference: (id) => set((state) => {
+    const target = state.project.panoRefs.find((pano) => pano.id === id);
+    if (!target) return state;
+
+    let remaining = state.project.panoRefs
+      .filter((pano) => pano.id !== id)
+      .map((pano) => (
+        pano.sourcePanoId === id ? { ...pano, sourcePanoId: undefined } : pano
+      ));
+
+    // Keep exactly one canonical when anything remains.
+    if (remaining.length > 0 && !remaining.some((pano) => pano.isCanonical)) {
+      const preferred = [...remaining]
+        .reverse()
+        .find((pano) => pano.type !== 'graybox_render')
+        ?? remaining[remaining.length - 1];
+      remaining = remaining.map((pano) => ({ ...pano, isCanonical: pano.id === preferred.id }));
+    } else if (remaining.length === 0) {
+      remaining = [];
+    }
+
+    const assetStillReferenced = remaining.some((pano) => pano.imageAssetId === target.imageAssetId);
+    const nextAssets = { ...state.project.assets.assets };
+    if (!assetStillReferenced) {
+      delete nextAssets[target.imageAssetId];
+    }
+
+    const workflow = { ...state.project.workflow };
+    if (workflow.referenceAlignmentAcceptedForPanoId === id) {
+      workflow.referenceAlignmentAcceptedForPanoId = undefined;
+    }
+
+    let nextProject = {
+      ...state.project,
+      panoRefs: remaining,
+      assets: { assets: nextAssets },
+      workflow,
+      shots: state.project.shots.map((shot) => {
+        const linkedToRemoved = shot.linkedPanoId === id || shot.panoCrop?.panoId === id;
+        if (!linkedToRemoved) return shot;
+        return {
+          ...shot,
+          linkedPanoId: undefined,
+          panoCrop: undefined,
+          updatedAt: new Date().toISOString(),
+        };
+      }),
+    };
+
+    nextProject = linkAllShotsToCanonicalPano(nextProject);
+
+    const nextActiveId = state.activePanoId === id
+      ? (remaining.find((pano) => pano.isCanonical)?.id ?? remaining[0]?.id)
+      : state.activePanoId && remaining.some((pano) => pano.id === state.activePanoId)
+        ? state.activePanoId
+        : remaining.find((pano) => pano.isCanonical)?.id ?? remaining[0]?.id;
+
+    return {
+      project: touchProject(nextProject),
+      activePanoId: nextActiveId,
+      seenAlignmentIntroForPanoId: state.seenAlignmentIntroForPanoId === id
+        ? undefined
+        : state.seenAlignmentIntroForPanoId,
+    };
+  }),
   updatePanoReference: (id, updates) => set((state) => ({
     project: touchProject({
       ...state.project,

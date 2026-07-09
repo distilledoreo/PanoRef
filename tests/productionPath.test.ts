@@ -12,6 +12,27 @@ describe('workflow guidance UI', () => {
     expect(app).not.toContain('DirectorQuest');
   });
 
+  it('keeps project import discoverable and retryable after the full-bleed revamp', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    expect(app).toContain('openProjectPicker');
+    expect(app).toContain('title="Open project"');
+    expect(app).toContain('title="Save project"');
+    expect(app).toContain('data-project-import-input');
+    expect(app).toContain('data-project-export-button');
+    expect(app).toContain('data-project-name-input');
+    expect(app).toContain('downloadProject(project)');
+    expect(app).toContain('accept=".json,application/json"');
+    expect(app).toContain('Project opened:');
+    expect(app).toContain('Could not open project:');
+    expect(app).toContain('data-project-import-status');
+    expect(app).toContain('IMPORT_STATUS_DISMISS_MS');
+    expect(app).toContain("fileRef.current.value = ''");
+    expect(app).toContain('setProjectMenuOpen(false)');
+    expect(app).toContain("event.key === 'Escape'");
+    expect(app).toMatch(/label="Open Project"[\s\S]*openProjectPicker\(\)/);
+    expect(app).toMatch(/label="Save Project"[\s\S]*downloadProject\(project\)/);
+  });
+
   it('uses progressive disclosure layouts with shot filmstrip and precision drawer', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     const shell = readFileSync(new URL('../src/components/workspaces/WorkspaceShell.tsx', import.meta.url), 'utf8');

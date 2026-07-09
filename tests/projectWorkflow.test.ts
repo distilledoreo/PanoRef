@@ -8,6 +8,7 @@ import { getProjectWarnings, getShotWarnings } from '../src/engine/warnings';
 import { getLatestGrayboxPano, getPanoAsset } from '../src/domain/selectors';
 import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
 import { addCameraMoveCubemapCropPaths, buildCameraMoveCubemapVisibility, cameraMoveCubemapVisibleStitchedPath } from '../src/engine/cameraMoveCubemap';
+import { useContinuityStore } from '../src/state/useContinuityStore';
 
 describe('project workflow logic', () => {
   it('creates a valid default local-first project', () => {
@@ -28,6 +29,12 @@ describe('project workflow logic', () => {
     const parsed = parseProject(serializeProject(project));
     expect(parsed.id).toBe(project.id);
     expect(parsed.scene.objects[0].name).toBe(project.scene.objects[0].name);
+  });
+
+  it('rejects unsupported project JSON during import parsing', () => {
+    const project = createDefaultProject();
+    expect(() => parseProject(JSON.stringify({ ...project, schemaVersion: '9.9' })))
+      .toThrow('Unsupported project schema version.');
   });
 
   it('migrates legacy in-app skinned frame fields to imported AI result fields', () => {
@@ -493,5 +500,92 @@ describe('project workflow logic', () => {
     });
     project.shots.push(shot);
     expect(getShotWarnings(project, shot).some((warning) => warning.id.endsWith('missing-landmarks'))).toBe(true);
+  });
+
+  it('resets session fly and busy flags when opening a project', () => {
+    const incoming = createDefaultProject();
+    incoming.name = 'Imported Audit Project';
+    useContinuityStore.setState({
+      shotCameraFlying: true,
+      isRenderingGraybox: true,
+      isExportingPackage: true,
+      buildMode: 'place',
+      activePrimitive: 'wall',
+      gridSnap: false,
+      panoView: { yawDegrees: 90, pitchDegrees: 12, fovDegrees: 40 },
+    });
+
+    useContinuityStore.getState().setProject(incoming);
+    const state = useContinuityStore.getState();
+
+    expect(state.project.name).toBe('Imported Audit Project');
+    expect(state.shotCameraFlying).toBe(false);
+    expect(state.isRenderingGraybox).toBe(false);
+    expect(state.isExportingPackage).toBe(false);
+    expect(state.buildMode).toBe('select');
+    expect(state.activePrimitive).toBe('box');
+    expect(state.gridSnap).toBe(true);
+    expect(state.selectedShotId).toBe(incoming.shots[0]?.id);
+  });
+
+  it('removes an uploaded pano reference, frees its asset, and re-links shots', () => {
+    const project = createDefaultProject();
+    const grayboxAsset = createPanoAsset({
+      name: 'global_graybox.png',
+      uri: 'data:image/png;base64,gray',
+      width: 4096,
+      height: 2048,
+    });
+    const uploadedAsset = createPanoAsset({
+      name: 'styled.png',
+      uri: 'data:image/png;base64,styled',
+      width: 4096,
+      height: 2048,
+    });
+    const graybox = createPanoReference({
+      name: 'Graybox 360',
+      assetId: grayboxAsset.id,
+      type: 'graybox_render',
+      origin: project.scene.panoOrigin,
+      width: 4096,
+      height: 2048,
+      isCanonical: false,
+    });
+    const uploaded = createPanoReference({
+      name: 'Styled Upload',
+      assetId: uploadedAsset.id,
+      type: 'ai_global_reference',
+      origin: project.scene.panoOrigin,
+      width: 4096,
+      height: 2048,
+      isCanonical: true,
+      sourcePanoId: graybox.id,
+    });
+    project.assets.assets[grayboxAsset.id] = grayboxAsset;
+    project.assets.assets[uploadedAsset.id] = uploadedAsset;
+    project.panoRefs = [graybox, uploaded];
+    project.workflow.referenceAlignmentAcceptedForPanoId = uploaded.id;
+    project.shots[0] = {
+      ...project.shots[0],
+      linkedPanoId: uploaded.id,
+    };
+
+    useContinuityStore.setState({
+      project,
+      activePanoId: uploaded.id,
+      seenAlignmentIntroForPanoId: uploaded.id,
+    });
+
+    useContinuityStore.getState().removePanoReference(uploaded.id);
+    const state = useContinuityStore.getState();
+
+    expect(state.project.panoRefs.map((pano) => pano.id)).toEqual([graybox.id]);
+    expect(state.project.panoRefs[0]?.isCanonical).toBe(true);
+    expect(state.project.assets.assets[uploadedAsset.id]).toBeUndefined();
+    expect(state.project.assets.assets[grayboxAsset.id]).toBeTruthy();
+    expect(state.project.workflow.referenceAlignmentAcceptedForPanoId).toBeUndefined();
+    expect(state.activePanoId).toBe(graybox.id);
+    expect(state.project.shots[0]?.linkedPanoId).toBe(graybox.id);
+    expect(state.seenAlignmentIntroForPanoId).toBeUndefined();
   });
 });

@@ -36,6 +36,9 @@ export interface Transform {
   scale: Vec3;
 }
 
+/** Visual surface for graybox objects. Checkerboard tiles are 1m × 1m in world space. */
+export type ObjectSurfaceStyle = 'default' | 'solid' | 'checkerboard';
+
 export interface SceneObject {
   id: string;
   name: string;
@@ -45,7 +48,14 @@ export interface SceneObject {
   category: 'architecture' | 'environment' | 'helper' | 'landmark';
   locked: boolean;
   visible: boolean;
+  /** @deprecated Prefer surfaceStyle + color. Kept for older project files. */
   materialId?: string;
+  /** default = category clay; solid / checkerboard for identity and scale. */
+  surfaceStyle?: ObjectSurfaceStyle;
+  /** Primary hex color (#rrggbb) for solid and checkerboard light squares. */
+  color?: string;
+  /** Secondary hex for checkerboard dark squares. */
+  secondaryColor?: string;
   metadata?: Record<string, unknown>;
 }
 

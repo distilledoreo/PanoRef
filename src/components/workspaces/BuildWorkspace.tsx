@@ -28,17 +28,24 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
+import { ObjectSurfaceStyle, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import type { GizmoMode } from '../../engine/transformGizmo';
 import { objectDisplayName } from '../../domain/defaults';
 import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
 import {
   CLICK_ONLY_BUILD_PRIMITIVES,
   HOTKEYED_BUILD_PRIMITIVES,
+  getPrimitiveShortcutLabel,
   resolveBuildShortcut,
 } from '../../engine/buildShortcuts';
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
+import {
+  CHECKERBOARD_TILE_METERS,
+  defaultSecondaryColor,
+  defaultSolidColorForObject,
+  resolveSurfaceStyle,
+} from '../../engine/sceneObjects';
 import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
 import { useThemeStore } from '../../state/useThemeStore';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
@@ -78,6 +85,7 @@ export function BuildWorkspace() {
   const [layersOpen, setLayersOpen] = useState(false);
   const [showSceneGuides, setShowSceneGuides] = useState(false);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('translate');
+  const [grayboxRenderError, setGrayboxRenderError] = useState<string | undefined>();
   const {
     project,
     selectedObjectId,
@@ -100,6 +108,16 @@ export function BuildWorkspace() {
     renderGrayboxPano,
     isRenderingGraybox,
   } = useContinuityStore();
+
+  const handleRenderGraybox = useCallback(() => {
+    if (isRenderingGraybox) return;
+    setGrayboxRenderError(undefined);
+    void renderGrayboxPano().catch((error: unknown) => {
+      setGrayboxRenderError(
+        error instanceof Error ? error.message : 'Could not render graybox 360.',
+      );
+    });
+  }, [isRenderingGraybox, renderGrayboxPano]);
   const selectedObject = project.scene.objects.find((object) => object.id === selectedObjectId);
   const grayboxPano = getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
@@ -348,36 +366,60 @@ export function BuildWorkspace() {
           onGridSnapChange={setGridSnap}
         />
 
-        <div className="pointer-events-none absolute bottom-6 right-6 z-10 flex flex-col items-end gap-2">
-          <PrimaryCTA
-            icon={<Globe className="h-5 w-5" />}
-            label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
-            onClick={() => void renderGrayboxPano()}
-            disabled={isRenderingGraybox}
-            highlighted={primaryAction?.id === 'render-graybox'}
-            appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
-          />
-          {grayboxAsset && grayboxPano && (
-            <button
-              type="button"
-              onClick={() => void downloadPanoImage(
-                grayboxAsset.uri,
-                grayboxPano.width,
-                grayboxPano.height,
-                grayboxAsset.name || 'global_graybox.png',
-                {
-                  letterboxEnabled: false,
-                  targetWidth: project.settings.defaultShotWidth,
-                  targetHeight: project.settings.defaultShotHeight,
-                },
-                downloadDataUrl,
-              )}
+        {/* Isolated stacking context so the viewport canvas cannot swallow CTA clicks. */}
+        <div
+          data-build-graybox-cta
+          className="pointer-events-auto absolute bottom-6 right-6 z-30 flex flex-col items-end gap-2"
+        >
+          {grayboxAsset && grayboxPano ? (
+            <>
+              <PrimaryCTA
+                icon={<FileDown className="h-5 w-5" />}
+                label={`Download Graybox 360 (${grayboxPano.width}×${grayboxPano.height})`}
+                hint="Downloads the latest rendered equirectangular PNG."
+                onClick={() => void downloadPanoImage(
+                  grayboxAsset.uri,
+                  grayboxPano.width,
+                  grayboxPano.height,
+                  grayboxAsset.name || 'global_graybox.png',
+                  {
+                    letterboxEnabled: false,
+                    targetWidth: project.settings.defaultShotWidth,
+                    targetHeight: project.settings.defaultShotHeight,
+                  },
+                  downloadDataUrl,
+                )}
+                disabled={isRenderingGraybox}
+                appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
+              />
+              <button
+                type="button"
+                data-build-rerender-graybox
+                onClick={handleRenderGraybox}
+                disabled={isRenderingGraybox}
+                className="inline-flex items-center gap-2 rounded-[18px] border border-subtle bg-surface-overlay px-4 py-2 text-xs font-medium text-secondary shadow-card backdrop-blur-sm transition hover:border-[var(--accent)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Globe className="h-3.5 w-3.5" />
+                {isRenderingGraybox ? 'Rendering...' : 'Re-render after scene changes'}
+              </button>
+            </>
+          ) : (
+            <PrimaryCTA
+              icon={<Globe className="h-5 w-5" />}
+              label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
+              onClick={handleRenderGraybox}
               disabled={isRenderingGraybox}
-              className="pointer-events-auto inline-flex items-center gap-2 rounded-[18px] border border-subtle bg-surface-overlay px-4 py-2 text-xs font-medium text-secondary shadow-card backdrop-blur-sm transition hover:border-[var(--accent)] hover:text-accent disabled:opacity-45"
+              highlighted={primaryAction?.id === 'render-graybox'}
+              appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
+            />
+          )}
+          {grayboxRenderError && (
+            <p
+              role="alert"
+              className="max-w-xs rounded-xl border border-red-400/60 bg-surface-overlay px-3 py-2 text-xs text-primary shadow-card backdrop-blur"
             >
-              <FileDown className="h-3.5 w-3.5" />
-              Download Graybox 360 ({grayboxPano.width}×{grayboxPano.height})
-            </button>
+              {grayboxRenderError}
+            </p>
           )}
         </div>
 
@@ -489,21 +531,30 @@ function BuildObjectTray({
       )}
       <div className="pointer-events-auto rounded-[22px] border border-subtle bg-surface-overlay px-3 py-2.5 shadow-[var(--tray-glow)] backdrop-blur dark:border-[var(--accent)]/25">
         <div className="flex items-center gap-1">
-          {primaryTrayItems.map(({ type, label, icon: Icon }) => (
-            <div key={type}>
-              <TrayButton
-                active={buildMode === 'place' && activePrimitive === type}
-                label={label}
-                onClick={() => onPrimitiveChange(type)}
-              >
-                <Icon className="h-5 w-5" />
-              </TrayButton>
-            </div>
-          ))}
+          {primaryTrayItems.map(({ type, label, icon: Icon }) => {
+            const shortcut = getPrimitiveShortcutLabel(type);
+            return (
+              <div key={type}>
+                <TrayButton
+                  active={buildMode === 'place' && activePrimitive === type}
+                  label={label}
+                  shortcut={shortcut}
+                  onClick={() => onPrimitiveChange(type)}
+                >
+                  <Icon className="h-5 w-5" />
+                </TrayButton>
+              </div>
+            );
+          })}
           <TrayButton active={toolsOpen} label="More" onClick={() => setToolsOpen((open) => !open)}>
             <Wrench className="h-5 w-5" />
           </TrayButton>
         </div>
+        {toolsOpen && (
+          <p className="mt-2 border-t border-subtle pt-2 text-[10px] leading-relaxed text-muted" data-build-shortcuts-hint>
+            Keys: 1–9/0 stamp · V/Esc select · O origin · G snap · D dup · R rotate · [ ] scale · T/E/S gizmo · I precision · Del delete
+          </p>
+        )}
       </div>
     </div>
   );
@@ -513,12 +564,14 @@ function TrayButton({
   active,
   label,
   compact,
+  shortcut,
   children,
   onClick,
 }: {
   active?: boolean;
   label: string;
   compact?: boolean;
+  shortcut?: string;
   children: React.ReactNode;
   onClick: () => void;
 }) {
@@ -526,12 +579,18 @@ function TrayButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition ${
+      title={shortcut ? `${label} (${shortcut})` : label}
+      className={`relative flex shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition ${
         compact ? 'w-full' : 'w-16'
       } ${
         active ? 'bg-accent-soft text-accent' : 'text-secondary hover:bg-surface-muted hover:text-primary'
       }`}
     >
+      {shortcut && (
+        <span className="absolute right-1 top-0.5 rounded bg-surface-muted px-1 text-[9px] font-semibold tabular-nums text-muted">
+          {shortcut}
+        </span>
+      )}
       {children}
       <span className="text-[10px] font-medium">{label}</span>
     </button>
@@ -600,6 +659,28 @@ function PrecisionControls({
   object: SceneObject;
   onChange: (updates: Partial<SceneObject>) => void;
 }) {
+  const surfaceStyle = resolveSurfaceStyle(object);
+  const primaryColor = object.color ?? defaultSolidColorForObject(object);
+  const secondaryColor = object.secondaryColor ?? defaultSecondaryColor(primaryColor);
+
+  const setSurfaceStyle = (next: ObjectSurfaceStyle) => {
+    if (next === 'default') {
+      onChange({
+        surfaceStyle: 'default',
+        color: undefined,
+        secondaryColor: undefined,
+      });
+      return;
+    }
+    onChange({
+      surfaceStyle: next,
+      color: object.color ?? defaultSolidColorForObject(object),
+      secondaryColor: next === 'checkerboard'
+        ? (object.secondaryColor ?? defaultSecondaryColor(object.color ?? defaultSolidColorForObject(object)))
+        : object.secondaryColor,
+    });
+  };
+
   return (
     <div className="space-y-3">
       <Field label="Name">
@@ -610,6 +691,55 @@ function PrecisionControls({
           {primitiveTypes.map((type) => <option key={type} value={type}>{objectDisplayName(type)}</option>)}
         </Select>
       </Field>
+      <Field label="Surface">
+        <Select
+          value={surfaceStyle}
+          onChange={(event) => setSurfaceStyle(event.target.value as ObjectSurfaceStyle)}
+          data-object-surface-style
+        >
+          <option value="default">Default clay</option>
+          <option value="solid">Solid color</option>
+          <option value="checkerboard">1m × 1m checkerboard</option>
+        </Select>
+      </Field>
+      {surfaceStyle !== 'default' && (
+        <Field label={surfaceStyle === 'checkerboard' ? 'Light tile' : 'Color'}>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={primaryColor}
+              onChange={(event) => onChange({ color: event.target.value })}
+              className="h-9 w-12 cursor-pointer rounded-lg border border-subtle bg-surface-raised p-1"
+              aria-label="Object color"
+              data-object-color
+            />
+            <TextInput
+              value={primaryColor}
+              onChange={(event) => onChange({ color: event.target.value })}
+              className="font-mono text-xs"
+            />
+          </div>
+        </Field>
+      )}
+      {surfaceStyle === 'checkerboard' && (
+        <Field label={`Dark tile (${CHECKERBOARD_TILE_METERS}m grid)`}>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={secondaryColor}
+              onChange={(event) => onChange({ secondaryColor: event.target.value })}
+              className="h-9 w-12 cursor-pointer rounded-lg border border-subtle bg-surface-raised p-1"
+              aria-label="Checkerboard secondary color"
+              data-object-secondary-color
+            />
+            <TextInput
+              value={secondaryColor}
+              onChange={(event) => onChange({ secondaryColor: event.target.value })}
+              className="font-mono text-xs"
+            />
+          </div>
+        </Field>
+      )}
       <Field label="Position">
         <Vec3Input
           value={object.transform.position}

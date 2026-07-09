@@ -8,6 +8,7 @@ import { Field, IconButton, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
 import { ShotThumbnail } from '../common/ShotThumbnail';
+import { WarningPopover } from '../common/StatusBadge';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { FullBleedLayout } from './WorkspaceShell';
 
@@ -217,7 +218,14 @@ export function ExportWorkspace() {
                       </span>
                     </button>
                     {warnings.length > 0 && (
-                      <span className="shrink-0 text-[10px] text-amber-600 dark:text-amber-400">{warnings.length}</span>
+                      <WarningPopover warnings={warnings}>
+                        <span
+                          className="shrink-0 cursor-pointer rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                          title="Show warning details"
+                        >
+                          {warnings.length}
+                        </span>
+                      </WarningPopover>
                     )}
                     {exportingShotId === shot.id && (
                       <span className="shrink-0 text-[10px] text-accent">Exporting...</span>
@@ -247,6 +255,13 @@ export function ExportWorkspace() {
       <PrecisionDrawer open={settingsOpen} title="Export Settings" onClose={() => setSettingsOpen(false)}>
         {selectedShot ? (
           <div className="space-y-4">
+            <p
+              data-export-settings-scope
+              className="rounded-lg border border-subtle bg-surface-muted px-3 py-2 text-xs text-secondary"
+            >
+              Settings apply to the <span className="font-semibold text-primary">active shot</span>
+              {' '}(Shot {selectedShot.shotNumber}: {selectedShot.name}) only — not every checked shot in the multi-select list.
+            </p>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Width">
                 <TextInput
