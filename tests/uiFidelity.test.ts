@@ -59,14 +59,19 @@ describe('ui revamp fidelity surfaces', () => {
     expect(panoViewer).not.toContain('THEME_COLORS.light.empty');
   });
 
-  it('exposes land/adjust controls directly in the shots action dock', () => {
+  it('uses an iPhone-style camera chrome for shots capture', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    expect(shots).toContain("'Adjust'");
-    expect(shots).toContain("'Land'");
-    expect(shots).toContain('Land this shot');
+    expect(shots).toContain('data-shots-camera-shell');
+    expect(shots).toContain('data-shots-shutter');
+    expect(shots).toContain('data-shots-mode-switcher');
+    expect(shots).toContain('data-shots-library-thumb');
+    expect(shots).toContain('data-shots-settings-trigger');
     expect(shots).toContain('landShotFraming');
-    expect(shots).toContain('data-shots-land-fork');
-    expect(shots).not.toContain('label="Frame"');
+    expect(shots).toContain("captureMode === 'still'");
+    expect(shots).toContain("captureMode === 'video'");
+    expect(shots).not.toContain('data-shots-action-dock');
+    expect(shots).not.toContain('data-shots-land-fork');
+    expect(shots).not.toContain('ShotInfoCard');
   });
 
   it('pauses automatic shot frame preview renders while fly camera is active', () => {
@@ -136,11 +141,12 @@ describe('ui revamp fidelity surfaces', () => {
     expect(store).toContain('removePanoReference:');
   });
 
-  it('clarifies shots frame download vs accept framing', () => {
+  it('keeps advanced shot tools in settings rather than the camera chrome', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    expect(shots).toContain('Land this shot');
-    expect(shots).toContain('Add camera move');
-    expect(shots).toContain('data-shots-land-fork');
+    expect(shots).toContain('data-shots-advanced-settings');
+    expect(shots).toContain('Download PNG');
+    expect(shots).toContain('Pano match');
+    expect(shots).toContain('Video mode (advanced)');
     expect(shots).not.toContain("label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}");
   });
 
@@ -150,27 +156,20 @@ describe('ui revamp fidelity surfaces', () => {
     expect(exportWorkspace).toContain('active shot');
   });
 
-  it('anchors shots floating card above the bottom overlay safe area', () => {
+  it('uses camera-style bottom chrome without a floating shot dossier', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
     expect(styles).toContain('--shots-overlay-bottom-safe');
-    expect(shots).toContain('data-shots-info-safe-area');
-    expect(shots).toContain('bottom-[var(--shots-overlay-bottom-safe)]');
-    expect(shots).toContain('items-start');
-    expect(shots).not.toContain('items-center pl-3');
+    expect(shots).toContain('data-shots-camera-chrome');
+    expect(shots).toContain('data-shots-library');
+    expect(shots).not.toContain('data-shots-info-safe-area');
+    expect(shots).not.toContain('ShotFilmstrip');
   });
 
-  it('uses shots workspace overlay layout with floating info card and cinematic filmstrip', () => {
-    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    const shotInfoCard = readFileSync(new URL('../src/components/common/ShotInfoCard.tsx', import.meta.url), 'utf8');
+  it('keeps shot filmstrip component available for other surfaces', () => {
     const filmstrip = readFileSync(new URL('../src/components/common/ShotFilmstrip.tsx', import.meta.url), 'utf8');
+    const shotInfoCard = readFileSync(new URL('../src/components/common/ShotInfoCard.tsx', import.meta.url), 'utf8');
     const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
-    expect(shots).toContain('ShotInfoCard');
-    expect(shots).toContain('appearance="overlay"');
-    expect(shots).toContain('absolute inset-x-0 bottom-0');
-    expect(shots).toContain('layout="inline"');
-    expect(shots).not.toContain('grid-cols-[minmax(220px,280px)_minmax(0,1fr)]');
-    expect(shots).not.toContain('ContextualPanel');
     expect(shotInfoCard).toContain('data-shot-info-card="floating"');
     expect(shotInfoCard).toContain('bg-surface-overlay');
     expect(filmstrip).toContain("appearance?: 'default' | 'overlay'");
@@ -280,8 +279,8 @@ describe('ui revamp fidelity surfaces', () => {
     expect(workflow).toContain("['build', 'reference', 'shots', 'export']");
     expect(workflow).toContain('normalizeWorkspace');
     expect(workflow).not.toContain("return ['Import an AI result frame in Review first.']");
-    expect(shots).toContain("setWorkspace('export')");
-    expect(shots).toContain('Go to Export');
+    expect(shots).toContain('setWorkspace');
+    expect(shots).toContain('data-shots-shutter');
   });
 
   it('offers a simple 360 viewer mode with download current view', () => {
@@ -351,27 +350,13 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).not.toMatch(/LandmarkStrip[\s\S]*bottom-5 right-5[\s\S]*PrimaryCTA/);
   });
 
-  it('reserves an intentional shots bottom safe area for the filmstrip and CTA hint', () => {
+  it('reserves space for the camera shutter chrome on shots', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    const primaryCta = readFileSync(new URL('../src/components/common/PrimaryCTA.tsx', import.meta.url), 'utf8');
     const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
-    expect(styles).toContain('--shots-overlay-bottom-safe: 12rem');
-    expect(styles).toContain('--shots-bottom-chrome-pad: 1.125rem');
-    expect(styles).toContain('--shots-bottom-chrome-gap: 0.375rem');
-    expect(styles).toContain('--shots-cta-hint-block: 1.125rem');
-    expect(styles).toContain('--shots-cta-lane: 15.5rem');
-    expect(shots).toContain('data-shots-bottom-chrome');
-    expect(shots).toContain('data-shots-action-dock');
-    expect(shots).toContain('bottom-[var(--shots-overlay-bottom-safe)]');
-    expect(shots).toContain('pb-[var(--shots-bottom-chrome-pad)]');
-    expect(shots).toContain('gap-[var(--shots-bottom-chrome-gap)]');
-    expect(shots).toContain('Land this shot when the frame looks right.');
-    expect(shots).toContain('compact');
-    expect(primaryCta).toContain('data-primary-cta-hint');
-    expect(primaryCta).toContain('items-end');
-    expect(primaryCta).toContain('whitespace-nowrap');
-    expect(primaryCta).toContain('--shots-cta-lane');
-    expect(primaryCta).toContain('leading-[var(--shots-cta-hint-block,1.125rem)]');
+    expect(styles).toContain('--shots-overlay-bottom-safe');
+    expect(shots).toContain('data-shots-camera-chrome');
+    expect(shots).toContain('data-shots-shutter');
+    expect(shots).toContain('Capture this frame');
   });
 
   it('bundles a CC0 human mannequin glb for person scale references', () => {

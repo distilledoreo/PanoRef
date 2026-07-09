@@ -1,14 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CheckCircle2,
+  Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   Film,
+  Globe,
+  Image as ImageIcon,
   KeyRound,
-  Lock,
-  Move3D,
   Plus,
+  Settings2,
   Trash2,
+  X,
 } from 'lucide-react';
 import { CameraData, ShotStatus } from '../../domain/types';
 import {
@@ -26,14 +30,11 @@ import {
 } from '../../engine/cameraKeyframes';
 import { downloadDataUrl } from '../../engine/projectIO';
 import { getSupportedCameraMoveMp4MimeType, renderShotCameraMoveMp4, renderShotFrame } from '../../engine/renderers';
-import { isShotFramingAccepted, resolveWorkspacePrimaryAction } from '../../engine/workflow';
+import { isShotFramingAccepted } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, Panel, Select, TextArea, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
-import { PrimaryCTA } from '../common/PrimaryCTA';
-import { ShotFilmstrip } from '../common/ShotFilmstrip';
-import { ShotInfoCard } from '../common/ShotInfoCard';
 import { ShotThumbnail } from '../common/ShotThumbnail';
 import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
@@ -41,6 +42,8 @@ import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
 import { FullBleedLayout } from './WorkspaceShell';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
+
+type CaptureMode = 'still' | 'video';
 
 export function ShotsWorkspace() {
   const {
@@ -69,10 +72,11 @@ export function ShotsWorkspace() {
   const [isExportingCameraMove, setIsExportingCameraMove] = useState(false);
   const [cameraMoveProgress, setCameraMoveProgress] = useState(0);
   const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
-  const [precisionOpen, setPrecisionOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
-  /** Progressive camera-move path after landing a still. */
-  const [cameraMoveMode, setCameraMoveMode] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('still');
+  const [landFlash, setLandFlash] = useState(false);
 
   const getEffectiveCamera = useCallback((): CameraData | undefined => {
     if (!selectedShot) return undefined;
@@ -210,7 +214,7 @@ export function ShotsWorkspace() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === 'i' && selectedShot && !isEditableTarget(event.target)) {
         event.preventDefault();
-        setPrecisionOpen((open) => !open);
+        setSettingsOpen((open) => !open);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -272,22 +276,9 @@ export function ShotsWorkspace() {
     const camera = draftCameraRef.current ?? selectedShot.camera;
     draftCameraRef.current = undefined;
     landShotFraming(selectedShot.id, camera);
-    setCameraMoveMode(false);
+    setLandFlash(true);
+    window.setTimeout(() => setLandFlash(false), 900);
   }, [landShotFraming, selectedShot]);
-
-  const startCameraMove = useCallback(() => {
-    if (!selectedShot) return;
-    // Auto-set start from the landed still, then fly for the end pose.
-    updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
-      keyframes: selectedShot.cameraKeyframes,
-      slot: 'start',
-      camera: selectedShot.camera,
-      durationSeconds: cameraMoveDurationSeconds,
-    }));
-    setCameraMoveMode(true);
-    setCameraMoveError(undefined);
-    startFlyCamera({ clearFramingAcceptance: false });
-  }, [cameraMoveDurationSeconds, selectedShot, startFlyCamera, updateCameraMoveKeyframes]);
 
   const setCameraMoveEnd = useCallback(() => {
     if (!selectedShot) return;
@@ -301,12 +292,78 @@ export function ShotsWorkspace() {
     }));
     draftCameraRef.current = undefined;
     landShotFraming(selectedShot.id, camera);
+    setLandFlash(true);
+    window.setTimeout(() => setLandFlash(false), 900);
   }, [
     cameraMoveDurationSeconds,
     getEffectiveCamera,
     landShotFraming,
     selectedShot,
     updateCameraMoveKeyframes,
+  ]);
+
+  const enterVideoMode = useCallback(() => {
+    if (!selectedShot) return;
+    setCaptureMode('video');
+    // Auto-set start from the current still, then fly for the end pose.
+    updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
+      keyframes: selectedShot.cameraKeyframes,
+      slot: 'start',
+      camera: selectedShot.camera,
+      durationSeconds: cameraMoveDurationSeconds,
+    }));
+    setCameraMoveError(undefined);
+    startFlyCamera({ clearFramingAcceptance: false });
+  }, [cameraMoveDurationSeconds, selectedShot, startFlyCamera, updateCameraMoveKeyframes]);
+
+  const enterStillMode = useCallback(() => {
+    setCaptureMode('still');
+    const framingAccepted = selectedShot
+      ? isShotFramingAccepted(project, selectedShot.id)
+      : false;
+    if (!framingAccepted) {
+      startFlyCamera();
+    } else {
+      setShotCameraFlying(false);
+    }
+  }, [project, selectedShot, setShotCameraFlying, startFlyCamera]);
+
+  const setMode = useCallback((mode: CaptureMode) => {
+    if (mode === captureMode) return;
+    if (mode === 'video') enterVideoMode();
+    else enterStillMode();
+  }, [captureMode, enterStillMode, enterVideoMode]);
+
+  const onCapture = useCallback(() => {
+    if (!selectedShot) {
+      addCamera();
+      return;
+    }
+    if (captureMode === 'video') {
+      if (shotCameraFlying || !cameraMoveReady) {
+        setCameraMoveEnd();
+        return;
+      }
+      void exportCameraMoveVideo();
+      return;
+    }
+    // Still: capture lands; if already landed and idle, re-enter adjust.
+    if (shotCameraFlying || !isShotFramingAccepted(project, selectedShot.id)) {
+      landShot();
+      return;
+    }
+    startFlyCamera();
+  }, [
+    addCamera,
+    cameraMoveReady,
+    captureMode,
+    exportCameraMoveVideo,
+    landShot,
+    project,
+    selectedShot,
+    setCameraMoveEnd,
+    shotCameraFlying,
+    startFlyCamera,
   ]);
 
   const panoMatch = selectedShot && linkedPano
@@ -321,11 +378,11 @@ export function ShotsWorkspace() {
         frameResolutionLabel: `${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height}`,
         flyActive: shotCameraFlying,
         onCameraChange: handleFramingCameraChange,
-        onLockCamera: cameraMoveMode ? setCameraMoveEnd : landShot,
+        onLockCamera: captureMode === 'video' ? setCameraMoveEnd : landShot,
       }
       : undefined
   ), [
-    cameraMoveMode,
+    captureMode,
     handleFramingCameraChange,
     landShot,
     selectedShot?.camera,
@@ -336,20 +393,12 @@ export function ShotsWorkspace() {
   ]);
 
   const framingAccepted = selectedShot ? isShotFramingAccepted(project, selectedShot.id) : false;
-  const primaryAction = useMemo(
-    () => resolveWorkspacePrimaryAction({
-      project,
-      workspace: 'shots',
-      selectedShotId: selectedShot?.id,
-      shotCameraFlying,
-    }),
-    [project, selectedShot?.id, shotCameraFlying],
-  );
   const lensMm = project.settings.defaultCameraLensMm ?? DEFAULT_CAMERA_LENS_MM;
   const cameraHeight = selectedShot?.camera.position[1] ?? DEFAULT_CAMERA_HEIGHT_METERS;
 
   useEffect(() => {
-    setCameraMoveMode(false);
+    setCaptureMode('still');
+    setLibraryOpen(false);
   }, [selectedShot?.id]);
 
   const duplicateSelectedShot = useCallback(() => {
@@ -381,78 +430,43 @@ export function ShotsWorkspace() {
     setWorkspace('reference');
   }, [linkedPano, setActivePano, setWorkspace]);
 
-  const handleShotMenuAction = useCallback((action: string) => {
-    if (!selectedShot) return;
-    if (action === 'adjust') startFlyCamera();
-    if (action === 'land') landShot();
-    if (action === 'camera-move') startCameraMove();
-    if (action === 'precision') setPrecisionOpen(true);
-  }, [landShot, selectedShot, startCameraMove, startFlyCamera]);
+  const selectedIndex = selectedShot
+    ? project.shots.findIndex((shot) => shot.id === selectedShot.id)
+    : -1;
+  const previousShot = selectedIndex > 0 ? project.shots[selectedIndex - 1] : undefined;
+  // iPhone-style recents: prefer previous landed capture; fall back to current if only one.
+  const libraryThumbShot = previousShot
+    ?? (framingAccepted && !shotCameraFlying ? selectedShot : undefined)
+    ?? project.shots.find((shot) => shot.id !== selectedShot?.id && isShotFramingAccepted(project, shot.id))
+    ?? project.shots[0];
 
-  const primaryCta = useMemo(() => {
-    if (!selectedShot) {
-      return {
-        label: 'Add Shot',
-        hint: 'Create a shot to frame.',
-        onClick: () => addCamera(),
-        disabled: false,
-        highlighted: false,
-      };
-    }
-    if (cameraMoveMode) {
-      if (shotCameraFlying || !cameraMoveReady) {
-        return {
-          label: 'Set end & land',
-          hint: 'Fly to the end pose, then land to save the move.',
-          onClick: setCameraMoveEnd,
-          disabled: false,
-          highlighted: true,
-        };
-      }
-      return {
-        label: isExportingCameraMove ? `Exporting ${Math.round(cameraMoveProgress * 100)}%` : 'Export move MP4',
-        hint: supportedMp4MimeType ? 'Export the graybox camera-move control clip.' : 'MP4 not supported in this browser.',
-        onClick: () => void exportCameraMoveVideo(),
-        disabled: !cameraMoveReady || isExportingCameraMove || !supportedMp4MimeType,
-        highlighted: true,
-      };
-    }
-    if (shotCameraFlying || !framingAccepted) {
-      return {
-        label: 'Land this shot',
-        hint: 'Saves the camera and marks framing ready to export.',
-        onClick: landShot,
-        disabled: false,
-        highlighted: primaryAction?.id === 'lock-camera' || primaryAction?.id === 'accept-framing' || !framingAccepted,
-      };
-    }
-    return {
-      label: 'Add camera move',
-      hint: 'Optional: set an end pose and export a motion control MP4.',
-      onClick: startCameraMove,
-      disabled: false,
-      highlighted: false,
-    };
-  }, [
-    addCamera,
-    cameraMoveMode,
-    cameraMoveProgress,
-    cameraMoveReady,
-    exportCameraMoveVideo,
-    framingAccepted,
-    isExportingCameraMove,
-    landShot,
-    primaryAction?.id,
-    selectedShot,
-    setCameraMoveEnd,
-    shotCameraFlying,
-    startCameraMove,
-    supportedMp4MimeType,
-  ]);
+  const captureLabel = !selectedShot
+    ? 'Add shot'
+    : captureMode === 'video'
+      ? (shotCameraFlying || !cameraMoveReady
+        ? 'Capture end'
+        : isExportingCameraMove
+          ? `Exporting ${Math.round(cameraMoveProgress * 100)}%`
+          : 'Export video')
+      : (shotCameraFlying || !framingAccepted ? 'Capture' : 'Adjust');
+
+  const captureHint = captureMode === 'video'
+    ? (shotCameraFlying || !cameraMoveReady
+      ? 'Fly to the end pose, then capture'
+      : 'Export the graybox move as MP4')
+    : (shotCameraFlying || !framingAccepted
+      ? 'Capture this frame'
+      : 'Tap to adjust');
+
+  const goAdjacentShot = (direction: -1 | 1) => {
+    if (selectedIndex < 0) return;
+    const next = project.shots[selectedIndex + direction];
+    if (next) selectShot(next.id);
+  };
 
   return (
     <FullBleedLayout reserveHeader>
-      <div className="relative h-full min-h-0 overflow-hidden bg-surface-base">
+      <div className="relative h-full min-h-0 overflow-hidden bg-black" data-shots-camera-shell>
         <div className="absolute inset-0">
           <SceneViewport
             project={project}
@@ -462,50 +476,40 @@ export function ShotsWorkspace() {
           />
         </div>
 
-        {selectedShot && (
-          <div
-            data-shots-info-safe-area
-            className="pointer-events-none absolute inset-x-0 top-0 bottom-[var(--shots-overlay-bottom-safe)] left-0 z-20 flex items-start pl-3 pt-3"
+        {/* Top chrome: shot index + settings */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between px-4 pt-[calc(var(--stage-header-safe)+0.35rem)]">
+          <div className="pointer-events-auto rounded-full bg-black/45 px-3 py-1 text-xs font-semibold tabular-nums text-white/90 backdrop-blur-sm">
+            {selectedShot
+              ? `${selectedIndex + 1} / ${project.shots.length}`
+              : 'No shots'}
+          </div>
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white shadow-card backdrop-blur-sm transition hover:bg-black/60"
+            aria-label="Camera settings"
+            data-shots-settings-trigger
+            title="Settings (I)"
           >
-            <div className="pointer-events-auto min-h-0 max-h-full overflow-y-auto">
-              <ShotInfoCard
-                project={project}
-                shot={selectedShot}
-                lensMm={lensMm}
-                cameraHeight={cameraHeight}
-                previewSrc={framePreviewUrl}
-                statusLabel={
-                  cameraMoveMode
-                    ? (cameraMoveReady ? 'Move ready' : 'Setting end pose')
-                    : shotCameraFlying
-                      ? 'Adjusting'
-                      : framingAccepted
-                        ? 'Landed'
-                        : 'Unlanded'
-                }
-                nextStepLabel={
-                  cameraMoveMode
-                    ? (cameraMoveReady ? 'Export the move MP4 when ready.' : 'Fly to the end pose, then set end.')
-                    : shotCameraFlying || !framingAccepted
-                      ? 'Land this shot when the frame looks right.'
-                      : 'Continue to another shot, or add a camera move.'
-                }
-                onOpenPrecision={() => setPrecisionOpen(true)}
-                onOpenMenuAction={handleShotMenuAction}
-                onOpenIn360={linkedPano ? openLinkedPanoIn360 : undefined}
-                menuItems={[
-                  { id: 'adjust', label: 'Adjust shot' },
-                  { id: 'land', label: 'Land this shot', disabled: !shotCameraFlying && framingAccepted },
-                  { id: 'camera-move', label: 'Add camera move', disabled: !framingAccepted && !cameraMoveMode },
-                  { id: 'precision', label: 'Camera settings' },
-                ]}
-              />
-            </div>
+            <Settings2 className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Quiet landed flash */}
+        {landFlash && (
+          <div
+            className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-white/10"
+            data-shots-capture-flash
+          >
+            <span className="inline-flex items-center gap-2 rounded-full bg-black/55 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm">
+              <Check className="h-4 w-4 text-emerald-400" />
+              Captured
+            </span>
           </div>
         )}
 
         {showCompare && selectedShot && (
-          <div className="pointer-events-auto absolute inset-y-3 right-3 z-20 w-72 overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-overlay shadow-soft backdrop-blur-sm">
+          <div className="pointer-events-auto absolute inset-y-[calc(var(--stage-header-safe)+3rem)] right-3 z-20 w-72 overflow-hidden rounded-[var(--radius-card)] border border-white/10 bg-black/70 shadow-soft backdrop-blur-md">
             <ShotPanoCropPreview
               imageUrl={linkedAsset?.uri}
               crop={selectedShot.panoCrop}
@@ -518,151 +522,216 @@ export function ShotsWorkspace() {
           </div>
         )}
 
+        {/* Library sheet (opened from thumbnail) */}
+        {libraryOpen && (
+          <div
+            className="absolute inset-0 z-40 flex flex-col justify-end bg-black/50 backdrop-blur-[2px]"
+            data-shots-library
+            onClick={() => setLibraryOpen(false)}
+          >
+            <div
+              className="rounded-t-3xl border border-white/10 bg-zinc-950/95 px-4 pb-8 pt-3 shadow-soft"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-white">Shots</h2>
+                <button
+                  type="button"
+                  onClick={() => setLibraryOpen(false)}
+                  className="rounded-full p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+                  aria-label="Close shot library"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {project.shots.map((shot) => {
+                  const selected = shot.id === selectedShot?.id;
+                  const landed = isShotFramingAccepted(project, shot.id);
+                  return (
+                    <button
+                      key={shot.id}
+                      type="button"
+                      onClick={() => {
+                        selectShot(shot.id);
+                        setLibraryOpen(false);
+                      }}
+                      className={`relative shrink-0 overflow-hidden rounded-xl border transition ${
+                        selected
+                          ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]'
+                          : 'border-white/15'
+                      }`}
+                      aria-label={`Select shot ${shot.shotNumber}`}
+                    >
+                      <ShotThumbnail
+                        project={project}
+                        shot={shot}
+                        overrideSrc={shot.id === selectedShot?.id ? framePreviewUrl : undefined}
+                        className="h-20 w-28 object-cover"
+                      />
+                      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                        {shot.shotNumber}{landed ? ' · ✓' : ''}
+                      </span>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => {
+                    addCamera();
+                    setLibraryOpen(false);
+                  }}
+                  className="inline-flex h-20 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-white/25 text-white/80 transition hover:border-[var(--accent)] hover:text-accent"
+                >
+                  <Plus className="h-5 w-5" />
+                  <span className="text-[10px] font-semibold">New</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bottom camera chrome */}
         <div
-          data-shots-bottom-chrome
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-[var(--shots-bottom-chrome-gap)] px-3 pb-[var(--shots-bottom-chrome-pad)]"
+          data-shots-camera-chrome
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-3 px-4 pb-6 pt-10"
+          style={{
+            background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.35) 55%, transparent 100%)',
+          }}
         >
-          <div className="pointer-events-auto shrink-0">
-            <ShotFilmstrip
-              appearance="overlay"
-              compact
-              project={project}
-              selectedShotId={selectedShot?.id}
-              onSelectShot={selectShot}
-              renderThumbnail={(shot) => (
-                shot.id === selectedShot?.id && framePreviewUrl ? (
-                  <ShotThumbnail project={project} shot={shot} overrideSrc={framePreviewUrl} />
-                ) : undefined
-              )}
+          {/* Mode switcher */}
+          <div
+            data-shots-mode-switcher
+            className="pointer-events-auto flex items-center gap-1 rounded-full bg-black/40 p-1 backdrop-blur-md"
+          >
+            <ModePill
+              label="Still"
+              active={captureMode === 'still'}
+              onClick={() => setMode('still')}
+            />
+            <ModePill
+              label="Video"
+              active={captureMode === 'video'}
+              onClick={() => setMode('video')}
             />
           </div>
 
-          {cameraMoveMode && selectedShot && (
-            <div
-              data-shots-move-strip
-              className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-[var(--radius-card)] border border-subtle bg-surface-overlay px-3 py-2 text-xs text-secondary shadow-card backdrop-blur-sm"
-            >
-              <span className={`rounded-full px-2 py-0.5 font-semibold ${cameraMoveKeyframes.some((k) => k.label.toLowerCase().includes('start') || k.timeSeconds === 0) || cameraMoveKeyframes.length > 0 ? 'bg-accent-soft text-accent' : 'bg-surface-muted'}`}>
-                Start {hasRenderableCameraMove(selectedShot.cameraKeyframes) || selectedShot.cameraKeyframes.length > 0 ? '✓' : '…'}
-              </span>
-              <span className={`rounded-full px-2 py-0.5 font-semibold ${cameraMoveReady ? 'bg-accent-soft text-accent' : 'bg-surface-muted'}`}>
-                End {cameraMoveReady ? '✓' : '…'}
-              </span>
-              <span className="text-muted">Auto-start from landed view · fly for end</span>
-              <button
-                type="button"
-                className="ml-auto text-xs font-medium text-secondary hover:text-accent"
-                onClick={() => {
-                  setCameraMoveMode(false);
-                  if (shotCameraFlying) landShot();
-                }}
-              >
-                Exit move
-              </button>
-            </div>
+          {captureMode === 'video' && (
+            <p className="pointer-events-none text-center text-[11px] font-medium text-white/75">
+              {shotCameraFlying || !cameraMoveReady
+                ? 'Start set · fly to end · capture'
+                : 'End set · export when ready'}
+            </p>
           )}
 
-          {framingAccepted && !shotCameraFlying && !cameraMoveMode && selectedShot && (
-            <div
-              data-shots-land-fork
-              className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-[var(--radius-card)] border border-[var(--accent)]/40 bg-surface-overlay px-3 py-2 shadow-card backdrop-blur-sm"
+          {/* Shutter row */}
+          <div className="pointer-events-auto flex w-full max-w-md items-center justify-between gap-4 px-2">
+            {/* Last / library thumbnail */}
+            <button
+              type="button"
+              onClick={() => setLibraryOpen(true)}
+              className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border-2 border-white/80 bg-zinc-900 shadow-card"
+              aria-label="Open shot library"
+              data-shots-library-thumb
+              title="Previous shots"
             >
-              <span className="text-xs font-medium text-primary">Shot landed.</span>
-              <button
-                type="button"
-                onClick={() => addCamera()}
-                className="rounded-lg border border-subtle px-2.5 py-1 text-xs font-semibold text-secondary hover:border-accent hover:text-accent"
-              >
-                Next shot
-              </button>
-              <button
-                type="button"
-                onClick={startCameraMove}
-                className="rounded-lg border border-[var(--accent)] bg-accent-soft px-2.5 py-1 text-xs font-semibold text-accent"
-              >
-                Add camera move
-              </button>
-              <button
-                type="button"
-                onClick={() => setWorkspace('export')}
-                className="rounded-lg border border-subtle px-2.5 py-1 text-xs font-semibold text-secondary hover:border-accent hover:text-accent"
-              >
-                Go to Export
-              </button>
-            </div>
-          )}
-
-          <div
-            data-shots-action-dock
-            className="pointer-events-auto flex min-h-0 items-end justify-between gap-2"
-          >
-            <div className="flex max-w-[min(100%,42rem)] flex-wrap items-center gap-1 rounded-[var(--radius-card)] border border-subtle bg-surface-overlay px-2 py-1 shadow-card backdrop-blur-sm">
-              <ToolbarButton icon={<Plus className="h-4 w-4" />} label="Add Shot" onClick={addCamera} />
-              <ToolbarButton
-                icon={<Copy className="h-4 w-4" />}
-                label="Duplicate"
-                onClick={duplicateSelectedShot}
-                disabled={!selectedShot}
-              />
-              <ToolbarButton
-                icon={shotCameraFlying ? <CheckCircle2 className="h-4 w-4" /> : <Move3D className="h-4 w-4" />}
-                label={shotCameraFlying ? 'Land' : 'Adjust'}
-                onClick={shotCameraFlying ? (cameraMoveMode ? setCameraMoveEnd : landShot) : () => startFlyCamera()}
-                disabled={!selectedShot}
-                active={shotCameraFlying}
-              />
-              <ToolbarButton
-                icon={<Film className="h-4 w-4" />}
-                label="Pano match"
-                onClick={() => setShowCompare((value) => !value)}
-                active={showCompare}
-                disabled={!linkedPano}
-              />
-              <ToolbarButton
-                icon={<Download className="h-4 w-4" />}
-                label="PNG"
-                onClick={() => void exportCameraFrame()}
-                disabled={!selectedShot || isExportingFrame || isRenderingFrame || shotCameraFlying}
-              />
-              <ToolbarButton
-                icon={<Trash2 className="h-4 w-4" />}
-                label="Delete"
-                onClick={() => selectedShot && removeShot(selectedShot.id)}
-                disabled={!selectedShot || project.shots.length <= 1}
-                danger
-              />
-              {shotCameraFlying && (
-                <span className="hidden px-1 text-xs text-secondary sm:inline">
-                  {cameraMoveMode ? 'Fly to the end pose' : 'WASD / mouse — Land when ready'}
+              {libraryThumbShot ? (
+                <ShotThumbnail
+                  project={project}
+                  shot={libraryThumbShot}
+                  overrideSrc={
+                    libraryThumbShot.id === selectedShot?.id ? framePreviewUrl : undefined
+                  }
+                  className="h-full w-full object-cover"
+                  compact
+                />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center text-white/40">
+                  <ImageIcon className="h-5 w-5" />
                 </span>
               )}
+            </button>
+
+            {/* Capture shutter */}
+            <button
+              type="button"
+              onClick={onCapture}
+              disabled={captureMode === 'video' && !shotCameraFlying && cameraMoveReady && (isExportingCameraMove || !supportedMp4MimeType)}
+              className="group relative flex h-[4.75rem] w-[4.75rem] shrink-0 items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-50"
+              aria-label={captureLabel}
+              data-shots-shutter
+              title={captureHint}
+            >
+              <span className="absolute inset-0 rounded-full border-[3px] border-white/90" />
+              <span
+                className={`h-[3.65rem] w-[3.65rem] rounded-full transition ${
+                  captureMode === 'video'
+                    ? (shotCameraFlying || !cameraMoveReady
+                      ? 'bg-red-500 group-active:scale-95'
+                      : 'bg-[var(--accent)] group-active:scale-95')
+                    : framingAccepted && !shotCameraFlying
+                      ? 'bg-white/90 group-active:scale-95'
+                      : 'bg-white group-active:scale-90'
+                }`}
+              />
+              {captureMode === 'still' && framingAccepted && !shotCameraFlying && (
+                <Check className="pointer-events-none absolute h-6 w-6 text-zinc-900" />
+              )}
+              {captureMode === 'video' && !shotCameraFlying && cameraMoveReady && (
+                <Film className="pointer-events-none absolute h-5 w-5 text-white" />
+              )}
+            </button>
+
+            {/* Adjacent shot nav (keeps layout balanced; light affordance) */}
+            <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-0.5">
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => goAdjacentShot(-1)}
+                  disabled={selectedIndex <= 0}
+                  className="rounded-full p-1.5 text-white/80 transition hover:bg-white/10 disabled:opacity-30"
+                  aria-label="Previous shot"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goAdjacentShot(1)}
+                  disabled={selectedIndex < 0 || selectedIndex >= project.shots.length - 1}
+                  className="rounded-full p-1.5 text-white/80 transition hover:bg-white/10 disabled:opacity-30"
+                  aria-label="Next shot"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
             </div>
-            <PrimaryCTA
-              icon={primaryCta.label.includes('MP4') || primaryCta.label.includes('Export')
-                ? <Film className="h-5 w-5" />
-                : primaryCta.label.includes('Land') || primaryCta.label.includes('end')
-                  ? <CheckCircle2 className="h-5 w-5" />
-                  : primaryCta.label.includes('move')
-                    ? <KeyRound className="h-5 w-5" />
-                    : <Plus className="h-5 w-5" />}
-              label={primaryCta.label}
-              hint={primaryCta.hint}
-              onClick={primaryCta.onClick}
-              disabled={primaryCta.disabled}
-              highlighted={primaryCta.highlighted}
-              layout="inline"
-            />
           </div>
+
+          <p className="pointer-events-none text-center text-[11px] font-medium text-white/70">
+            {captureHint}
+            {shotCameraFlying ? ' · WASD / mouse' : ''}
+          </p>
         </div>
       </div>
 
       <PrecisionDrawer
-        open={precisionOpen && Boolean(selectedShot)}
+        open={settingsOpen && Boolean(selectedShot)}
         title="Camera Settings"
-        onClose={() => setPrecisionOpen(false)}
+        onClose={() => setSettingsOpen(false)}
       >
         {selectedShot && (
-          <div className="space-y-4">
+          <div className="space-y-4" data-shots-advanced-settings>
+            <div className="grid grid-cols-2 gap-2">
+              <IconButton onClick={() => addCamera()} className="w-full">
+                <Plus className="h-4 w-4" />
+                New shot
+              </IconButton>
+              <IconButton onClick={duplicateSelectedShot} className="w-full">
+                <Copy className="h-4 w-4" />
+                Duplicate
+              </IconButton>
+            </div>
+
             <Field label="Name">
               <TextInput value={selectedShot.name} onChange={(event) => updateShot(selectedShot.id, { name: event.target.value })} />
             </Field>
@@ -674,9 +743,20 @@ export function ShotsWorkspace() {
             <Field label="Description">
               <TextArea value={selectedShot.description} onChange={(event) => updateShot(selectedShot.id, { description: event.target.value })} />
             </Field>
-            <Field label="Lens (mm)">
-              <TextInput type="number" value={lensMm} readOnly />
-            </Field>
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="rounded-lg border border-subtle px-2 py-2">
+                <div className="text-muted">Lens</div>
+                <div className="font-semibold text-primary">{lensMm}mm</div>
+              </div>
+              <div className="rounded-lg border border-subtle px-2 py-2">
+                <div className="text-muted">Height</div>
+                <div className="font-semibold text-primary">{cameraHeight.toFixed(1)}m</div>
+              </div>
+              <div className="rounded-lg border border-subtle px-2 py-2">
+                <div className="text-muted">FOV</div>
+                <div className="font-semibold text-primary">{selectedShot.camera.fovDegrees.toFixed(0)}°</div>
+              </div>
+            </div>
             <Field label="Camera Position">
               <Vec3Input
                 value={selectedShot.camera.position}
@@ -717,6 +797,33 @@ export function ShotsWorkspace() {
               </div>
             </Field>
 
+            <Panel title="Tools">
+              <div className="space-y-2">
+                <IconButton
+                  onClick={() => setShowCompare((value) => !value)}
+                  disabled={!linkedPano}
+                  className="w-full"
+                >
+                  <Film className="h-4 w-4" />
+                  {showCompare ? 'Hide pano match' : 'Pano match'}
+                </IconButton>
+                {linkedPano && (
+                  <IconButton onClick={openLinkedPanoIn360} className="w-full">
+                    <Globe className="h-4 w-4" />
+                    Open in 360
+                  </IconButton>
+                )}
+                <IconButton
+                  onClick={() => void exportCameraFrame()}
+                  disabled={isExportingFrame || isRenderingFrame}
+                  className="w-full"
+                >
+                  <Download className="h-4 w-4" />
+                  {isExportingFrame ? 'Exporting...' : `Download PNG (${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height})`}
+                </IconButton>
+              </div>
+            </Panel>
+
             <Panel title="Landmarks">
               <div className="space-y-2">
                 {project.landmarks.map((landmark) => (
@@ -730,22 +837,17 @@ export function ShotsWorkspace() {
                     <span className="flex-1 text-primary">{landmark.displayName}</span>
                   </label>
                 ))}
+                {project.landmarks.length === 0 && (
+                  <p className="text-xs text-secondary">No landmarks in this project.</p>
+                )}
               </div>
             </Panel>
 
-            <Panel title="Export Frame">
-              <IconButton
-                onClick={() => void exportCameraFrame()}
-                disabled={isExportingFrame || isRenderingFrame}
-                className="w-full"
-              >
-                <Download className="h-4 w-4" />
-                {isExportingFrame ? 'Exporting...' : `Download Frame (${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height})`}
-              </IconButton>
-            </Panel>
-
-            <Panel title="Camera Move MP4">
+            <Panel title="Video mode (advanced)">
               <div className="space-y-3">
+                <p className="text-xs text-secondary">
+                  Use the Video mode on the camera chrome for the simple path. Manual keyframes live here.
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   <IconButton onClick={() => captureCameraMoveKeyframe('start')} className="w-full">
                     <KeyRound className="h-4 w-4" />
@@ -796,8 +898,9 @@ export function ShotsWorkspace() {
               type="button"
               onClick={() => removeShot(selectedShot.id)}
               disabled={project.shots.length <= 1}
-              className="w-full rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 transition hover:bg-red-50 disabled:opacity-45"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 transition hover:bg-red-50 disabled:opacity-45"
             >
+              <Trash2 className="h-4 w-4" />
               Delete Shot
             </button>
           </div>
@@ -807,35 +910,25 @@ export function ShotsWorkspace() {
   );
 }
 
-function ToolbarButton({
-  icon,
+function ModePill({
   label,
-  onClick,
-  disabled,
   active,
-  danger,
+  onClick,
 }: {
-  icon: React.ReactNode;
   label: string;
+  active: boolean;
   onClick: () => void;
-  disabled?: boolean;
-  active?: boolean;
-  danger?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition disabled:opacity-45 ${
-        danger
-          ? 'border-red-200 text-red-600 hover:bg-red-50'
-          : active
-            ? 'border-[var(--accent)] bg-accent-soft text-accent'
-            : 'border-subtle text-secondary hover:border-strong hover:text-primary'
+      className={`rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition ${
+        active
+          ? 'bg-white text-zinc-900 shadow-sm'
+          : 'text-white/70 hover:text-white'
       }`}
     >
-      {icon}
       {label}
     </button>
   );
