@@ -263,8 +263,13 @@ export function BuildWorkspace() {
           onEditBatchEnd={endBuildHistoryBatch}
         />
 
-        <div className="pointer-events-none absolute right-5 top-5 z-10 flex flex-col items-end gap-2">
-          <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-subtle bg-surface-overlay p-1 shadow-card backdrop-blur">
+        {/* Sit below the global header action cluster so undo/redo isn't stacked under theme. */}
+        <div
+          className="pointer-events-none absolute right-5 z-10 flex flex-col items-end gap-2"
+          style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+          data-build-top-tools
+        >
+          <div className="pointer-events-auto flex items-center gap-0.5 overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm">
             <button
               type="button"
               title="Undo Build edit (Ctrl+Z)"
@@ -272,10 +277,11 @@ export function BuildWorkspace() {
               data-build-undo
               disabled={!canUndo}
               onClick={() => undoBuild()}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition hover:bg-surface-muted hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-9 w-9 items-center justify-center border-0 bg-transparent text-secondary transition hover:bg-surface-muted/80 hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
             >
               <Undo2 className="h-4 w-4" />
             </button>
+            <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
             <button
               type="button"
               title="Redo Build edit (Ctrl+Shift+Z)"
@@ -283,23 +289,24 @@ export function BuildWorkspace() {
               data-build-redo
               disabled={!canRedo}
               onClick={() => redoBuild()}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition hover:bg-surface-muted hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-9 w-9 items-center justify-center border-0 bg-transparent text-secondary transition hover:bg-surface-muted/80 hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
             >
               <Redo2 className="h-4 w-4" />
             </button>
+            <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
+            <button
+              type="button"
+              title={showSceneGuides ? 'Hide scene guides' : 'Show camera guides'}
+              onClick={() => setShowSceneGuides((visible) => !visible)}
+              className={`inline-flex h-9 w-9 items-center justify-center border-0 transition ${
+                showSceneGuides
+                  ? 'bg-accent-soft text-accent'
+                  : 'bg-transparent text-secondary hover:bg-surface-muted/80 hover:text-primary'
+              }`}
+            >
+              {showSceneGuides ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            </button>
           </div>
-          <button
-            type="button"
-            title={showSceneGuides ? 'Hide scene guides' : 'Show camera guides'}
-            onClick={() => setShowSceneGuides((visible) => !visible)}
-            className={`pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border transition ${
-              showSceneGuides
-                ? 'border-[var(--accent)] bg-accent-soft text-accent'
-                : 'border-subtle bg-surface-overlay/90 text-secondary hover:border-accent hover:text-accent'
-            }`}
-          >
-            {showSceneGuides ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-          </button>
         </div>
 
         {selectedObject && buildMode === 'select' && (

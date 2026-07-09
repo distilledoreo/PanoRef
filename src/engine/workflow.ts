@@ -19,7 +19,9 @@ export interface WorkspaceObjective {
 
 export interface ShotWorkflowProgress {
   framingAccepted: boolean;
+  /** @deprecated kept for older project metadata; not a production gate */
   aiBriefSent: boolean;
+  /** @deprecated kept for older project assets; not a production gate */
   aiResultImported: boolean;
   finalPackageExported: boolean;
 }
@@ -35,11 +37,10 @@ const STEP_LABELS: Record<ProductionStepId, string> = {
   build: 'Build',
   reference: 'Reference',
   shots: 'Shots',
-  review: 'Review',
   export: 'Export',
 };
 
-const STEP_ORDER: ProductionStepId[] = ['build', 'reference', 'shots', 'review', 'export'];
+const STEP_ORDER: ProductionStepId[] = ['build', 'reference', 'shots', 'export'];
 
 export function normalizeProjectWorkflow(workflow?: Partial<ProjectWorkflow>): ProjectWorkflow {
   return {
@@ -49,6 +50,13 @@ export function normalizeProjectWorkflow(workflow?: Partial<ProjectWorkflow>): P
     aiBriefSentAtByShotId: { ...workflow?.aiBriefSentAtByShotId },
     finalPackageExportedAtByShotId: { ...workflow?.finalPackageExportedAtByShotId },
   };
+}
+
+/** Map legacy workspace ids (e.g. removed Review) onto the current path. */
+export function normalizeWorkspace(workspace: string | undefined): Workspace {
+  if (workspace === 'reference' || workspace === 'shots' || workspace === 'export') return workspace;
+  if (workspace === 'review') return 'export';
+  return 'build';
 }
 
 export const REFERENCE_ALIGNMENT_RETRY_TIPS = [
@@ -133,8 +141,6 @@ export function isStepComplete(step: ProductionStepId, project: LocationProject,
       return isReferenceReady(project);
     case 'shots':
       return isShotFramingAccepted(project, shotId);
-    case 'review':
-      return isAiBriefSent(project, shotId) && hasAiResultFrame(getSelectedShot(project, shotId));
     case 'export':
       return isFinalPackageExported(project, shotId);
     default:
@@ -159,19 +165,13 @@ function stepBlockers(step: ProductionStepId, context: ProductionPathContext): s
       return ['Finish the reference step before moving on.'];
     case 'shots':
       if (!shot) return ['Add a camera shot.'];
-      if (shotCameraFlying) return ['Lock the camera to finish framing.'];
-      if (!isShotFramingAccepted(project, shot.id)) return ['Accept framing after the camera is locked.'];
-      return [];
-    case 'review':
-      if (!shot) return ['Select a shot.'];
-      if (!isShotFramingAccepted(project, shot.id)) return ['Accept shot framing in Shots first.'];
-      if (!isAiBriefSent(project, shot.id)) return ['Export the AI Brief ZIP and mark it sent.'];
-      if (!hasAiResultFrame(shot)) return ['Import the generated AI result frame.'];
+      if (shotCameraFlying) return ['Land this shot when the frame looks right.'];
+      if (!isShotFramingAccepted(project, shot.id)) return ['Land this shot to commit framing.'];
       return [];
     case 'export':
       if (!shot) return ['Select a shot.'];
-      if (!hasAiResultFrame(shot)) return ['Import an AI result frame in Review first.'];
-      if (!isFinalPackageExported(project, shot.id)) return ['Export the final ZIP package for this shot.'];
+      if (!isShotFramingAccepted(project, shot.id)) return ['Land shot framing in Shots first.'];
+      if (!isFinalPackageExported(project, shot.id)) return ['Export the continuity ZIP package for this shot.'];
       return [];
     default:
       return [];
@@ -251,31 +251,22 @@ export function resolveWorkspaceObjective(context: ProductionPathContext): Works
       };
     case 'shots':
       return {
-        goal: shot ? `Frame ${shot.name} and accept the locked camera.` : 'Frame the active camera shot.',
-        why: 'Accepted framing becomes the camera truth for AI briefs and exports.',
+        goal: shot ? `Frame ${shot.name} and land the camera.` : 'Frame the active camera shot.',
+        why: 'Landed framing is the camera truth for continuity packages and external AI tools.',
         proceedSignal: shot && isShotFramingAccepted(project, shot.id)
-          ? 'Framing accepted — continue to Review for the AI handoff.'
+          ? 'Shot landed — export a handoff package, or add another shot.'
           : shotCameraFlying
-            ? 'Lock the camera, then accept framing.'
-            : 'Fly the camera, lock it, then accept framing.',
-        blockers,
-      };
-    case 'review':
-      return {
-        goal: shot ? `Hand ${shot.name} to your image generator and bring the result back.` : 'Export the AI brief and import a result frame.',
-        why: 'Review is where external generation meets the continuity package.',
-        proceedSignal: shot && hasAiResultFrame(shot) && isAiBriefSent(project, shot.id)
-          ? 'AI result imported — export the final package in Export.'
-          : 'Export the AI Brief ZIP, mark it sent, then import the result frame.',
+            ? 'Look around, then land this shot when the frame looks right.'
+            : 'Adjust the camera, then land this shot when the frame looks right.',
         blockers,
       };
     case 'export':
       return {
-        goal: shot ? `Publish the final continuity package for ${shot.name}.` : 'Export the final shot package.',
-        why: 'This ZIP is the deliverable for downstream video and continuity tooling.',
+        goal: shot ? `Export the continuity handoff package for ${shot.name}.` : 'Export continuity packages for your shots.',
+        why: 'Packages carry control frames, camera data, and prompts to external AI and pipeline tools — deliverables stay outside this app.',
         proceedSignal: shot && isFinalPackageExported(project, shot.id)
-          ? 'Final package exported for this shot.'
-          : 'Export the final ZIP when the manifest looks complete.',
+          ? 'Package exported for this shot. Open it in your AI or pipeline tools.'
+          : 'Export ZIPs for the shots you need. No need to import results back here.',
         blockers,
       };
     default:
@@ -323,8 +314,7 @@ export type WorkspacePrimaryActionId =
   | 'lock-camera'
   | 'fly-camera'
   | 'accept-framing'
-  | 'export-ai-brief'
-  | 'import-ai-result'
+  | 'land-shot'
   | 'export-final-zip';
 
 export interface WorkspacePrimaryAction {
@@ -364,31 +354,10 @@ export function resolveWorkspacePrimaryAction(
       return undefined;
     case 'shots':
       if (!shot) return undefined;
-      if (!isShotFramingAccepted(project, shot.id)) {
-        if (shotCameraFlying) {
-          return {
-            id: 'lock-camera',
-            hint: 'Fly the camera in the viewport, then click to lock it.',
-          };
-        }
+      if (!isShotFramingAccepted(project, shot.id) || shotCameraFlying) {
         return {
-          id: 'accept-framing',
-          hint: 'Accept framing when the clay and pano crop previews look right.',
-        };
-      }
-      return undefined;
-    case 'review':
-      if (!shot) return undefined;
-      if (!isAiBriefSent(project, shot.id)) {
-        return {
-          id: 'export-ai-brief',
-          hint: 'Export the AI brief ZIP for your image generator.',
-        };
-      }
-      if (!hasAiResultFrame(shot)) {
-        return {
-          id: 'import-ai-result',
-          hint: 'Import the image your generator produced.',
+          id: 'land-shot',
+          hint: 'Land this shot when the frame looks right — saves the camera and marks it ready to export.',
         };
       }
       return undefined;
@@ -397,7 +366,7 @@ export function resolveWorkspacePrimaryAction(
       if (!isFinalPackageExported(project, shot.id)) {
         return {
           id: 'export-final-zip',
-          hint: 'Export the final ZIP package for this shot.',
+          hint: 'Export the continuity ZIP handoff package for this shot.',
         };
       }
       return undefined;

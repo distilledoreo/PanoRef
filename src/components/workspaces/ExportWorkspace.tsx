@@ -129,7 +129,9 @@ export function ExportWorkspace() {
           >
             <header data-export-package-header className="mb-3 shrink-0">
               <h1 className="text-xl font-semibold text-primary">Export Your Shots</h1>
-              <p className="mt-0.5 text-sm text-secondary">Choose what to export. Each shot is packaged individually.</p>
+              <p className="mt-0.5 text-sm text-secondary">
+                Handoff packages for your AI and pipeline tools. Each shot is a ZIP — deliverables stay outside this app.
+              </p>
             </header>
 
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2">
@@ -261,7 +263,7 @@ export function ExportWorkspace() {
               <PrimaryCTA
                 icon={<Download className="h-4 w-4" />}
                 label={isExportingPackage ? 'Building Package...' : 'Export Selected Shots'}
-                hint="Create ZIP packages for each selected shot."
+                hint="Download continuity ZIPs for each selected shot. No need to import results back."
                 onClick={() => void exportSelectedShots()}
                 disabled={isExportingPackage || selectedShotIds.size === 0}
                 highlighted={primaryAction?.id === 'export-final-zip'}
@@ -304,12 +306,12 @@ export function ExportWorkspace() {
             </div>
             {([
               ['includeViewport', 'Viewport clay render'],
-              ['includeAiResultFrame', 'Imported AI result frame'],
+              ['includeAiResultFrame', 'AI result frame (if already attached)'],
               ['includePanoCrop', 'Pano crop'],
               ['includeFullPano', 'Styled reference pano'],
               ['includeGrayboxPano', 'Graybox pano'],
               ['includeCameraMoveVideo', 'Camera move MP4'],
-              ['includeCameraMoveReferenceFrames', 'Camera move cubemap references'],
+              ['includeCameraMoveReferenceFrames', 'Camera move clay frames'],
               ['includeMetadata', 'Metadata JSON'],
               ['includePrompt', 'Prompts'],
             ] as const).map(([key, label]) => (

@@ -8,7 +8,6 @@ describe('ui revamp fidelity surfaces', () => {
     const shell = readFileSync(new URL('../src/components/workspaces/WorkspaceShell.tsx', import.meta.url), 'utf8');
     const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
     const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
     expect(app).toContain('<main className="absolute inset-0">');
@@ -16,12 +15,13 @@ describe('ui revamp fidelity surfaces', () => {
     expect(app).toContain('bg-surface-overlay/75');
     expect(app).not.toContain('border-b border-subtle bg-surface-header');
     expect(app).not.toContain('flex h-screen w-full flex-col');
+    expect(app).not.toContain('ReviewWorkspace');
+    expect(app).not.toContain("id: 'review'");
     expect(styles).toContain('--stage-header-safe');
     expect(shell).toContain('reserveHeader');
     expect(shell).toContain('pt-[var(--stage-header-safe)]');
     expect(reference).toContain('FullBleedLayout reserveHeader');
     expect(shots).toContain('FullBleedLayout reserveHeader');
-    expect(review).toContain('FullBleedLayout reserveHeader');
     expect(exportWorkspace).toContain('FullBleedLayout reserveHeader');
     expect(build).toContain('<FullBleedLayout>');
     expect(build).not.toContain('reserveHeader');
@@ -59,12 +59,25 @@ describe('ui revamp fidelity surfaces', () => {
     expect(panoViewer).not.toContain('THEME_COLORS.light.empty');
   });
 
-  it('exposes fly camera controls directly in the shots action dock', () => {
+  it('uses an iPhone-style camera chrome for shots capture', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    expect(shots).toContain("'Fly Camera'");
-    expect(shots).toContain("'Lock View'");
-    expect(shots).toContain('commitDraftCameraAndLock');
-    expect(shots).not.toContain('label="Frame"');
+    expect(shots).toContain('data-shots-camera-shell');
+    expect(shots).toContain('data-shots-shutter');
+    expect(shots).toContain('data-shots-mode-switcher');
+    expect(shots).toContain('data-shots-library-thumb');
+    expect(shots).toContain('data-shots-library-delete');
+    expect(shots).toContain('data-shots-settings-trigger');
+    expect(shots).toContain('data-shots-video-duration');
+    expect(shots).toContain('VIDEO_DURATION_PRESETS_SECONDS');
+    expect(shots).toContain('landShotFraming');
+    expect(shots).toContain('keepFlying: true');
+    expect(shots).toContain('captureStill');
+    expect(shots).toContain("captureMode === 'still'");
+    expect(shots).toContain("captureMode === 'video'");
+    expect(shots).toContain('viewfinder stays live');
+    expect(shots).not.toContain('data-shots-action-dock');
+    expect(shots).not.toContain('data-shots-land-fork');
+    expect(shots).not.toContain('ShotInfoCard');
   });
 
   it('pauses automatic shot frame preview renders while fly camera is active', () => {
@@ -134,10 +147,12 @@ describe('ui revamp fidelity surfaces', () => {
     expect(store).toContain('removePanoReference:');
   });
 
-  it('clarifies shots frame download vs accept framing', () => {
+  it('keeps advanced shot tools in settings rather than the camera chrome', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    expect(shots).toContain('Download Shot Frame');
-    expect(shots).toContain('Accept Framing');
+    expect(shots).toContain('data-shots-advanced-settings');
+    expect(shots).toContain('Download PNG');
+    expect(shots).toContain('Pano match');
+    expect(shots).toContain('Video mode (advanced)');
     expect(shots).not.toContain("label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}");
   });
 
@@ -147,27 +162,20 @@ describe('ui revamp fidelity surfaces', () => {
     expect(exportWorkspace).toContain('active shot');
   });
 
-  it('anchors shots floating card above the bottom overlay safe area', () => {
+  it('uses camera-style bottom chrome without a floating shot dossier', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
     expect(styles).toContain('--shots-overlay-bottom-safe');
-    expect(shots).toContain('data-shots-info-safe-area');
-    expect(shots).toContain('bottom-[var(--shots-overlay-bottom-safe)]');
-    expect(shots).toContain('items-start');
-    expect(shots).not.toContain('items-center pl-3');
+    expect(shots).toContain('data-shots-camera-chrome');
+    expect(shots).toContain('data-shots-library');
+    expect(shots).not.toContain('data-shots-info-safe-area');
+    expect(shots).not.toContain('ShotFilmstrip');
   });
 
-  it('uses shots workspace overlay layout with floating info card and cinematic filmstrip', () => {
-    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    const shotInfoCard = readFileSync(new URL('../src/components/common/ShotInfoCard.tsx', import.meta.url), 'utf8');
+  it('keeps shot filmstrip component available for other surfaces', () => {
     const filmstrip = readFileSync(new URL('../src/components/common/ShotFilmstrip.tsx', import.meta.url), 'utf8');
+    const shotInfoCard = readFileSync(new URL('../src/components/common/ShotInfoCard.tsx', import.meta.url), 'utf8');
     const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
-    expect(shots).toContain('ShotInfoCard');
-    expect(shots).toContain('appearance="overlay"');
-    expect(shots).toContain('absolute inset-x-0 bottom-0');
-    expect(shots).toContain('layout="inline"');
-    expect(shots).not.toContain('grid-cols-[minmax(220px,280px)_minmax(0,1fr)]');
-    expect(shots).not.toContain('ContextualPanel');
     expect(shotInfoCard).toContain('data-shot-info-card="floating"');
     expect(shotInfoCard).toContain('bg-surface-overlay');
     expect(filmstrip).toContain("appearance?: 'default' | 'overlay'");
@@ -268,31 +276,65 @@ describe('ui revamp fidelity surfaces', () => {
     expect(store).toContain("history?: BuildHistoryMode");
   });
 
-  it('fits review grid as a compact 3x2 layout above the action bar', () => {
-    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
-    expect(review).toContain('fitsCompactGrid');
-    expect(review).toContain('lg:grid-cols-3');
-    expect(review).toContain('content-start');
-    expect(review).toContain('auto-rows-min');
-    expect(review).toContain('overflow-hidden');
-    expect(review).toContain('compactGrid');
-    expect(review).toContain('data-review-grid-card={compactGrid ? \'compact\' : \'default\'}');
-    expect(review).toContain('aspect-video max-h-[8.5rem]');
-    expect(review).not.toContain('lg:grid-rows-2');
-    expect(review).not.toContain('gridTemplateColumns');
+  it('ends the production path at export handoff without a review stage', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    const workflow = readFileSync(new URL('../src/engine/workflow.ts', import.meta.url), 'utf8');
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    expect(app).toContain("id: 'export'");
+    expect(app).not.toContain("id: 'review'");
+    expect(workflow).toContain("['build', 'reference', 'shots', 'export']");
+    expect(workflow).toContain('normalizeWorkspace');
+    expect(workflow).not.toContain("return ['Import an AI result frame in Review first.']");
+    expect(shots).toContain('setWorkspace');
+    expect(shots).toContain('data-shots-shutter');
   });
 
-  it('keeps export multi-select reconciled and add-camera local to review/export', () => {
+  it('offers a simple 360 viewer mode with download current view', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    const modeStore = readFileSync(new URL('../src/state/useAppModeStore.ts', import.meta.url), 'utf8');
+    const chooser = readFileSync(new URL('../src/components/common/ModeChooser.tsx', import.meta.url), 'utf8');
+    const panoViewer = readFileSync(new URL('../src/components/workspaces/PanoViewerWorkspace.tsx', import.meta.url), 'utf8');
+    expect(modeStore).toContain("panoref-app-mode");
+    expect(modeStore).toContain("'continuity' | 'panoViewer'");
+    expect(app).toContain('ModeChooser');
+    expect(app).toContain('PanoViewerWorkspace');
+    expect(app).toContain('Simple 360 Viewer');
+    expect(app).toContain('Open Continuity Stage');
+    expect(app).toContain('data-brand-menu-trigger');
+    expect(app).toContain('ChevronDown');
+    expect(app).toContain('Open app menu');
+    expect(chooser).toContain('data-mode-chooser');
+    expect(chooser).toContain('Just view a 360 pano');
+    expect(panoViewer).toContain('Download current view');
+    expect(panoViewer).toContain('renderPanoPerspectiveCrop');
+    expect(panoViewer).toContain('downloadDataUrl');
+    expect(panoViewer).toContain('data-pano-viewer-workspace');
+    expect(panoViewer).toContain('data-pano-viewer-isolated');
+    // Must not mutate Continuity Stage project from simple viewer.
+    expect(panoViewer).not.toContain("from '../../state/useContinuityStore'");
+    expect(panoViewer).not.toContain('importCanonicalPano');
+    expect(panoViewer).toContain('useState');
+  });
+
+  it('advances video shutter from capture-end to export without requiring fly to stop', () => {
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    expect(shots).toContain('videoEndCaptured');
+    expect(shots).toContain("data-shots-video-phase");
+    expect(shots).toContain('setVideoEndCaptured(true)');
+    // Export must not be gated on !shotCameraFlying.
+    expect(shots).not.toMatch(/if \(shotCameraFlying \|\| !cameraMoveReady\)/);
+    expect(shots).toMatch(/if \(!videoEndCaptured\)/);
+    // Preview after capture should read latest store project (not stale closure only).
+    expect(shots).toContain('useContinuityStore.getState().project');
+  });
+
+  it('keeps export multi-select reconciled and add-camera local to export', () => {
     const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
-    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
     const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
     expect(exportWorkspace).toContain('reconcileExportSelectedShotIds');
     expect(exportWorkspace).toContain('navigateToShots: false');
-    expect(review).toContain('navigateToShots: false');
-    expect(review).toContain('WarningPopover');
-    expect(review).toContain('data-review-warning');
-    expect(review).toContain('placement="below"');
-    expect(review).not.toMatch(/data-review-grid-card[\s\S]*overflow-hidden rounded-\[var\(--radius-card\)\]/);
+    expect(exportWorkspace).toContain('WarningPopover');
+    expect(exportWorkspace).toContain('Handoff packages');
     expect(store).toContain('navigateToShots?: boolean');
   });
 
@@ -334,27 +376,13 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).not.toMatch(/LandmarkStrip[\s\S]*bottom-5 right-5[\s\S]*PrimaryCTA/);
   });
 
-  it('reserves an intentional shots bottom safe area for the filmstrip and CTA hint', () => {
+  it('reserves space for the camera shutter chrome on shots', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    const primaryCta = readFileSync(new URL('../src/components/common/PrimaryCTA.tsx', import.meta.url), 'utf8');
     const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
-    expect(styles).toContain('--shots-overlay-bottom-safe: 12rem');
-    expect(styles).toContain('--shots-bottom-chrome-pad: 1.125rem');
-    expect(styles).toContain('--shots-bottom-chrome-gap: 0.375rem');
-    expect(styles).toContain('--shots-cta-hint-block: 1.125rem');
-    expect(styles).toContain('--shots-cta-lane: 15.5rem');
-    expect(shots).toContain('data-shots-bottom-chrome');
-    expect(shots).toContain('data-shots-action-dock');
-    expect(shots).toContain('bottom-[var(--shots-overlay-bottom-safe)]');
-    expect(shots).toContain('pb-[var(--shots-bottom-chrome-pad)]');
-    expect(shots).toContain('gap-[var(--shots-bottom-chrome-gap)]');
-    expect(shots).toContain('Downloads a clay PNG');
-    expect(shots).toContain('compact');
-    expect(primaryCta).toContain('data-primary-cta-hint');
-    expect(primaryCta).toContain('items-end');
-    expect(primaryCta).toContain('whitespace-nowrap');
-    expect(primaryCta).toContain('--shots-cta-lane');
-    expect(primaryCta).toContain('leading-[var(--shots-cta-hint-block,1.125rem)]');
+    expect(styles).toContain('--shots-overlay-bottom-safe');
+    expect(shots).toContain('data-shots-camera-chrome');
+    expect(shots).toContain('data-shots-shutter');
+    expect(shots).toContain('viewfinder stays live');
   });
 
   it('bundles a CC0 human mannequin glb for person scale references', () => {
@@ -384,24 +412,6 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shotThumbnail).not.toContain('ImageIcon');
     expect(styles).toContain('--thumbnail-fallback-sky');
     expect(styles).toContain('--thumbnail-fallback-block-a');
-  });
-
-  it('keeps review compact-grid thumbnails thumbnail-first instead of stretching', () => {
-    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
-    const statusBadge = readFileSync(new URL('../src/components/common/StatusBadge.tsx', import.meta.url), 'utf8');
-    const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
-    expect(statusBadge).toContain('className?: string');
-    expect(review).toContain('aspect-video max-h-[8.5rem]');
-    expect(review).toContain('StatusGlow level={level} showIcon={false} className="w-full overflow-hidden"');
-    expect(review).toContain('renderViewportClay(project, shot.camera, previewSize.width, previewSize.height)');
-    expect(review).toContain('getReviewShotControlSize');
-    expect(review).toContain('overrideLabel="Graybox shot"');
-    expect(review).toContain('fallbackOnly');
-    expect(review).toContain('Graybox Shot Control');
-    expect(review).not.toContain('compactGrid ? \'h-full min-h-0\'');
-    expect(review).not.toContain('lg:grid-rows-2');
-    expect(shotThumbnail).toContain('data-shot-thumbnail-fallback');
-    expect(shotThumbnail).toContain('fallbackOnly?: boolean');
   });
 
   it('uses compact shot thumbnail fallbacks without cramped labels in export rows', () => {

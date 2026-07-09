@@ -7,7 +7,6 @@ import { serializeProject, parseProject } from '../src/engine/projectIO';
 import { getProjectWarnings, getShotWarnings } from '../src/engine/warnings';
 import { getLatestGrayboxPano, getPanoAsset } from '../src/domain/selectors';
 import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
-import { addCameraMoveCubemapCropPaths, buildCameraMoveCubemapVisibility, cameraMoveCubemapVisibleStitchedPath } from '../src/engine/cameraMoveCubemap';
 import { useContinuityStore } from '../src/state/useContinuityStore';
 
 describe('project workflow logic', () => {
@@ -380,18 +379,50 @@ describe('project workflow logic', () => {
     });
 
     const paths = createShotPackageManifest(project, shot).files.map((file) => file.path);
-    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/px.png');
-    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/nx.png');
-    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/py.png');
-    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/ny.png');
-    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/pz.png');
-    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/nz.png');
-    expect(paths).toContain('shot_001/inputs/camera_move/cubemap/cubemap_stitched.png');
-    expect(paths).toContain('shot_001/metadata/camera_move_cubemap_visibility.json');
+    expect(paths).toContain('shot_001/inputs/cubemap/px.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/nx.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/py.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/ny.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/pz.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/nz.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/cubemap_stitched.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/clay_start.png');
+    expect(paths).not.toContain('shot_001/metadata/camera_move_cubemap_visibility.json');
+    expect(paths).not.toContain('shot_001/inputs/camera_move/cubemap_visible/start_stitched.png');
     expect(paths).not.toContain('shot_001/inputs/camera_move/pano_reference_start.png');
   });
 
-  it('adds computed cubemap visible crop paths to the final manifest', () => {
+  it('includes cubemap with full pano even without camera keyframes', () => {
+    const project = createDefaultProject();
+    const asset = createPanoAsset({
+      name: 'global_reference.png',
+      uri: 'data:image/png;base64,AAAA',
+      width: 2048,
+      height: 1024,
+    });
+    const pano = createPanoReference({
+      name: 'Canonical',
+      assetId: asset.id,
+      type: 'ai_global_reference',
+      origin: project.scene.panoOrigin,
+      width: asset.width ?? 2048,
+      height: asset.height ?? 1024,
+      isCanonical: true,
+    });
+    project.assets.assets[asset.id] = asset;
+    project.panoRefs.push(pano);
+    const shot = project.shots[0];
+    shot.linkedPanoId = pano.id;
+    shot.cameraKeyframes = [];
+    shot.exportSettings.includeFullPano = true;
+
+    const paths = createShotPackageManifest(project, shot).files.map((file) => file.path);
+    expect(paths).toContain('shot_001/inputs/cubemap/pz.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/cubemap_stitched.png');
+    expect(paths).not.toContain('shot_001/inputs/camera_move/clay_start.png');
+  });
+
+  it('never lists cubemap_visible paths in the package manifest', () => {
     const project = createDefaultProject();
     const asset = createPanoAsset({
       name: 'global_reference.png',
@@ -425,19 +456,10 @@ describe('project workflow logic', () => {
       },
       durationSeconds: 3,
     });
-    const visibility = addCameraMoveCubemapCropPaths(buildCameraMoveCubemapVisibility(
-      project,
-      shot,
-      pano,
-      [{ id: 'start', label: 'Start', timeSeconds: 0, camera: shot.camera }],
-      { faceSize: 128, columns: 5, rows: 3 },
-    ));
 
-    const paths = createShotPackageManifest(project, shot, visibility).files.map((file) => file.path);
-    expect(visibility.frames[0].visibleFaces.length).toBeGreaterThan(0);
-    const stitchedPath = cameraMoveCubemapVisibleStitchedPath('start');
-    expect(stitchedPath).toBeTruthy();
-    expect(paths).toContain(`shot_001/${stitchedPath}`);
+    const paths = createShotPackageManifest(project, shot).files.map((file) => file.path);
+    expect(paths.every((path) => !path.includes('cubemap_visible'))).toBe(true);
+    expect(paths.every((path) => !path.includes('camera_move_cubemap_visibility'))).toBe(true);
   });
 
   it('fails gracefully when exporting without a selected shot', async () => {

@@ -48,8 +48,6 @@ export function ShotSelector({
           const selected = shot.id === selectedShotId;
           const completedSteps = [
             progress.framingAccepted,
-            progress.aiBriefSent,
-            progress.aiResultImported,
             progress.finalPackageExported,
           ].filter(Boolean).length;
 
@@ -71,11 +69,9 @@ export function ShotSelector({
                 </span>
               </div>
               <div className="mt-1.5 flex items-center justify-between gap-2 text-xs text-zinc-500">
-                <span>{completedSteps}/4 checkpoints</span>
+                <span>{completedSteps}/2 checkpoints</span>
                 <div className="flex items-center gap-1">
                   <ShotCheckpoint done={progress.framingAccepted} title="Framing" />
-                  <ShotCheckpoint done={progress.aiBriefSent} title="Brief" />
-                  <ShotCheckpoint done={progress.aiResultImported} title="Result" />
                   <ShotCheckpoint done={progress.finalPackageExported} title="Export" />
                 </div>
               </div>

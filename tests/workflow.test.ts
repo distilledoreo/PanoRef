@@ -9,6 +9,7 @@ import {
   needsReferenceAlignment,
   isStepComplete,
   buildAdvancePromptKey,
+  normalizeWorkspace,
   resolveProductionPath,
   resolveWorkflowAdvancePrompt,
   resolveWorkspaceObjective,
@@ -80,7 +81,7 @@ describe('workflow resolver', () => {
     expect(isReferenceReady(project)).toBe(true);
   });
 
-  it('requires explicit accept framing after camera lock', () => {
+  it('requires landed framing before shots step is complete', () => {
     const project = withGraybox();
     project.workflow.grayboxApprovedForReferenceAt = new Date().toISOString();
     const shotId = project.shots[0].id;
@@ -91,19 +92,24 @@ describe('workflow resolver', () => {
     expect(isStepComplete('shots', project, shotId)).toBe(true);
   });
 
-  it('marks review complete after AI brief and result import', () => {
+  it('advances from landed shots to export without AI result import', () => {
     const project = withGraybox();
     const shot = project.shots[0];
     project.workflow.grayboxApprovedForReferenceAt = new Date().toISOString();
     project.workflow.shotFramingAcceptedAtByShotId[shot.id] = new Date().toISOString();
-    project.workflow.aiBriefSentAtByShotId[shot.id] = new Date().toISOString();
-    shot.assets.aiResultFrameAssetId = 'asset_ai';
-    expect(isStepComplete('review', project, shot.id)).toBe(true);
+    expect(getRecommendedWorkspace({
+      project,
+      workspace: 'shots',
+      selectedShotId: shot.id,
+      shotCameraFlying: false,
+    })).toBe('export');
+    expect(isStepComplete('export', project, shot.id)).toBe(false);
   });
 
-  it('marks export complete after final package checkpoint', () => {
+  it('marks export complete after final package checkpoint without AI result', () => {
     const project = withGraybox();
     const shot = project.shots[0];
+    project.workflow.shotFramingAcceptedAtByShotId[shot.id] = new Date().toISOString();
     project.workflow.finalPackageExportedAtByShotId[shot.id] = new Date().toISOString();
     expect(isStepComplete('export', project, shot.id)).toBe(true);
   });
@@ -143,13 +149,13 @@ describe('workflow resolver', () => {
       workspace: 'shots',
       selectedShotId: shotId,
       shotCameraFlying: true,
-    })?.id).toBe('lock-camera');
+    })?.id).toBe('land-shot');
     expect(resolveWorkspacePrimaryAction({
       project: withBox,
       workspace: 'shots',
       selectedShotId: shotId,
       shotCameraFlying: false,
-    })?.id).toBe('accept-framing');
+    })?.id).toBe('land-shot');
   });
 
   it('describes workspace objectives with proceed signals', () => {
@@ -162,5 +168,10 @@ describe('workflow resolver', () => {
     });
     expect(objective.goal).toContain(project.shots[0].name);
     expect(objective.blockers.length).toBeGreaterThan(0);
+  });
+
+  it('maps legacy review workspace to export', () => {
+    expect(normalizeWorkspace('review')).toBe('export');
+    expect(normalizeWorkspace('shots')).toBe('shots');
   });
 });

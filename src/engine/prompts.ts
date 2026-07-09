@@ -65,6 +65,7 @@ export function generateImagePrompt(project: LocationProject, shot: Shot): strin
   ];
   if (hasGlobalReference) {
     referenceInstructions.push('Use global_reference.png, when available, as the visual identity, lighting, material, and palette reference.');
+    referenceInstructions.push('Use inputs/cubemap/ (face PNGs and cubemap_stitched.png), when available, as the undistorted environment / material reference.');
   }
   if (hasGrayboxPano) {
     referenceInstructions.push('Use global_graybox.png, when available, as the full-location spatial reference.');
@@ -73,8 +74,7 @@ export function generateImagePrompt(project: LocationProject, shot: Shot): strin
     referenceInstructions.push('Use pano_crop.png, when available, only as supporting local context.');
   }
   if (hasCameraMoveReferenceFrames) {
-    referenceInstructions.push('Use inputs/camera_move/cubemap/px.png, nx.png, py.png, ny.png, pz.png, and nz.png as the full aligned environment reference for the camera move.');
-    referenceInstructions.push('Use inputs/camera_move/cubemap_visible/ and metadata/camera_move_cubemap_visibility.json as the frame-by-frame local material and geometry guide for surfaces visible in the video.');
+    referenceInstructions.push('Use inputs/camera_move/clay_*.png as graybox composition checkpoints along the camera move.');
     referenceInstructions.push('Do not reproduce equirectangular, panoramic, fisheye, 360, or wide-lens distortion from the source panorama. The output lens and perspective must follow viewport_clay.png and viewport_clay_motion.mp4.');
   }
 
@@ -108,17 +108,17 @@ export function generateImagePrompt(project: LocationProject, shot: Shot): strin
 
 export function generateVideoPrompt(shot: Shot): string {
   const hasCameraMove = shot.cameraKeyframes.length >= 2 && shot.assets.cameraMoveVideoAssetId;
-  const hasCameraMoveReferenceFrames = shot.cameraKeyframes.length >= 2 && shot.exportSettings.includeCameraMoveReferenceFrames;
+  const hasCubemap = shot.exportSettings.includeFullPano;
   return [
     'Animate from the provided base frame while preserving the same environment, camera direction, landmarks, materials, lighting, and layout.',
     hasCameraMove
       ? 'Use viewport_clay_motion.mp4 as the camera-motion, parallax, composition, and timing guide.'
       : 'If no camera-motion clip is provided, keep camera motion subtle and composition-safe.',
-    hasCameraMoveReferenceFrames
-      ? 'Use inputs/camera_move/cubemap/ as the full aligned environment reference, and use inputs/camera_move/cubemap_visible/ plus metadata/camera_move_cubemap_visibility.json as the local texture and geometry guide for surfaces visible during the move. The video is the camera-control reference; the cubemap references are the texture/style reference.'
+    hasCubemap
+      ? 'Use inputs/cubemap/ as the full aligned environment / texture reference. The video is the camera-control reference; the cubemap is not the camera lens.'
       : '',
-    hasCameraMoveReferenceFrames
-      ? 'Avoid equirectangular, panoramic, fisheye, 360, or wide-lens distortion. Do not treat the cubemap as the camera lens; the output lens and perspective must follow the input video.'
+    hasCubemap || hasCameraMove
+      ? 'Avoid equirectangular, panoramic, fisheye, 360, or wide-lens distortion. The output lens and perspective must follow the input video or base frame.'
       : '',
     'Keep the background architecture stable.',
     'Do not redesign the set, move landmarks, or introduce new major objects.',
