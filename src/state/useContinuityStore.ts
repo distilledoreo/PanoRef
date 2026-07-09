@@ -33,11 +33,27 @@ import {
   multiplyScalar,
 } from '../engine/sync';
 import { renderGrayboxEquirectangularPano } from '../engine/renderers';
+import {
+  BUILD_HISTORY_COALESCE_MS,
+  type BuildHistorySnapshot,
+  captureBuildSnapshot,
+  clearBuildHistory,
+  pushBuildHistoryPast,
+  redoBuildHistory,
+  undoBuildHistory,
+} from '../engine/buildHistory';
 
 import { useThemeStore } from './useThemeStore';
 import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition, snapBuildPoint } from '../engine/sandbox';
 
 export type BuildMode = 'select' | 'place' | 'pano_origin';
+
+/** Module-level batching so drag gestures record one undo step without extra React churn. */
+let buildHistoryBatchDepth = 0;
+let buildHistoryBatchCaptured = false;
+let buildHistoryRestoring = false;
+let buildHistoryCoalesceActive = false;
+let buildHistoryCoalesceTimer: ReturnType<typeof setTimeout> | undefined;
 
 interface ContinuityStore {
   project: LocationProject;
@@ -53,6 +69,8 @@ interface ContinuityStore {
   isRenderingGraybox: boolean;
   isExportingPackage: boolean;
   shotCameraFlying: boolean;
+  buildHistoryPast: BuildHistorySnapshot[];
+  buildHistoryFuture: BuildHistorySnapshot[];
   setWorkspace: (workspace: Workspace) => void;
   setProject: (project: LocationProject) => void;
   updateProjectInfo: (updates: Pick<LocationProject, 'name'> | Partial<Pick<LocationProject, 'name' | 'description'>>) => void;
@@ -60,6 +78,12 @@ interface ContinuityStore {
   setBuildMode: (mode: BuildMode) => void;
   setActivePrimitive: (type: SceneObjectType) => void;
   setGridSnap: (value: boolean) => void;
+  beginBuildHistoryBatch: () => void;
+  endBuildHistoryBatch: () => void;
+  undoBuild: () => boolean;
+  redoBuild: () => boolean;
+  canUndoBuild: () => boolean;
+  canRedoBuild: () => boolean;
   addObject: (type: SceneObjectType) => void;
   placeObject: (type: SceneObjectType, point: Vec3) => SceneObject;
   selectObject: (id?: string) => void;
@@ -129,12 +153,55 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   isRenderingGraybox: false,
   isExportingPackage: false,
   shotCameraFlying: false,
+  buildHistoryPast: [],
+  buildHistoryFuture: [],
   dismissedWorkflowAdvanceKeys: [],
   seenObjectiveWorkspaces: [],
   objectiveModalRequest: 0,
   alignmentIntroRequest: 0,
   alignmentRetryModalRequest: 0,
   seenAlignmentIntroForPanoId: undefined,
+
+  beginBuildHistoryBatch: () => {
+    buildHistoryBatchDepth += 1;
+    if (buildHistoryBatchDepth === 1) {
+      buildHistoryBatchCaptured = false;
+      // A new gesture ends any open coalesce window.
+      buildHistoryCoalesceActive = false;
+      if (buildHistoryCoalesceTimer) {
+        clearTimeout(buildHistoryCoalesceTimer);
+        buildHistoryCoalesceTimer = undefined;
+      }
+    }
+  },
+  endBuildHistoryBatch: () => {
+    buildHistoryBatchDepth = Math.max(0, buildHistoryBatchDepth - 1);
+    if (buildHistoryBatchDepth === 0) {
+      buildHistoryBatchCaptured = false;
+    }
+  },
+  canUndoBuild: () => get().buildHistoryPast.length > 0,
+  canRedoBuild: () => get().buildHistoryFuture.length > 0,
+  undoBuild: () => {
+    const state = get();
+    const result = undoBuildHistory(
+      { past: state.buildHistoryPast, future: state.buildHistoryFuture },
+      captureCurrentBuildSnapshot(state),
+    );
+    if (!result) return false;
+    applyBuildSnapshot(result.restored, result.stacks.past, result.stacks.future);
+    return true;
+  },
+  redoBuild: () => {
+    const state = get();
+    const result = redoBuildHistory(
+      { past: state.buildHistoryPast, future: state.buildHistoryFuture },
+      captureCurrentBuildSnapshot(state),
+    );
+    if (!result) return false;
+    applyBuildSnapshot(result.restored, result.stacks.past, result.stacks.future);
+    return true;
+  },
 
   setWorkspace: (workspace) => set((state) => {
     if (workspace !== 'shots') {
@@ -156,6 +223,14 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const linkedProject = linkAllShotsToCanonicalPano(project);
     const canonical = linkedProject.panoRefs.find((pano) => pano.isCanonical) ?? linkedProject.panoRefs[0];
     const firstShot = linkedProject.shots[0];
+    const cleared = clearBuildHistory();
+    buildHistoryBatchDepth = 0;
+    buildHistoryBatchCaptured = false;
+    buildHistoryCoalesceActive = false;
+    if (buildHistoryCoalesceTimer) {
+      clearTimeout(buildHistoryCoalesceTimer);
+      buildHistoryCoalesceTimer = undefined;
+    }
     set({
       project: linkedProject,
       activePanoId: canonical?.id,
@@ -169,6 +244,8 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       shotCameraFlying: false,
       isRenderingGraybox: false,
       isExportingPackage: false,
+      buildHistoryPast: cleared.past,
+      buildHistoryFuture: cleared.future,
       panoView: firstShot
         ? panoViewFromCamera(firstShot.camera)
         : { yawDegrees: 0, pitchDegrees: 0, fovDegrees: 65 },
@@ -197,9 +274,11 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   }),
   setGridSnap: (gridSnap) => set({ gridSnap }),
   addObject: (type) => set((state) => {
+    const history = historyPatchBeforeMutation(state);
     const count = state.project.scene.objects.filter((object) => object.type === type).length + 1;
     const object = createSceneObject(type, count);
     return {
+      ...history,
       project: touchProject({
         ...state.project,
         scene: {
@@ -220,6 +299,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       snapToGrid: state.gridSnap,
     });
     set((current) => ({
+      ...historyPatchBeforeMutation(current),
       project: touchProject({
         ...current.project,
         scene: {
@@ -233,6 +313,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   },
   selectObject: (id) => set({ selectedObjectId: id }),
   updateObject: (id, updates) => set((state) => ({
+    ...historyPatchBeforeMutation(state, { coalesce: true }),
     project: touchProject({
       ...state.project,
       scene: {
@@ -246,6 +327,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     if (!object || object.locked) return state;
     const position = getGroundPlacementPosition(object, point, state.gridSnap);
     return {
+      ...historyPatchBeforeMutation(state),
       project: touchProject({
         ...state.project,
         scene: {
@@ -264,6 +346,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       ? [snapBuildPoint(point, true)[0], point[1], snapBuildPoint(point, true)[2]] as Vec3
       : point;
     return {
+      ...historyPatchBeforeMutation(state),
       project: touchProject({
         ...state.project,
         scene: {
@@ -282,6 +365,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const count = state.project.scene.objects.filter((item) => item.type === object.type).length + 1;
     const duplicate = duplicateSceneObject(object, count, state.gridSnap);
     set((current) => ({
+      ...historyPatchBeforeMutation(current),
       project: touchProject({
         ...current.project,
         scene: {
@@ -295,6 +379,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     return duplicate;
   },
   toggleObjectVisibility: (id) => set((state) => ({
+    ...historyPatchBeforeMutation(state),
     project: touchProject({
       ...state.project,
       scene: {
@@ -306,6 +391,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     }),
   })),
   toggleObjectLocked: (id) => set((state) => ({
+    ...historyPatchBeforeMutation(state),
     project: touchProject({
       ...state.project,
       scene: {
@@ -317,6 +403,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     }),
   })),
   removeObject: (id) => set((state) => ({
+    ...historyPatchBeforeMutation(state),
     project: touchProject({
       ...state.project,
       scene: {
@@ -327,6 +414,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     selectedObjectId: state.selectedObjectId === id ? undefined : state.selectedObjectId,
   })),
   setPanoOrigin: (origin) => set((state) => ({
+    ...historyPatchBeforeMutation(state),
     project: touchProject({
       ...state.project,
       scene: { ...state.project.scene, panoOrigin: origin },
@@ -789,6 +877,97 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
 
 function touchProject(project: LocationProject): LocationProject {
   return { ...project, updatedAt: new Date().toISOString() };
+}
+
+function captureCurrentBuildSnapshot(state: {
+  project: LocationProject;
+  selectedObjectId?: string;
+}): BuildHistorySnapshot {
+  return captureBuildSnapshot({
+    objects: state.project.scene.objects,
+    panoOrigin: state.project.scene.panoOrigin,
+    panoRotation: state.project.scene.panoRotation,
+    selectedObjectId: state.selectedObjectId,
+  });
+}
+
+function historyPatchBeforeMutation(
+  state: {
+    project: LocationProject;
+    selectedObjectId?: string;
+    buildHistoryPast: BuildHistorySnapshot[];
+    buildHistoryFuture: BuildHistorySnapshot[];
+  },
+  options?: { coalesce?: boolean },
+): Pick<ContinuityStore, 'buildHistoryPast' | 'buildHistoryFuture'> | Record<string, never> {
+  if (buildHistoryRestoring) return {};
+
+  if (buildHistoryBatchDepth > 0) {
+    if (buildHistoryBatchCaptured) return {};
+    buildHistoryBatchCaptured = true;
+  } else if (options?.coalesce) {
+    if (buildHistoryCoalesceActive) {
+      // Refresh the window while typing / scrubbing continues.
+      if (buildHistoryCoalesceTimer) clearTimeout(buildHistoryCoalesceTimer);
+      buildHistoryCoalesceTimer = setTimeout(() => {
+        buildHistoryCoalesceActive = false;
+        buildHistoryCoalesceTimer = undefined;
+      }, BUILD_HISTORY_COALESCE_MS);
+      return {};
+    }
+    buildHistoryCoalesceActive = true;
+    if (buildHistoryCoalesceTimer) clearTimeout(buildHistoryCoalesceTimer);
+    buildHistoryCoalesceTimer = setTimeout(() => {
+      buildHistoryCoalesceActive = false;
+      buildHistoryCoalesceTimer = undefined;
+    }, BUILD_HISTORY_COALESCE_MS);
+  } else {
+    buildHistoryCoalesceActive = false;
+    if (buildHistoryCoalesceTimer) {
+      clearTimeout(buildHistoryCoalesceTimer);
+      buildHistoryCoalesceTimer = undefined;
+    }
+  }
+
+  const stacks = pushBuildHistoryPast(
+    { past: state.buildHistoryPast, future: state.buildHistoryFuture },
+    captureCurrentBuildSnapshot(state),
+  );
+  return {
+    buildHistoryPast: stacks.past,
+    buildHistoryFuture: stacks.future,
+  };
+}
+
+function applyBuildSnapshot(
+  snapshot: BuildHistorySnapshot,
+  past: BuildHistorySnapshot[],
+  future: BuildHistorySnapshot[],
+) {
+  buildHistoryRestoring = true;
+  buildHistoryCoalesceActive = false;
+  if (buildHistoryCoalesceTimer) {
+    clearTimeout(buildHistoryCoalesceTimer);
+    buildHistoryCoalesceTimer = undefined;
+  }
+  try {
+    useContinuityStore.setState((state) => ({
+      buildHistoryPast: past,
+      buildHistoryFuture: future,
+      selectedObjectId: snapshot.selectedObjectId,
+      project: touchProject({
+        ...state.project,
+        scene: {
+          ...state.project.scene,
+          objects: snapshot.objects,
+          panoOrigin: snapshot.panoOrigin,
+          panoRotation: snapshot.panoRotation,
+        },
+      }),
+    }));
+  } finally {
+    buildHistoryRestoring = false;
+  }
 }
 
 function ensureProjectHasCamera(project: LocationProject): LocationProject {

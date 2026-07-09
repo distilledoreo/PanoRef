@@ -3,6 +3,8 @@ import { createDefaultProject } from '../src/domain/defaults';
 import { createPlacedSceneObject, duplicateSceneObject, snapBuildPoint } from '../src/engine/sandbox';
 import { useContinuityStore } from '../src/state/useContinuityStore';
 
+// Ensure history stacks start clean for store integration cases below.
+
 describe('sandbox build interactions', () => {
   it('snaps build points on the floor grid without changing height', () => {
     expect(snapBuildPoint([1.26, 2.4, -0.74], true)).toEqual([1.5, 2.4, -0.5]);
@@ -134,6 +136,44 @@ describe('sandbox build interactions', () => {
     expect(moved.transform.position[0]).toBe(2.5);
     expect(moved.transform.position[1]).toBeCloseTo(originalY + 1.25);
     expect(moved.transform.position[2]).toBe(-2);
+  });
+
+  it('undoes and redoes placeObject, and batches continuous moves into one undo step', () => {
+    const project = createDefaultProject();
+    const startCount = project.scene.objects.length;
+    useContinuityStore.setState({
+      project,
+      buildHistoryPast: [],
+      buildHistoryFuture: [],
+      gridSnap: true,
+    });
+
+    useContinuityStore.getState().placeObject('box', [1, 0, 1]);
+    expect(useContinuityStore.getState().project.scene.objects).toHaveLength(startCount + 1);
+    expect(useContinuityStore.getState().buildHistoryPast).toHaveLength(1);
+
+    expect(useContinuityStore.getState().undoBuild()).toBe(true);
+    expect(useContinuityStore.getState().project.scene.objects).toHaveLength(startCount);
+    expect(useContinuityStore.getState().buildHistoryFuture).toHaveLength(1);
+
+    expect(useContinuityStore.getState().redoBuild()).toBe(true);
+    expect(useContinuityStore.getState().project.scene.objects).toHaveLength(startCount + 1);
+
+    const placed = useContinuityStore.getState().project.scene.objects.at(-1)!;
+    useContinuityStore.getState().beginBuildHistoryBatch();
+    useContinuityStore.getState().moveObjectPosition(placed.id, [2, placed.transform.position[1], 2]);
+    useContinuityStore.getState().moveObjectPosition(placed.id, [3, placed.transform.position[1], 3]);
+    useContinuityStore.getState().moveObjectPosition(placed.id, [4, placed.transform.position[1], 4]);
+    useContinuityStore.getState().endBuildHistoryBatch();
+
+    // place + one batch pre-state (not three move steps)
+    expect(useContinuityStore.getState().buildHistoryPast.length).toBeGreaterThanOrEqual(2);
+    const pastLenAfterBatch = useContinuityStore.getState().buildHistoryPast.length;
+
+    useContinuityStore.getState().undoBuild();
+    const afterUndoMove = useContinuityStore.getState().project.scene.objects.find((item) => item.id === placed.id);
+    expect(afterUndoMove?.transform.position[0]).not.toBe(4);
+    expect(useContinuityStore.getState().buildHistoryPast).toHaveLength(pastLenAfterBatch - 1);
   });
 
   it('does not drag locked objects through the sandbox move action', () => {

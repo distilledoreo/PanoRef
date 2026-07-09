@@ -251,6 +251,20 @@ describe('ui revamp fidelity surfaces', () => {
     expect(gizmo).toContain('0x14b8a6');
   });
 
+  it('exposes build undo/redo controls and history batching on the viewport', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
+    const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
+    expect(build).toContain('data-build-undo');
+    expect(build).toContain('data-build-redo');
+    expect(build).toContain('undoBuild');
+    expect(build).toContain('onEditBatchStart={beginBuildHistoryBatch}');
+    expect(viewport).toContain('onEditBatchStart');
+    expect(viewport).toContain('startEditBatch');
+    expect(store).toContain('beginBuildHistoryBatch');
+    expect(store).toContain('undoBuild');
+  });
+
   it('fits review grid as a compact 3x2 layout above the action bar', () => {
     const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
     expect(review).toContain('fitsCompactGrid');

@@ -14,6 +14,7 @@ import {
   Lock,
   Mountain,
   Move3D,
+  Redo2,
   RotateCcw,
   RotateCw,
   Ruler,
@@ -22,6 +23,7 @@ import {
   Sun,
   Trash2,
   TreeDeciduous,
+  Undo2,
   Unlock,
   User,
   Wrench,
@@ -107,7 +109,15 @@ export function BuildWorkspace() {
     setPanoOrigin,
     renderGrayboxPano,
     isRenderingGraybox,
+    beginBuildHistoryBatch,
+    endBuildHistoryBatch,
+    undoBuild,
+    redoBuild,
+    buildHistoryPast,
+    buildHistoryFuture,
   } = useContinuityStore();
+  const canUndo = buildHistoryPast.length > 0;
+  const canRedo = buildHistoryFuture.length > 0;
 
   const handleRenderGraybox = useCallback(() => {
     if (isRenderingGraybox) return;
@@ -153,6 +163,14 @@ export function BuildWorkspace() {
       if (!command) return;
       event.preventDefault();
 
+      if (command.kind === 'undo') {
+        undoBuild();
+        return;
+      }
+      if (command.kind === 'redo') {
+        redoBuild();
+        return;
+      }
       if (command.kind === 'primitive') {
         blurActiveElement();
         setActivePrimitive(command.type);
@@ -197,6 +215,7 @@ export function BuildWorkspace() {
     buildMode,
     duplicateObject,
     gridSnap,
+    redoBuild,
     removeObject,
     rotateSelected,
     scaleSelected,
@@ -206,6 +225,7 @@ export function BuildWorkspace() {
     setGridSnap,
     toggleObjectLocked,
     toggleObjectVisibility,
+    undoBuild,
   ]);
 
   useEffect(() => {
@@ -239,9 +259,35 @@ export function BuildWorkspace() {
           }}
           onScaleObject={(id, dimensions) => updateObject(id, { dimensions })}
           onMovePanoOrigin={setPanoOrigin}
+          onEditBatchStart={beginBuildHistoryBatch}
+          onEditBatchEnd={endBuildHistoryBatch}
         />
 
-        <div className="pointer-events-none absolute right-5 top-5 z-10">
+        <div className="pointer-events-none absolute right-5 top-5 z-10 flex flex-col items-end gap-2">
+          <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-subtle bg-surface-overlay p-1 shadow-card backdrop-blur">
+            <button
+              type="button"
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+              data-build-undo
+              disabled={!canUndo}
+              onClick={() => undoBuild()}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition hover:bg-surface-muted hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              <Undo2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              title="Redo (Ctrl+Shift+Z)"
+              aria-label="Redo"
+              data-build-redo
+              disabled={!canRedo}
+              onClick={() => redoBuild()}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-secondary transition hover:bg-surface-muted hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              <Redo2 className="h-4 w-4" />
+            </button>
+          </div>
           <button
             type="button"
             title={showSceneGuides ? 'Hide scene guides' : 'Show camera guides'}
@@ -552,7 +598,7 @@ function BuildObjectTray({
         </div>
         {toolsOpen && (
           <p className="mt-2 border-t border-subtle pt-2 text-[10px] leading-relaxed text-muted" data-build-shortcuts-hint>
-            Keys: 1–9/0 stamp · V/Esc select · O origin · G snap · D dup · R rotate · [ ] scale · T/E/S gizmo · I precision · Del delete
+            Keys: 1–9/0 stamp · V/Esc select · O origin · G snap · D dup · R rotate · [ ] scale · T/E/S gizmo · I precision · Del delete · Ctrl+Z undo · Ctrl+Shift+Z redo
           </p>
         )}
       </div>
