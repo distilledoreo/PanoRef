@@ -296,7 +296,7 @@ export default function App() {
           )}
 
           <div
-            className="pointer-events-auto flex items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm"
+            className="pointer-events-auto flex items-center gap-0.5 rounded-full border border-subtle/70 bg-surface-overlay/75 p-0.5 shadow-card backdrop-blur-sm"
             data-header-actions
           >
             <input
@@ -313,7 +313,6 @@ export default function App() {
                 <HeaderToolbarButton onClick={openProjectPicker} title="Open project">
                   <FolderOpen className="h-4 w-4" />
                 </HeaderToolbarButton>
-                <span className="h-4 w-px shrink-0 bg-border-subtle/80" aria-hidden />
                 <HeaderToolbarButton
                   onClick={() => downloadProject(project)}
                   title="Save project"
@@ -321,7 +320,6 @@ export default function App() {
                 >
                   <Save className="h-4 w-4" />
                 </HeaderToolbarButton>
-                <span className="h-4 w-px shrink-0 bg-border-subtle/80" aria-hidden />
               </>
             )}
             <HeaderToolbarButton
@@ -396,7 +394,7 @@ function HeaderToolbarButton({
       {...rest}
       onClick={onClick}
       title={title}
-      className={`inline-flex h-9 w-9 items-center justify-center text-secondary transition hover:bg-surface-muted/80 hover:text-primary ${className ?? ''}`}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-secondary shadow-none outline-none transition hover:bg-surface-muted/90 hover:text-primary focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 ${className ?? ''}`}
     >
       {children}
     </button>
