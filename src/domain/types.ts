@@ -28,7 +28,7 @@ export type ShotStatus =
   | 'approved'
   | 'rejected';
 
-export type Workspace = 'build' | 'reference' | 'shots' | 'review' | 'export';
+export type Workspace = 'build' | 'reference' | 'shots' | 'export';
 
 export interface Transform {
   position: Vec3;

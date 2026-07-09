@@ -21,7 +21,7 @@ function markSplashSeen() {
   }
 }
 
-export default function SplashScreen() {
+export default function SplashScreen({ onDismissed }: { onDismissed?: () => void } = {}) {
   const [visible, setVisible] = useState(() => !hasSeenSplash());
   const [fading, setFading] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -32,8 +32,11 @@ export default function SplashScreen() {
     dismissedRef.current = true;
     setFading(true);
     markSplashSeen();
-    window.setTimeout(() => setVisible(false), FADE_MS);
-  }, [visible]);
+    window.setTimeout(() => {
+      setVisible(false);
+      onDismissed?.();
+    }, FADE_MS);
+  }, [visible, onDismissed]);
 
   useEffect(() => {
     if (!visible) return;

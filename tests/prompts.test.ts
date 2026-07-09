@@ -48,8 +48,8 @@ describe('graybox reference prompt', () => {
 
     const prompt = generateVideoPrompt(shot);
     expect(prompt).toContain('Use viewport_clay_motion.mp4 as the camera-motion');
-    expect(prompt).toContain('inputs/camera_move/cubemap/');
-    expect(prompt).toContain('metadata/camera_move_cubemap_visibility.json');
-    expect(prompt).toContain('Do not treat the cubemap as the camera lens');
+    expect(prompt).toContain('inputs/cubemap/');
+    expect(prompt).not.toContain('cubemap_visible');
+    expect(prompt).toContain('cubemap is not the camera lens');
   });
 });

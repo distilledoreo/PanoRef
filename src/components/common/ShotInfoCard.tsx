@@ -3,6 +3,7 @@ import { Globe, MoreHorizontal, Ruler } from 'lucide-react';
 import { LocationProject, Shot } from '../../domain/types';
 import { getShotWarnings } from '../../engine/warnings';
 import { ShotThumbnail } from './ShotThumbnail';
+import { WarningPopover } from './StatusBadge';
 
 export function ShotInfoCard({
   project,
@@ -10,6 +11,8 @@ export function ShotInfoCard({
   lensMm,
   cameraHeight,
   previewSrc,
+  statusLabel,
+  nextStepLabel,
   onOpenPrecision,
   onOpenMenuAction,
   onOpenIn360,
@@ -20,6 +23,8 @@ export function ShotInfoCard({
   lensMm: number;
   cameraHeight: number;
   previewSrc?: string;
+  statusLabel?: string;
+  nextStepLabel?: string;
   onOpenPrecision: () => void;
   onOpenMenuAction: (action: string) => void;
   onOpenIn360?: () => void;
@@ -37,6 +42,11 @@ export function ShotInfoCard({
         <div className="min-w-0">
           <div className="text-sm font-semibold text-primary">Shot {shot.shotNumber}</div>
           <div className="truncate text-xs text-secondary">{shot.name}</div>
+          {statusLabel && (
+            <div className="mt-1 inline-flex rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent">
+              {statusLabel}
+            </div>
+          )}
         </div>
         <div className="relative shrink-0">
           <button
@@ -84,17 +94,20 @@ export function ShotInfoCard({
           <SpecCell label="Height" value={`${cameraHeight.toFixed(1)}m`} />
           <SpecCell label="FOV" value={`${shot.camera.fovDegrees.toFixed(0)}°`} />
         </dl>
+        {nextStepLabel && (
+          <p className="text-[11px] font-medium leading-snug text-primary">{nextStepLabel}</p>
+        )}
         {shot.description && (
           <p className="line-clamp-2 text-[11px] leading-snug text-secondary">{shot.description}</p>
         )}
         {warnings.length > 0 && (
-          <button
-            type="button"
-            onClick={onOpenPrecision}
-            className="text-[11px] font-medium text-amber-600 transition hover:text-amber-700 dark:text-amber-400"
-          >
-            {warnings.length} issue{warnings.length === 1 ? '' : 's'} — review
-          </button>
+          <div className="relative h-5" data-shot-card-warning>
+            <WarningPopover warnings={warnings} placement="below">
+              <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                {warnings.length} issue{warnings.length === 1 ? '' : 's'}
+              </span>
+            </WarningPopover>
+          </div>
         )}
       </div>
 
@@ -124,9 +137,9 @@ export function ShotInfoCard({
 
 function SpecCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-surface-muted px-1.5 py-1 text-center">
-      <dt className="text-muted">{label}</dt>
-      <dd className="font-medium text-primary">{value}</dd>
+    <div className="rounded-md bg-surface-muted/80 px-1.5 py-1 text-center">
+      <div className="text-[9px] uppercase tracking-wide text-muted">{label}</div>
+      <div className="font-semibold text-primary">{value}</div>
     </div>
   );
 }

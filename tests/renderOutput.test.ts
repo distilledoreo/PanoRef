@@ -45,10 +45,12 @@ describe('rendered shot output', () => {
   it('applies linked pano rotation to local reference exports', () => {
     const source = readFileSync(new URL('../src/engine/packageExport.ts', import.meta.url), 'utf8');
     expect(source).toContain('renderPanoPerspectiveCrop(linkedPanoAsset.uri, shot.panoCrop, linkedPano.rotation)');
-    expect(source).toContain('renderPanoCubemapFaces(linkedPanoAsset.uri');
-    expect(source).toContain('panoRotation: linkedPano.rotation');
+    expect(source).toContain('renderPanoCubemapFaces(cubemapSourcePano.asset.uri');
+    expect(source).toContain('panoRotation: cubemapSourcePano.pano.rotation');
+    expect(source).toContain('inputs/cubemap/');
     expect(source).toContain('stitchCubemapFacesCrossAsync');
-    expect(source).toContain('stitchCubemapVisibleFacesAsync');
+    expect(source).not.toContain('stitchCubemapVisibleFacesAsync');
+    expect(source).not.toContain('cubemap_visible');
   });
 
   it('letterboxes full pano exports when the project setting is enabled', () => {

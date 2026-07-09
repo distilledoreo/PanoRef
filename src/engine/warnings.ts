@@ -88,14 +88,14 @@ export function getShotWarnings(project: LocationProject, shot: Shot): WarningIt
   }
 
   if (
-    shot.exportSettings.includeCameraMoveReferenceFrames
-    && hasRenderableCameraMove(shot.cameraKeyframes)
+    shot.exportSettings.includeFullPano
     && !linkedPano
+    && !project.panoRefs.some((pano) => pano.isCanonical)
   ) {
     warnings.push({
-      id: `${shot.id}-missing-camera-move-cubemap-references`,
+      id: `${shot.id}-missing-full-pano-for-cubemap`,
       severity: 'info',
-      message: 'Camera move clay frames can export, but cubemap references need a linked pano.',
+      message: 'Full pano / cubemap export is enabled, but no canonical or linked pano is available.',
     });
   }
 

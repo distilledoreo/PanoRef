@@ -8,7 +8,6 @@ describe('ui revamp fidelity surfaces', () => {
     const shell = readFileSync(new URL('../src/components/workspaces/WorkspaceShell.tsx', import.meta.url), 'utf8');
     const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
     const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
     expect(app).toContain('<main className="absolute inset-0">');
@@ -16,12 +15,13 @@ describe('ui revamp fidelity surfaces', () => {
     expect(app).toContain('bg-surface-overlay/75');
     expect(app).not.toContain('border-b border-subtle bg-surface-header');
     expect(app).not.toContain('flex h-screen w-full flex-col');
+    expect(app).not.toContain('ReviewWorkspace');
+    expect(app).not.toContain("id: 'review'");
     expect(styles).toContain('--stage-header-safe');
     expect(shell).toContain('reserveHeader');
     expect(shell).toContain('pt-[var(--stage-header-safe)]');
     expect(reference).toContain('FullBleedLayout reserveHeader');
     expect(shots).toContain('FullBleedLayout reserveHeader');
-    expect(review).toContain('FullBleedLayout reserveHeader');
     expect(exportWorkspace).toContain('FullBleedLayout reserveHeader');
     expect(build).toContain('<FullBleedLayout>');
     expect(build).not.toContain('reserveHeader');
@@ -59,11 +59,13 @@ describe('ui revamp fidelity surfaces', () => {
     expect(panoViewer).not.toContain('THEME_COLORS.light.empty');
   });
 
-  it('exposes fly camera controls directly in the shots action dock', () => {
+  it('exposes land/adjust controls directly in the shots action dock', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    expect(shots).toContain("'Fly Camera'");
-    expect(shots).toContain("'Lock View'");
-    expect(shots).toContain('commitDraftCameraAndLock');
+    expect(shots).toContain("'Adjust'");
+    expect(shots).toContain("'Land'");
+    expect(shots).toContain('Land this shot');
+    expect(shots).toContain('landShotFraming');
+    expect(shots).toContain('data-shots-land-fork');
     expect(shots).not.toContain('label="Frame"');
   });
 
@@ -136,8 +138,9 @@ describe('ui revamp fidelity surfaces', () => {
 
   it('clarifies shots frame download vs accept framing', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    expect(shots).toContain('Download Shot Frame');
-    expect(shots).toContain('Accept Framing');
+    expect(shots).toContain('Land this shot');
+    expect(shots).toContain('Add camera move');
+    expect(shots).toContain('data-shots-land-fork');
     expect(shots).not.toContain("label={isRenderingFrame ? 'Rendering...' : 'Render Shot Preview'}");
   });
 
@@ -268,31 +271,45 @@ describe('ui revamp fidelity surfaces', () => {
     expect(store).toContain("history?: BuildHistoryMode");
   });
 
-  it('fits review grid as a compact 3x2 layout above the action bar', () => {
-    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
-    expect(review).toContain('fitsCompactGrid');
-    expect(review).toContain('lg:grid-cols-3');
-    expect(review).toContain('content-start');
-    expect(review).toContain('auto-rows-min');
-    expect(review).toContain('overflow-hidden');
-    expect(review).toContain('compactGrid');
-    expect(review).toContain('data-review-grid-card={compactGrid ? \'compact\' : \'default\'}');
-    expect(review).toContain('aspect-video max-h-[8.5rem]');
-    expect(review).not.toContain('lg:grid-rows-2');
-    expect(review).not.toContain('gridTemplateColumns');
+  it('ends the production path at export handoff without a review stage', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    const workflow = readFileSync(new URL('../src/engine/workflow.ts', import.meta.url), 'utf8');
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    expect(app).toContain("id: 'export'");
+    expect(app).not.toContain("id: 'review'");
+    expect(workflow).toContain("['build', 'reference', 'shots', 'export']");
+    expect(workflow).toContain('normalizeWorkspace');
+    expect(workflow).not.toContain("return ['Import an AI result frame in Review first.']");
+    expect(shots).toContain("setWorkspace('export')");
+    expect(shots).toContain('Go to Export');
   });
 
-  it('keeps export multi-select reconciled and add-camera local to review/export', () => {
+  it('offers a simple 360 viewer mode with download current view', () => {
+    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+    const modeStore = readFileSync(new URL('../src/state/useAppModeStore.ts', import.meta.url), 'utf8');
+    const chooser = readFileSync(new URL('../src/components/common/ModeChooser.tsx', import.meta.url), 'utf8');
+    const panoViewer = readFileSync(new URL('../src/components/workspaces/PanoViewerWorkspace.tsx', import.meta.url), 'utf8');
+    expect(modeStore).toContain("panoref-app-mode");
+    expect(modeStore).toContain("'continuity' | 'panoViewer'");
+    expect(app).toContain('ModeChooser');
+    expect(app).toContain('PanoViewerWorkspace');
+    expect(app).toContain('Simple 360 Viewer');
+    expect(app).toContain('Open Continuity Stage');
+    expect(chooser).toContain('data-mode-chooser');
+    expect(chooser).toContain('Just view a 360 pano');
+    expect(panoViewer).toContain('Download current view');
+    expect(panoViewer).toContain('renderPanoPerspectiveCrop');
+    expect(panoViewer).toContain('downloadDataUrl');
+    expect(panoViewer).toContain('data-pano-viewer-workspace');
+  });
+
+  it('keeps export multi-select reconciled and add-camera local to export', () => {
     const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
-    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
     const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
     expect(exportWorkspace).toContain('reconcileExportSelectedShotIds');
     expect(exportWorkspace).toContain('navigateToShots: false');
-    expect(review).toContain('navigateToShots: false');
-    expect(review).toContain('WarningPopover');
-    expect(review).toContain('data-review-warning');
-    expect(review).toContain('placement="below"');
-    expect(review).not.toMatch(/data-review-grid-card[\s\S]*overflow-hidden rounded-\[var\(--radius-card\)\]/);
+    expect(exportWorkspace).toContain('WarningPopover');
+    expect(exportWorkspace).toContain('Handoff packages');
     expect(store).toContain('navigateToShots?: boolean');
   });
 
@@ -348,7 +365,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('bottom-[var(--shots-overlay-bottom-safe)]');
     expect(shots).toContain('pb-[var(--shots-bottom-chrome-pad)]');
     expect(shots).toContain('gap-[var(--shots-bottom-chrome-gap)]');
-    expect(shots).toContain('Downloads a clay PNG');
+    expect(shots).toContain('Land this shot when the frame looks right.');
     expect(shots).toContain('compact');
     expect(primaryCta).toContain('data-primary-cta-hint');
     expect(primaryCta).toContain('items-end');
@@ -384,24 +401,6 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shotThumbnail).not.toContain('ImageIcon');
     expect(styles).toContain('--thumbnail-fallback-sky');
     expect(styles).toContain('--thumbnail-fallback-block-a');
-  });
-
-  it('keeps review compact-grid thumbnails thumbnail-first instead of stretching', () => {
-    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
-    const statusBadge = readFileSync(new URL('../src/components/common/StatusBadge.tsx', import.meta.url), 'utf8');
-    const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
-    expect(statusBadge).toContain('className?: string');
-    expect(review).toContain('aspect-video max-h-[8.5rem]');
-    expect(review).toContain('StatusGlow level={level} showIcon={false} className="w-full overflow-hidden"');
-    expect(review).toContain('renderViewportClay(project, shot.camera, previewSize.width, previewSize.height)');
-    expect(review).toContain('getReviewShotControlSize');
-    expect(review).toContain('overrideLabel="Graybox shot"');
-    expect(review).toContain('fallbackOnly');
-    expect(review).toContain('Graybox Shot Control');
-    expect(review).not.toContain('compactGrid ? \'h-full min-h-0\'');
-    expect(review).not.toContain('lg:grid-rows-2');
-    expect(shotThumbnail).toContain('data-shot-thumbnail-fallback');
-    expect(shotThumbnail).toContain('fallbackOnly?: boolean');
   });
 
   it('uses compact shot thumbnail fallbacks without cramped labels in export rows', () => {

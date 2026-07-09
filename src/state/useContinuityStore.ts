@@ -48,6 +48,7 @@ import {
 
 import { useThemeStore } from './useThemeStore';
 import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition, snapBuildPoint } from '../engine/sandbox';
+import { normalizeWorkspace } from '../engine/workflow';
 
 export type BuildMode = 'select' | 'place' | 'pano_origin';
 export type { BuildHistoryMode };
@@ -114,8 +115,10 @@ interface ContinuityStore {
   setPanoView: (updates: Partial<PanoViewState>) => void;
   addCamera: (options?: { navigateToShots?: boolean }) => Shot;
   selectShot: (id?: string) => void;
-  setShotCameraFlying: (value: boolean) => void;
+  setShotCameraFlying: (value: boolean, options?: { clearFramingAcceptance?: boolean }) => void;
   lockShotCamera: () => void;
+  /** Commit framing: exit fly mode and mark shot framing accepted. */
+  landShotFraming: (shotId: string, camera?: CameraData) => void;
   updateShot: (id: string, updates: Partial<Shot>) => void;
   removeShot: (id: string) => void;
   attachCameraMoveVideoToShot: (shotId: string, params: { name: string; dataUrl: string; mimeType: string; width: number; height: number; durationSeconds: number; frameRate: number }) => ProjectAsset;
@@ -219,19 +222,24 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   },
 
   setWorkspace: (workspace) => set((state) => {
+    workspace = normalizeWorkspace(workspace);
     if (workspace !== 'shots') {
       return { workspace };
     }
     const project = ensureProjectHasCamera(state.project);
     const shot = project.shots.find((item) => item.id === state.selectedShotId)
       ?? project.shots[0];
+    const framingAccepted = shot
+      ? Boolean(project.workflow.shotFramingAcceptedAtByShotId[shot.id])
+      : false;
     return {
       workspace,
       project,
       selectedShotId: shot.id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
       panoView: panoViewFromCamera(shot.camera),
-      shotCameraFlying: true,
+      // Only auto-fly unlanded shots; keep landed shots locked.
+      shotCameraFlying: !framingAccepted,
     };
   }),
   setProject: (project) => {
@@ -593,24 +601,29 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const originShot = createOriginShot(state.project, state.project.shots.length + 1);
     const pano = getActivePano(state.project, state.activePanoId);
     return addShotWithCamera(originShot.camera, pano?.id, originShot.name, {
-      // Shots workspace defaults to navigating into fly mode; Review/Export can opt out.
+      // Shots workspace defaults to navigating into fly mode; Export can opt out.
       navigateToShots: options?.navigateToShots ?? true,
     });
   },
   selectShot: (id) => set((state) => {
     const shot = state.project.shots.find((item) => item.id === id);
     if (!shot) return { selectedShotId: id, shotCameraFlying: true };
+    const framingAccepted = Boolean(state.project.workflow.shotFramingAcceptedAtByShotId[shot.id]);
     return {
       selectedShotId: id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
       panoView: panoViewFromCamera(shot.camera),
-      shotCameraFlying: true,
+      shotCameraFlying: !framingAccepted,
     };
   }),
-  setShotCameraFlying: (value) => set((state) => {
+  setShotCameraFlying: (value, options) => set((state) => {
     if (!value) return { shotCameraFlying: false };
     const shotId = state.selectedShotId;
     if (!shotId) return { shotCameraFlying: true };
+    // Adjusting a still clears acceptance; camera-move end posing can keep it.
+    if (options?.clearFramingAcceptance === false) {
+      return { shotCameraFlying: true };
+    }
     const accepted = { ...state.project.workflow.shotFramingAcceptedAtByShotId };
     delete accepted[shotId];
     return {
@@ -624,6 +637,35 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   lockShotCamera: () => {
     if (document.pointerLockElement) document.exitPointerLock();
     set({ shotCameraFlying: false });
+  },
+  landShotFraming: (shotId, camera) => {
+    if (document.pointerLockElement) document.exitPointerLock();
+    set((state) => {
+      const shot = state.project.shots.find((item) => item.id === shotId);
+      if (!shot) return state;
+      const nextCamera = camera ?? shot.camera;
+      return {
+        shotCameraFlying: false,
+        project: touchProject({
+          ...state.project,
+          shots: state.project.shots.map((item) => {
+            if (item.id !== shotId) return item;
+            return withShotPanoLink(state.project, {
+              ...item,
+              camera: nextCamera,
+              updatedAt: new Date().toISOString(),
+            });
+          }),
+          workflow: {
+            ...state.project.workflow,
+            shotFramingAcceptedAtByShotId: {
+              ...state.project.workflow.shotFramingAcceptedAtByShotId,
+              [shotId]: new Date().toISOString(),
+            },
+          },
+        }),
+      };
+    });
   },
   updateShot: (id, updates) => set((state) => ({
     project: touchProject({
@@ -722,7 +764,6 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
             }
           : item),
       }),
-      workspace: 'review',
     }));
     return asset;
   },

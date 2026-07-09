@@ -2,16 +2,13 @@ import JSZip from 'jszip';
 import { LocationProject, Shot } from '../domain/types';
 import { getCameraMoveReferenceFrames } from './cameraKeyframes';
 import {
-  addCameraMoveCubemapCropPaths,
-  buildCameraMoveCubemapVisibility,
   CAMERA_MOVE_CUBEMAP_FACES,
-  cameraMoveCubemapVisibleStitchedPath,
   DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
 } from './cameraMoveCubemap';
 import { buildShotMetadata, createShotPackageManifest } from './exportManifest';
 import { generateImagePrompt, generateVideoPrompt } from './prompts';
 import { preparePanoExportDataUrl } from './panoImage';
-import { stitchCubemapFacesCrossAsync, stitchCubemapVisibleFacesAsync } from './cubemapStitch';
+import { stitchCubemapFacesCrossAsync } from './cubemapStitch';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
 import { renderPanoCubemapFaces, renderPanoPerspectiveCrop, renderShotFrame, renderViewportClay } from './renderers';
 
@@ -77,51 +74,23 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
   }
 
   await ensureHumanMannequinModel();
-  const cameraMoveCubemapVisibility = linkedPano && linkedPanoAsset && cameraMoveReferenceFrames.length > 0
-    ? addCameraMoveCubemapCropPaths(buildCameraMoveCubemapVisibility(
-      project,
-      shot,
-      linkedPano,
-      cameraMoveReferenceFrames,
-      { faceSize: DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE },
-    ))
-    : undefined;
 
-  if (linkedPano && linkedPanoAsset) {
-    if (cameraMoveReferenceFrames.length > 0) {
-      const cubemap = await renderPanoCubemapFaces(linkedPanoAsset.uri, {
-        faceSize: cameraMoveCubemapVisibility?.faceSize ?? DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
-        panoRotation: linkedPano.rotation,
-      });
-
-      // Export individual face PNGs (master cubemap)
-      for (const face of CAMERA_MOVE_CUBEMAP_FACES) {
-        addDataUrl(zip, `${rootFolder}/inputs/camera_move/cubemap/${face}.png`, cubemap.faces[face].dataUrl);
-      }
-
-      // Export stitched cross unfold (master cubemap combined with continuous seams)
-      const stitchedCubemap = await stitchCubemapFacesCrossAsync(cubemap.faces, cubemap.faceSize);
-      addDataUrl(zip, `${rootFolder}/inputs/camera_move/cubemap/cubemap_stitched.png`, stitchedCubemap.dataUrl);
-
-      // Export per-frame visible crops in the same cross layout (cubemap_visible)
-      for (const frame of cameraMoveCubemapVisibility?.frames ?? []) {
-        if (frame.visibleFaces.length === 0) continue;
-
-        const stitchedVisible = await stitchCubemapVisibleFacesAsync(
-          frame.visibleFaces.map((visibleFace) => ({
-            face: visibleFace.face,
-            dataUrl: cubemap.faces[visibleFace.face].dataUrl,
-            crop: visibleFace.crop,
-          })),
-          cubemap.faceSize,
-        );
-        addDataUrl(
-          zip,
-          `${rootFolder}/${cameraMoveCubemapVisibleStitchedPath(frame.id)}`,
-          stitchedVisible.dataUrl,
-        );
-      }
+  // Full cubemap ships with full-pano exports (canonical preferred, else linked).
+  const cubemapSourcePano = (shot.exportSettings.includeFullPano && canonicalPano && canonicalAsset)
+    ? { pano: canonicalPano, asset: canonicalAsset }
+    : (shot.exportSettings.includeFullPano && linkedPano && linkedPanoAsset)
+      ? { pano: linkedPano, asset: linkedPanoAsset }
+      : undefined;
+  if (cubemapSourcePano) {
+    const cubemap = await renderPanoCubemapFaces(cubemapSourcePano.asset.uri, {
+      faceSize: DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
+      panoRotation: cubemapSourcePano.pano.rotation,
+    });
+    for (const face of CAMERA_MOVE_CUBEMAP_FACES) {
+      addDataUrl(zip, `${rootFolder}/inputs/cubemap/${face}.png`, cubemap.faces[face].dataUrl);
     }
+    const stitchedCubemap = await stitchCubemapFacesCrossAsync(cubemap.faces, cubemap.faceSize);
+    addDataUrl(zip, `${rootFolder}/inputs/cubemap/cubemap_stitched.png`, stitchedCubemap.dataUrl);
   }
 
   if (shot.exportSettings.includePanoCrop && linkedPano && shot.panoCrop) {
@@ -169,9 +138,6 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
     if (cameraMoveReferenceFrames.length > 0) {
       zip.file(`${rootFolder}/metadata/camera_move_reference_frames.json`, JSON.stringify(cameraMoveReferenceFrames, null, 2));
     }
-    if (cameraMoveCubemapVisibility) {
-      zip.file(`${rootFolder}/metadata/camera_move_cubemap_visibility.json`, JSON.stringify(cameraMoveCubemapVisibility, null, 2));
-    }
     zip.file(`${rootFolder}/metadata/landmarks.json`, JSON.stringify(metadata.landmarks, null, 2));
     zip.file(`${rootFolder}/metadata/location.json`, JSON.stringify(metadata.project, null, 2));
   }
@@ -182,7 +148,7 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
     zip.file(`${rootFolder}/prompts/negative_prompt.txt`, shot.promptOverrides.negativePrompt || '');
   }
 
-  const manifest = createShotPackageManifest(project, shot, cameraMoveCubemapVisibility);
+  const manifest = createShotPackageManifest(project, shot);
   zip.file(`${rootFolder}/manifest.json`, JSON.stringify(manifest, null, 2));
   const blob = await zip.generateAsync({ type: 'blob' });
   return {

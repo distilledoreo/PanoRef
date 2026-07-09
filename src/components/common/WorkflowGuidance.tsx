@@ -20,7 +20,6 @@ const WORKSPACE_LABELS: Record<Workspace, string> = {
   build: 'Build',
   reference: 'Reference',
   shots: 'Shots',
-  review: 'Review',
   export: 'Export',
 };
 
