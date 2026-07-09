@@ -65,6 +65,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('data-shots-shutter');
     expect(shots).toContain('data-shots-mode-switcher');
     expect(shots).toContain('data-shots-library-thumb');
+    expect(shots).toContain('data-shots-library-delete');
     expect(shots).toContain('data-shots-settings-trigger');
     expect(shots).toContain('data-shots-video-duration');
     expect(shots).toContain('VIDEO_DURATION_PRESETS_SECONDS');
@@ -299,6 +300,9 @@ describe('ui revamp fidelity surfaces', () => {
     expect(app).toContain('PanoViewerWorkspace');
     expect(app).toContain('Simple 360 Viewer');
     expect(app).toContain('Open Continuity Stage');
+    expect(app).toContain('data-brand-menu-trigger');
+    expect(app).toContain('ChevronDown');
+    expect(app).toContain('Open app menu');
     expect(chooser).toContain('data-mode-chooser');
     expect(chooser).toContain('Just view a 360 pano');
     expect(panoViewer).toContain('Download current view');

@@ -626,31 +626,52 @@ export function ShotsWorkspace() {
                 {project.shots.map((shot) => {
                   const selected = shot.id === selectedShot?.id;
                   const landed = isShotFramingAccepted(project, shot.id);
+                  const canDelete = project.shots.length > 1;
                   return (
-                    <button
+                    <div
                       key={shot.id}
-                      type="button"
-                      onClick={() => {
-                        selectShot(shot.id);
-                        setLibraryOpen(false);
-                      }}
                       className={`relative shrink-0 overflow-hidden rounded-xl border transition ${
                         selected
                           ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]'
                           : 'border-white/15'
                       }`}
-                      aria-label={`Select shot ${shot.shotNumber}`}
+                      data-shots-library-card
                     >
-                      <ShotThumbnail
-                        project={project}
-                        shot={shot}
-                        overrideSrc={shot.id === selectedShot?.id ? framePreviewUrl : undefined}
-                        className="h-20 w-28 object-cover"
-                      />
-                      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                        {shot.shotNumber}{landed ? ' · ✓' : ''}
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          selectShot(shot.id);
+                          setLibraryOpen(false);
+                        }}
+                        className="block"
+                        aria-label={`Select shot ${shot.shotNumber}`}
+                      >
+                        <ShotThumbnail
+                          project={project}
+                          shot={shot}
+                          overrideSrc={shot.id === selectedShot?.id ? framePreviewUrl : undefined}
+                          className="h-20 w-28 object-cover"
+                        />
+                        <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                          {shot.shotNumber}{landed ? ' · ✓' : ''}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!canDelete) return;
+                          removeShot(shot.id);
+                        }}
+                        disabled={!canDelete}
+                        className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                        aria-label={canDelete ? `Delete shot ${shot.shotNumber}` : 'Cannot delete the only shot'}
+                        title={canDelete ? 'Delete shot' : 'Keep at least one shot'}
+                        data-shots-library-delete
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   );
                 })}
                 <button

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Boxes,
   Camera,
+  ChevronDown,
   Clapperboard,
   Compass,
   FileJson,
@@ -145,17 +146,23 @@ export default function App() {
             <button
               type="button"
               onClick={() => setProjectMenuOpen((open) => !open)}
-              className="flex min-w-0 items-center gap-3 rounded-2xl pr-3 transition hover:bg-surface-overlay/60"
-              title="Project actions"
+              className="flex min-w-0 items-center gap-2 rounded-2xl border border-transparent py-1 pl-1 pr-2.5 transition hover:border-subtle hover:bg-surface-overlay/70"
+              title="Open menu"
+              aria-label="Open app menu"
               aria-expanded={projectMenuOpen}
               aria-haspopup="menu"
+              data-brand-menu-trigger
             >
               <span className="flex h-11 w-11 shrink-0 items-center justify-center text-accent">
                 <Boxes className="h-9 w-9" strokeWidth={2.2} />
               </span>
-              <span className="truncate text-xl font-semibold tracking-normal text-primary">
+              <span className="min-w-0 truncate text-xl font-semibold tracking-normal text-primary">
                 {isPanoViewer ? '360 Viewer' : 'Continuity Stage'}
               </span>
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-secondary transition ${projectMenuOpen ? 'rotate-180 text-accent' : ''}`}
+                aria-hidden
+              />
             </button>
             {projectMenuOpen && (
               <div
