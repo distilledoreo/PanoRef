@@ -305,6 +305,23 @@ describe('ui revamp fidelity surfaces', () => {
     expect(panoViewer).toContain('renderPanoPerspectiveCrop');
     expect(panoViewer).toContain('downloadDataUrl');
     expect(panoViewer).toContain('data-pano-viewer-workspace');
+    expect(panoViewer).toContain('data-pano-viewer-isolated');
+    // Must not mutate Continuity Stage project from simple viewer.
+    expect(panoViewer).not.toContain("from '../../state/useContinuityStore'");
+    expect(panoViewer).not.toContain('importCanonicalPano');
+    expect(panoViewer).toContain('useState');
+  });
+
+  it('advances video shutter from capture-end to export without requiring fly to stop', () => {
+    const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    expect(shots).toContain('videoEndCaptured');
+    expect(shots).toContain("data-shots-video-phase");
+    expect(shots).toContain('setVideoEndCaptured(true)');
+    // Export must not be gated on !shotCameraFlying.
+    expect(shots).not.toMatch(/if \(shotCameraFlying \|\| !cameraMoveReady\)/);
+    expect(shots).toMatch(/if \(!videoEndCaptured\)/);
+    // Preview after capture should read latest store project (not stale closure only).
+    expect(shots).toContain('useContinuityStore.getState().project');
   });
 
   it('keeps export multi-select reconciled and add-camera local to export', () => {

@@ -92,6 +92,11 @@ export function ShotsWorkspace() {
   const [landFlash, setLandFlash] = useState(false);
   /** Pending move length — applied when end is captured (and updates existing end if present). */
   const [videoDurationSeconds, setVideoDurationSeconds] = useState(DEFAULT_CAMERA_MOVE_DURATION_SECONDS);
+  /**
+   * Video shutter phases: pose end → export. Independent of shotCameraFlying so keepFlying
+   * stills/viewfinder can stay live without trapping the shutter on recapture-end.
+   */
+  const [videoEndCaptured, setVideoEndCaptured] = useState(false);
 
   const getEffectiveCamera = useCallback((): CameraData | undefined => {
     if (!selectedShot) return undefined;
@@ -295,21 +300,23 @@ export function ShotsWorkspace() {
     setShotCameraFlying(true, options);
   }, [selectedShot?.camera, setShotCameraFlying]);
 
-  const snapshotPreview = useCallback((shotId: string, camera: CameraData) => {
-    const shot = project.shots.find((item) => item.id === shotId);
-    if (!shot) return;
+  const snapshotPreview = useCallback((shot: { id: string; exportSettings: { width: number; height: number }; camera: CameraData }, camera: CameraData) => {
+    // Use latest project from the store so freshly created shots are not missing
+    // from a stale React closure after addCamera.
+    const latestProject = useContinuityStore.getState().project;
+    const latestShot = latestProject.shots.find((item) => item.id === shot.id) ?? shot;
     const previewShot = {
-      ...shot,
+      ...latestShot,
       camera: {
         ...camera,
         position: [...camera.position] as CameraData['position'],
         target: [...camera.target] as CameraData['target'],
       },
     };
-    void renderShotFrame(project, previewShot).then((frame) => {
+    void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number]).then((frame) => {
       setFramePreviewUrl(frame.dataUrl);
     });
-  }, [project]);
+  }, []);
 
   /**
    * Still capture = iPhone shutter: commit pose to gallery, keep viewfinder live.
@@ -321,25 +328,27 @@ export function ShotsWorkspace() {
       return;
     }
     const camera = draftCameraRef.current ?? selectedShot.camera;
-    const alreadyCaptured = isShotFramingAccepted(project, selectedShot.id);
+    const alreadyCaptured = isShotFramingAccepted(
+      useContinuityStore.getState().project,
+      selectedShot.id,
+    );
 
-    let targetShotId = selectedShot.id;
+    let targetShot = selectedShot;
     if (alreadyCaptured) {
-      const next = addCamera({ navigateToShots: false });
-      targetShotId = next.id;
+      targetShot = addCamera({ navigateToShots: false });
     }
 
-    landShotFraming(targetShotId, camera, { keepFlying: true });
+    landShotFraming(targetShot.id, camera, { keepFlying: true });
     // Stay live at the same pose — do not clear draft / freeze the viewfinder.
     draftCameraRef.current = {
       ...camera,
       position: [...camera.position] as CameraData['position'],
       target: [...camera.target] as CameraData['target'],
     };
-    snapshotPreview(targetShotId, camera);
+    snapshotPreview(targetShot, camera);
     setLandFlash(true);
     window.setTimeout(() => setLandFlash(false), 700);
-  }, [addCamera, landShotFraming, project, selectedShot, snapshotPreview]);
+  }, [addCamera, landShotFraming, selectedShot, snapshotPreview]);
 
   const setCameraMoveEnd = useCallback(() => {
     if (!selectedShot) return;
@@ -351,14 +360,15 @@ export function ShotsWorkspace() {
       camera,
       durationSeconds: cameraMoveDurationSeconds,
     }));
-    // Video end still commits framing; keep flying so the viewfinder doesn't freeze.
+    // Keep viewfinder live; shutter phase advances via videoEndCaptured (not flying flag).
     landShotFraming(selectedShot.id, camera, { keepFlying: true });
     draftCameraRef.current = {
       ...camera,
       position: [...camera.position] as CameraData['position'],
       target: [...camera.target] as CameraData['target'],
     };
-    snapshotPreview(selectedShot.id, camera);
+    setVideoEndCaptured(true);
+    snapshotPreview(selectedShot, camera);
     setLandFlash(true);
     window.setTimeout(() => setLandFlash(false), 700);
   }, [
@@ -377,9 +387,11 @@ export function ShotsWorkspace() {
     );
     setVideoDurationSeconds(duration);
     setCaptureMode('video');
-    // Auto-set start from the current still, then fly for the end pose.
+    setVideoEndCaptured(false);
+    // Fresh move session: start from current still, clear prior end by rewriting start only
+    // and dropping other keyframes so the shutter is not already "export ready."
     updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
-      keyframes: selectedShot.cameraKeyframes,
+      keyframes: [],
       slot: 'start',
       camera: selectedShot.camera,
       durationSeconds: duration,
@@ -390,6 +402,7 @@ export function ShotsWorkspace() {
 
   const enterStillMode = useCallback(() => {
     setCaptureMode('still');
+    setVideoEndCaptured(false);
     // Still camera is always live — like a phone camera app.
     startFlyCamera({ clearFramingAcceptance: false });
   }, [startFlyCamera]);
@@ -406,7 +419,8 @@ export function ShotsWorkspace() {
       return;
     }
     if (captureMode === 'video') {
-      if (shotCameraFlying || !cameraMoveReady) {
+      // Phase is tracked explicitly — do not gate export on !shotCameraFlying.
+      if (!videoEndCaptured) {
         setCameraMoveEnd();
         return;
       }
@@ -416,13 +430,12 @@ export function ShotsWorkspace() {
     captureStill();
   }, [
     addCamera,
-    cameraMoveReady,
     captureMode,
     captureStill,
     exportCameraMoveVideo,
     selectedShot,
     setCameraMoveEnd,
-    shotCameraFlying,
+    videoEndCaptured,
   ]);
 
   const panoMatch = selectedShot && linkedPano
@@ -458,6 +471,7 @@ export function ShotsWorkspace() {
   useEffect(() => {
     setCaptureMode('still');
     setLibraryOpen(false);
+    setVideoEndCaptured(false);
     if (selectedShot) {
       setVideoDurationSeconds(
         getCameraMoveDurationSeconds(selectedShot.cameraKeyframes, DEFAULT_CAMERA_MOVE_DURATION_SECONDS),
@@ -509,7 +523,7 @@ export function ShotsWorkspace() {
   const captureLabel = !selectedShot
     ? 'Add shot'
     : captureMode === 'video'
-      ? (shotCameraFlying || !cameraMoveReady
+      ? (!videoEndCaptured
         ? 'Capture end'
         : isExportingCameraMove
           ? `Exporting ${Math.round(cameraMoveProgress * 100)}%`
@@ -517,7 +531,7 @@ export function ShotsWorkspace() {
       : 'Capture';
 
   const captureHint = captureMode === 'video'
-    ? (shotCameraFlying || !cameraMoveReady
+    ? (!videoEndCaptured
       ? 'Fly to the end pose, then capture'
       : 'Export the graybox move as MP4')
     : 'Capture adds a shot — viewfinder stays live';
@@ -683,7 +697,7 @@ export function ShotsWorkspace() {
           {captureMode === 'video' && (
             <div className="pointer-events-auto flex w-full max-w-md flex-col items-center gap-2">
               <p className="text-center text-[11px] font-medium text-white/75">
-                {shotCameraFlying || !cameraMoveReady
+                {!videoEndCaptured
                   ? 'Start set · pick length · fly to end · capture'
                   : 'End set · export when ready'}
               </p>
@@ -750,23 +764,24 @@ export function ShotsWorkspace() {
             <button
               type="button"
               onClick={onCapture}
-              disabled={captureMode === 'video' && !shotCameraFlying && cameraMoveReady && (isExportingCameraMove || !supportedMp4MimeType)}
+              disabled={captureMode === 'video' && videoEndCaptured && (isExportingCameraMove || !supportedMp4MimeType)}
               className="group relative flex h-[4.75rem] w-[4.75rem] shrink-0 items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-50"
               aria-label={captureLabel}
               data-shots-shutter
+              data-shots-video-phase={captureMode === 'video' ? (videoEndCaptured ? 'export' : 'capture-end') : undefined}
               title={captureHint}
             >
               <span className="absolute inset-0 rounded-full border-[3px] border-white/90" />
               <span
                 className={`h-[3.65rem] w-[3.65rem] rounded-full transition ${
                   captureMode === 'video'
-                    ? (shotCameraFlying || !cameraMoveReady
+                    ? (!videoEndCaptured
                       ? 'bg-red-500 group-active:scale-95'
                       : 'bg-[var(--accent)] group-active:scale-95')
                     : 'bg-white group-active:scale-90'
                 }`}
               />
-              {captureMode === 'video' && cameraMoveReady && !isExportingCameraMove && (
+              {captureMode === 'video' && videoEndCaptured && !isExportingCameraMove && (
                 <Film className="pointer-events-none absolute h-5 w-5 text-white" />
               )}
             </button>

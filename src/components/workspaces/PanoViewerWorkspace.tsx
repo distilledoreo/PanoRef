@@ -1,34 +1,32 @@
 import React, { useRef, useState } from 'react';
 import { Download, ImagePlus, Loader2 } from 'lucide-react';
-import { getCanonicalPano, getPanoAsset } from '../../domain/selectors';
+import { Euler, PanoViewState } from '../../domain/types';
 import { preparePanoImport } from '../../engine/panoImage';
 import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
 import { renderPanoPerspectiveCrop } from '../../engine/renderers';
-import { useContinuityStore } from '../../state/useContinuityStore';
 import { PrimaryCTA } from '../common/PrimaryCTA';
 import { PanoViewer } from '../viewers/PanoViewer';
 import { FullBleedLayout } from './WorkspaceShell';
 
 const DEFAULT_DOWNLOAD_WIDTH = 1920;
 const DEFAULT_DOWNLOAD_HEIGHT = 1080;
+const DEFAULT_VIEW: PanoViewState = { yawDegrees: 0, pitchDegrees: 0, fovDegrees: 75 };
+const IDENTITY_ROTATION: Euler = [0, 0, 0];
 
+/**
+ * Simple 360 viewer — fully isolated from Continuity Stage project state.
+ * Importing a pano here uses local component state only (no project mutations).
+ */
 export function PanoViewerWorkspace() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState<string | undefined>();
-  const {
-    project,
-    panoView,
-    setPanoView,
-    importCanonicalPano,
-    activePanoId,
-  } = useContinuityStore();
-
-  const activePano = activePanoId
-    ? project.panoRefs.find((pano) => pano.id === activePanoId)
-    : getCanonicalPano(project) ?? project.panoRefs[0];
-  const activeAsset = activePano ? getPanoAsset(project, activePano) : undefined;
+  const [imageUrl, setImageUrl] = useState<string | undefined>();
+  const [imageName, setImageName] = useState('pano');
+  const [imageWidth, setImageWidth] = useState(DEFAULT_DOWNLOAD_WIDTH);
+  const [imageHeight, setImageHeight] = useState(DEFAULT_DOWNLOAD_HEIGHT);
+  const [view, setView] = useState<PanoViewState>(DEFAULT_VIEW);
 
   const importPano = async (file?: File) => {
     if (!file) return;
@@ -38,15 +36,11 @@ export function PanoViewerWorkspace() {
       const dataUrl = await readFileAsDataUrl(file);
       const dimensions = await getImageDimensions(dataUrl);
       const prepared = await preparePanoImport(dataUrl, dimensions.width, dimensions.height);
-      importCanonicalPano({
-        name: file.name || 'pano.png',
-        dataUrl: prepared.dataUrl,
-        width: prepared.width,
-        height: prepared.height,
-        importNote: prepared.analysis.wasLetterboxed
-          ? `Imported from ${dimensions.width}×${dimensions.height} letterboxed 16:9; extracted ${prepared.width}×${prepared.height} equirectangular region.`
-          : undefined,
-      });
+      setImageUrl(prepared.dataUrl);
+      setImageName(file.name || 'pano.png');
+      setImageWidth(prepared.width);
+      setImageHeight(prepared.height);
+      setView(DEFAULT_VIEW);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not import pano.');
     } finally {
@@ -56,30 +50,30 @@ export function PanoViewerWorkspace() {
   };
 
   const downloadCurrentView = async () => {
-    if (!activePano || !activeAsset) return;
+    if (!imageUrl) return;
     setIsDownloading(true);
     setError(undefined);
     try {
-      const width = project.settings.defaultShotWidth || DEFAULT_DOWNLOAD_WIDTH;
-      const height = project.settings.defaultShotHeight || DEFAULT_DOWNLOAD_HEIGHT;
+      const width = DEFAULT_DOWNLOAD_WIDTH;
+      const height = DEFAULT_DOWNLOAD_HEIGHT;
       const frame = await renderPanoPerspectiveCrop(
-        activeAsset.uri,
+        imageUrl,
         {
-          panoId: activePano.id,
-          yawDegrees: panoView.yawDegrees,
-          pitchDegrees: panoView.pitchDegrees,
+          panoId: 'simple-viewer',
+          yawDegrees: view.yawDegrees,
+          pitchDegrees: view.pitchDegrees,
           rollDegrees: 0,
-          fovDegrees: panoView.fovDegrees,
+          fovDegrees: view.fovDegrees,
           aspectRatio: width / height,
           width,
           height,
         },
-        activePano.rotation,
+        IDENTITY_ROTATION,
       );
-      const baseName = (activeAsset.name || activePano.name || 'pano_view')
+      const baseName = imageName
         .replace(/\.[^.]+$/, '')
         .replace(/\s+/g, '_')
-        .toLowerCase();
+        .toLowerCase() || 'pano_view';
       downloadDataUrl(frame.dataUrl, `${baseName}_${width}x${height}.png`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not download current view.');
@@ -88,23 +82,28 @@ export function PanoViewerWorkspace() {
     }
   };
 
+  const onViewChange = (updates: Partial<PanoViewState>) => {
+    setView((current) => ({ ...current, ...updates }));
+  };
+
   return (
     <FullBleedLayout reserveHeader>
-      <div className="relative h-full min-h-0 w-full" data-pano-viewer-workspace>
+      <div className="relative h-full min-h-0 w-full" data-pano-viewer-workspace data-pano-viewer-isolated>
         <PanoViewer
-          imageUrl={activeAsset?.uri}
-          view={panoView}
-          onViewChange={setPanoView}
-          label={activePano?.name}
-          panoRotation={activePano?.rotation}
+          imageUrl={imageUrl}
+          view={view}
+          onViewChange={onViewChange}
+          label={imageUrl ? imageName : undefined}
+          panoRotation={IDENTITY_ROTATION}
         />
 
-        {!activeAsset && (
+        {!imageUrl && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
             <div className="pointer-events-auto max-w-md space-y-3 rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-6 text-center shadow-soft backdrop-blur-sm">
               <h2 className="text-lg font-semibold text-primary">Import a 360 pano</h2>
               <p className="text-sm text-secondary">
                 Drop in an equirectangular image, look around, then download the current view as a flat PNG.
+                This mode does not change your Continuity Stage project.
               </p>
               <button
                 type="button"
@@ -136,9 +135,9 @@ export function PanoViewerWorkspace() {
               className="inline-flex items-center gap-1.5 rounded-xl border border-subtle bg-surface-overlay/90 px-3 py-2 text-xs font-semibold text-secondary shadow-card backdrop-blur-sm transition hover:border-accent hover:text-accent disabled:opacity-50"
             >
               <ImagePlus className="h-3.5 w-3.5" />
-              {activeAsset ? 'Replace pano' : 'Import pano'}
+              {imageUrl ? 'Replace pano' : 'Import pano'}
             </button>
-            {activeAsset && (
+            {imageUrl && (
               <label className="inline-flex items-center gap-2 rounded-xl border border-subtle bg-surface-overlay/90 px-3 py-2 text-xs text-secondary shadow-card backdrop-blur-sm">
                 <span className="font-medium">FOV</span>
                 <input
@@ -146,17 +145,22 @@ export function PanoViewerWorkspace() {
                   min={30}
                   max={120}
                   step={1}
-                  value={panoView.fovDegrees}
-                  onChange={(event) => setPanoView({ fovDegrees: Number(event.target.value) })}
+                  value={view.fovDegrees}
+                  onChange={(event) => onViewChange({ fovDegrees: Number(event.target.value) })}
                   className="w-24 accent-[var(--accent)]"
                   aria-label="Field of view"
                 />
-                <span className="w-8 tabular-nums text-primary">{Math.round(panoView.fovDegrees)}°</span>
+                <span className="w-8 tabular-nums text-primary">{Math.round(view.fovDegrees)}°</span>
               </label>
+            )}
+            {imageUrl && (
+              <span className="rounded-full bg-black/40 px-2 py-1 text-[10px] font-medium text-white/70 backdrop-blur-sm">
+                {imageWidth}×{imageHeight}
+              </span>
             )}
           </div>
 
-          {activeAsset && (
+          {imageUrl && (
             <div className="pointer-events-auto">
               <PrimaryCTA
                 icon={isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
