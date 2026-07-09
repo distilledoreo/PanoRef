@@ -1,9 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultProject } from '../src/domain/defaults';
+import { BUILD_HISTORY_COALESCE_MS } from '../src/engine/buildHistory';
 import { createPlacedSceneObject, duplicateSceneObject, snapBuildPoint } from '../src/engine/sandbox';
 import { useContinuityStore } from '../src/state/useContinuityStore';
-
-// Ensure history stacks start clean for store integration cases below.
 
 describe('sandbox build interactions', () => {
   it('snaps build points on the floor grid without changing height', () => {
@@ -145,6 +144,9 @@ describe('sandbox build interactions', () => {
       project,
       buildHistoryPast: [],
       buildHistoryFuture: [],
+      buildHistoryBatchDepth: 0,
+      buildHistoryBatchCaptured: false,
+      buildHistoryCoalesceActive: false,
       gridSnap: true,
     });
 
@@ -174,6 +176,108 @@ describe('sandbox build interactions', () => {
     const afterUndoMove = useContinuityStore.getState().project.scene.objects.find((item) => item.id === placed.id);
     expect(afterUndoMove?.transform.position[0]).not.toBe(4);
     expect(useContinuityStore.getState().buildHistoryPast).toHaveLength(pastLenAfterBatch - 1);
+  });
+
+  it('records step history for discrete updateObject and coalesces rapid field edits', () => {
+    vi.useFakeTimers();
+    const project = createDefaultProject();
+    const object = project.scene.objects[1];
+    useContinuityStore.setState({
+      project,
+      selectedObjectId: object.id,
+      buildHistoryPast: [],
+      buildHistoryFuture: [],
+      buildHistoryBatchDepth: 0,
+      buildHistoryBatchCaptured: false,
+      buildHistoryCoalesceActive: false,
+    });
+
+    useContinuityStore.getState().updateObject(object.id, {
+      transform: {
+        ...object.transform,
+        rotation: [0, 15, 0],
+      },
+    });
+    useContinuityStore.getState().updateObject(object.id, {
+      transform: {
+        ...object.transform,
+        rotation: [0, 30, 0],
+      },
+    });
+    useContinuityStore.getState().updateObject(object.id, {
+      transform: {
+        ...object.transform,
+        rotation: [0, 45, 0],
+      },
+    });
+    expect(useContinuityStore.getState().buildHistoryPast).toHaveLength(3);
+
+    useContinuityStore.setState({
+      buildHistoryPast: [],
+      buildHistoryFuture: [],
+      buildHistoryCoalesceActive: false,
+    });
+    const target = useContinuityStore.getState().project.scene.objects[1];
+    useContinuityStore.getState().updateObject(target.id, { name: 'A' }, { history: 'coalesce' });
+    useContinuityStore.getState().updateObject(target.id, { name: 'AB' }, { history: 'coalesce' });
+    useContinuityStore.getState().updateObject(target.id, { name: 'ABC' }, { history: 'coalesce' });
+    expect(useContinuityStore.getState().buildHistoryPast).toHaveLength(1);
+
+    vi.advanceTimersByTime(BUILD_HISTORY_COALESCE_MS + 10);
+    useContinuityStore.getState().updateObject(target.id, { name: 'ABCD' }, { history: 'coalesce' });
+    expect(useContinuityStore.getState().buildHistoryPast).toHaveLength(2);
+    vi.useRealTimers();
+  });
+
+  it('skips history for no-op pano origin and identical updateObject', () => {
+    const project = createDefaultProject();
+    const origin = [...project.scene.panoOrigin] as [number, number, number];
+    const object = project.scene.objects[1];
+    useContinuityStore.setState({
+      project,
+      buildHistoryPast: [],
+      buildHistoryFuture: [],
+      buildHistoryBatchDepth: 0,
+      buildHistoryBatchCaptured: false,
+    });
+
+    useContinuityStore.getState().setPanoOrigin(origin);
+    expect(useContinuityStore.getState().buildHistoryPast).toHaveLength(0);
+
+    useContinuityStore.getState().updateObject(object.id, { name: object.name });
+    expect(useContinuityStore.getState().buildHistoryPast).toHaveLength(0);
+  });
+
+  it('clears build history stacks and runtime flags when opening a project', () => {
+    const project = createDefaultProject();
+    useContinuityStore.setState({
+      project,
+      buildHistoryPast: [{
+        objects: project.scene.objects,
+        panoOrigin: project.scene.panoOrigin,
+        panoRotation: project.scene.panoRotation,
+      }],
+      buildHistoryFuture: [{
+        objects: project.scene.objects,
+        panoOrigin: project.scene.panoOrigin,
+        panoRotation: project.scene.panoRotation,
+      }],
+      buildHistoryBatchDepth: 2,
+      buildHistoryBatchCaptured: true,
+      buildHistoryCoalesceActive: true,
+    });
+
+    const incoming = createDefaultProject();
+    incoming.name = 'Fresh Project';
+    useContinuityStore.getState().setProject(incoming);
+
+    const state = useContinuityStore.getState();
+    expect(state.project.name).toBe('Fresh Project');
+    expect(state.buildHistoryPast).toEqual([]);
+    expect(state.buildHistoryFuture).toEqual([]);
+    expect(state.buildHistoryBatchDepth).toBe(0);
+    expect(state.buildHistoryBatchCaptured).toBe(false);
+    expect(state.buildHistoryCoalesceActive).toBe(false);
   });
 
   it('does not drag locked objects through the sandbox move action', () => {

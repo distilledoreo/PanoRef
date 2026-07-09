@@ -257,12 +257,15 @@ describe('ui revamp fidelity surfaces', () => {
     const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
     expect(build).toContain('data-build-undo');
     expect(build).toContain('data-build-redo');
+    expect(build).toContain('Undo Build edit');
+    expect(build).toContain('history: \'coalesce\'');
     expect(build).toContain('undoBuild');
     expect(build).toContain('onEditBatchStart={beginBuildHistoryBatch}');
     expect(viewport).toContain('onEditBatchStart');
     expect(viewport).toContain('startEditBatch');
     expect(store).toContain('beginBuildHistoryBatch');
     expect(store).toContain('undoBuild');
+    expect(store).toContain("history?: BuildHistoryMode");
   });
 
   it('fits review grid as a compact 3x2 layout above the action bar', () => {

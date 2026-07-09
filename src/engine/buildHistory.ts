@@ -1,8 +1,18 @@
 import { Euler, SceneObject, Vec3 } from '../domain/types';
 
 export const MAX_BUILD_HISTORY = 50;
-/** Coalesce rapid updateObject calls (e.g. typing a name) into one undo step. */
+/** Coalesce rapid field edits (name/color typing) into one undo step. */
 export const BUILD_HISTORY_COALESCE_MS = 350;
+export const BUILD_HISTORY_POSITION_EPSILON = 1e-6;
+
+/**
+ * How a build mutation records history:
+ * - step: always one undo entry per real change (default for commands)
+ * - coalesce: merge rapid successive changes into one entry
+ * - batch: first real change in an open drag batch records once
+ * - silent: never records
+ */
+export type BuildHistoryMode = 'step' | 'coalesce' | 'batch' | 'silent';
 
 export interface BuildHistorySnapshot {
   objects: SceneObject[];
@@ -32,6 +42,26 @@ export function captureBuildSnapshot(params: {
     panoRotation: params.panoRotation,
     selectedObjectId: params.selectedObjectId,
   });
+}
+
+export function vec3NearlyEqual(
+  a: Vec3,
+  b: Vec3,
+  epsilon = BUILD_HISTORY_POSITION_EPSILON,
+): boolean {
+  return (
+    Math.abs(a[0] - b[0]) <= epsilon
+    && Math.abs(a[1] - b[1]) <= epsilon
+    && Math.abs(a[2] - b[2]) <= epsilon
+  );
+}
+
+export function buildSnapshotsEqual(a: BuildHistorySnapshot, b: BuildHistorySnapshot): boolean {
+  if (a.selectedObjectId !== b.selectedObjectId) return false;
+  if (!vec3NearlyEqual(a.panoOrigin, b.panoOrigin)) return false;
+  if (!vec3NearlyEqual(a.panoRotation, b.panoRotation)) return false;
+  // Structural scene equality (order-sensitive). Fast enough for build-scale scenes.
+  return JSON.stringify(a.objects) === JSON.stringify(b.objects);
 }
 
 export function pushBuildHistoryPast(

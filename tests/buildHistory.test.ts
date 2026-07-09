@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createSceneObject } from '../src/domain/defaults';
 import {
   MAX_BUILD_HISTORY,
+  buildSnapshotsEqual,
   canRedoBuild,
   canUndoBuild,
   captureBuildSnapshot,
@@ -10,6 +11,7 @@ import {
   pushBuildHistoryPast,
   redoBuildHistory,
   undoBuildHistory,
+  vec3NearlyEqual,
   type BuildHistorySnapshot,
   type BuildHistoryStacks,
 } from '../src/engine/buildHistory';
@@ -79,5 +81,15 @@ describe('buildHistory', () => {
     const current = snap('now');
     expect(undoBuildHistory(empty, current)).toBeUndefined();
     expect(redoBuildHistory(empty, current)).toBeUndefined();
+  });
+
+  it('compares snapshots with epsilon position equality', () => {
+    const a = snap('same');
+    const b = cloneBuildSnapshot(a);
+    b.panoOrigin = [a.panoOrigin[0] + 1e-9, a.panoOrigin[1], a.panoOrigin[2]];
+    expect(vec3NearlyEqual(a.panoOrigin, b.panoOrigin)).toBe(true);
+    expect(buildSnapshotsEqual(a, b)).toBe(true);
+    b.objects[0].name = 'different';
+    expect(buildSnapshotsEqual(a, b)).toBe(false);
   });
 });
