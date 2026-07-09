@@ -178,6 +178,9 @@ export function ShotsWorkspace() {
       camera,
       durationSeconds: cameraMoveDurationSeconds,
     }));
+    // Keep main shutter phase in sync with advanced drawer Set Start / Set End.
+    if (slot === 'end') setVideoEndCaptured(true);
+    if (slot === 'start') setVideoEndCaptured(false);
   }, [cameraMoveDurationSeconds, getEffectiveCamera, selectedShot, updateCameraMoveKeyframes]);
 
   const changeCameraMoveDuration = useCallback((durationSeconds: number) => {
