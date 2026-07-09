@@ -21,6 +21,8 @@ import {
 } from '../../domain/defaults';
 import {
   DEFAULT_CAMERA_MOVE_DURATION_SECONDS,
+  MAX_CAMERA_MOVE_DURATION_SECONDS,
+  MIN_CAMERA_MOVE_DURATION_SECONDS,
   CameraMoveKeyframeSlot,
   getCameraMoveDurationSeconds,
   getSortedCameraKeyframes,
@@ -43,7 +45,18 @@ import { FullBleedLayout } from './WorkspaceShell';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
 
+/** Quick picks shown on the camera chrome while capturing a move end. */
+const VIDEO_DURATION_PRESETS_SECONDS = [1, 2, 3, 5, 8] as const;
+
 type CaptureMode = 'still' | 'video';
+
+function clampVideoDuration(seconds: number): number {
+  if (!Number.isFinite(seconds)) return DEFAULT_CAMERA_MOVE_DURATION_SECONDS;
+  return Math.min(
+    MAX_CAMERA_MOVE_DURATION_SECONDS,
+    Math.max(MIN_CAMERA_MOVE_DURATION_SECONDS, seconds),
+  );
+}
 
 export function ShotsWorkspace() {
   const {
@@ -77,6 +90,8 @@ export function ShotsWorkspace() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [captureMode, setCaptureMode] = useState<CaptureMode>('still');
   const [landFlash, setLandFlash] = useState(false);
+  /** Pending move length — applied when end is captured (and updates existing end if present). */
+  const [videoDurationSeconds, setVideoDurationSeconds] = useState(DEFAULT_CAMERA_MOVE_DURATION_SECONDS);
 
   const getEffectiveCamera = useCallback((): CameraData | undefined => {
     if (!selectedShot) return undefined;
@@ -107,9 +122,12 @@ export function ShotsWorkspace() {
     () => getSortedCameraKeyframes(selectedShot?.cameraKeyframes ?? []),
     [selectedShot?.cameraKeyframes],
   );
-  const cameraMoveDurationSeconds = selectedShot
+  const storedCameraMoveDurationSeconds = selectedShot
     ? getCameraMoveDurationSeconds(cameraMoveKeyframes, DEFAULT_CAMERA_MOVE_DURATION_SECONDS)
     : DEFAULT_CAMERA_MOVE_DURATION_SECONDS;
+  const cameraMoveDurationSeconds = captureMode === 'video'
+    ? videoDurationSeconds
+    : storedCameraMoveDurationSeconds;
   const cameraMoveReady = hasRenderableCameraMove(cameraMoveKeyframes);
   const cameraMoveAsset = selectedShot?.assets.cameraMoveVideoAssetId
     ? project.assets.assets[selectedShot.assets.cameraMoveVideoAssetId]
@@ -159,7 +177,13 @@ export function ShotsWorkspace() {
 
   const changeCameraMoveDuration = useCallback((durationSeconds: number) => {
     if (!selectedShot) return;
-    updateCameraMoveKeyframes(updateCameraMoveDuration(selectedShot.cameraKeyframes, durationSeconds));
+    const next = clampVideoDuration(durationSeconds);
+    setVideoDurationSeconds(next);
+    // Only rewrite keyframes when an end pose already exists; otherwise the
+    // pending duration is applied on the next end capture.
+    if (hasRenderableCameraMove(selectedShot.cameraKeyframes)) {
+      updateCameraMoveKeyframes(updateCameraMoveDuration(selectedShot.cameraKeyframes, next));
+    }
   }, [selectedShot, updateCameraMoveKeyframes]);
 
   const exportCameraMoveVideo = useCallback(async () => {
@@ -271,14 +295,51 @@ export function ShotsWorkspace() {
     setShotCameraFlying(true, options);
   }, [selectedShot?.camera, setShotCameraFlying]);
 
-  const landShot = useCallback(() => {
-    if (!selectedShot) return;
+  const snapshotPreview = useCallback((shotId: string, camera: CameraData) => {
+    const shot = project.shots.find((item) => item.id === shotId);
+    if (!shot) return;
+    const previewShot = {
+      ...shot,
+      camera: {
+        ...camera,
+        position: [...camera.position] as CameraData['position'],
+        target: [...camera.target] as CameraData['target'],
+      },
+    };
+    void renderShotFrame(project, previewShot).then((frame) => {
+      setFramePreviewUrl(frame.dataUrl);
+    });
+  }, [project]);
+
+  /**
+   * Still capture = iPhone shutter: commit pose to gallery, keep viewfinder live.
+   * First press fills the active unlanded shot; later presses create new gallery shots.
+   */
+  const captureStill = useCallback(() => {
+    if (!selectedShot) {
+      addCamera();
+      return;
+    }
     const camera = draftCameraRef.current ?? selectedShot.camera;
-    draftCameraRef.current = undefined;
-    landShotFraming(selectedShot.id, camera);
+    const alreadyCaptured = isShotFramingAccepted(project, selectedShot.id);
+
+    let targetShotId = selectedShot.id;
+    if (alreadyCaptured) {
+      const next = addCamera({ navigateToShots: false });
+      targetShotId = next.id;
+    }
+
+    landShotFraming(targetShotId, camera, { keepFlying: true });
+    // Stay live at the same pose — do not clear draft / freeze the viewfinder.
+    draftCameraRef.current = {
+      ...camera,
+      position: [...camera.position] as CameraData['position'],
+      target: [...camera.target] as CameraData['target'],
+    };
+    snapshotPreview(targetShotId, camera);
     setLandFlash(true);
-    window.setTimeout(() => setLandFlash(false), 900);
-  }, [landShotFraming, selectedShot]);
+    window.setTimeout(() => setLandFlash(false), 700);
+  }, [addCamera, landShotFraming, project, selectedShot, snapshotPreview]);
 
   const setCameraMoveEnd = useCallback(() => {
     if (!selectedShot) return;
@@ -290,43 +351,48 @@ export function ShotsWorkspace() {
       camera,
       durationSeconds: cameraMoveDurationSeconds,
     }));
-    draftCameraRef.current = undefined;
-    landShotFraming(selectedShot.id, camera);
+    // Video end still commits framing; keep flying so the viewfinder doesn't freeze.
+    landShotFraming(selectedShot.id, camera, { keepFlying: true });
+    draftCameraRef.current = {
+      ...camera,
+      position: [...camera.position] as CameraData['position'],
+      target: [...camera.target] as CameraData['target'],
+    };
+    snapshotPreview(selectedShot.id, camera);
     setLandFlash(true);
-    window.setTimeout(() => setLandFlash(false), 900);
+    window.setTimeout(() => setLandFlash(false), 700);
   }, [
     cameraMoveDurationSeconds,
     getEffectiveCamera,
     landShotFraming,
     selectedShot,
+    snapshotPreview,
     updateCameraMoveKeyframes,
   ]);
 
   const enterVideoMode = useCallback(() => {
     if (!selectedShot) return;
+    const duration = clampVideoDuration(
+      getCameraMoveDurationSeconds(selectedShot.cameraKeyframes, videoDurationSeconds),
+    );
+    setVideoDurationSeconds(duration);
     setCaptureMode('video');
     // Auto-set start from the current still, then fly for the end pose.
     updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
       keyframes: selectedShot.cameraKeyframes,
       slot: 'start',
       camera: selectedShot.camera,
-      durationSeconds: cameraMoveDurationSeconds,
+      durationSeconds: duration,
     }));
     setCameraMoveError(undefined);
     startFlyCamera({ clearFramingAcceptance: false });
-  }, [cameraMoveDurationSeconds, selectedShot, startFlyCamera, updateCameraMoveKeyframes]);
+  }, [selectedShot, startFlyCamera, updateCameraMoveKeyframes, videoDurationSeconds]);
 
   const enterStillMode = useCallback(() => {
     setCaptureMode('still');
-    const framingAccepted = selectedShot
-      ? isShotFramingAccepted(project, selectedShot.id)
-      : false;
-    if (!framingAccepted) {
-      startFlyCamera();
-    } else {
-      setShotCameraFlying(false);
-    }
-  }, [project, selectedShot, setShotCameraFlying, startFlyCamera]);
+    // Still camera is always live — like a phone camera app.
+    startFlyCamera({ clearFramingAcceptance: false });
+  }, [startFlyCamera]);
 
   const setMode = useCallback((mode: CaptureMode) => {
     if (mode === captureMode) return;
@@ -347,23 +413,16 @@ export function ShotsWorkspace() {
       void exportCameraMoveVideo();
       return;
     }
-    // Still: capture lands; if already landed and idle, re-enter adjust.
-    if (shotCameraFlying || !isShotFramingAccepted(project, selectedShot.id)) {
-      landShot();
-      return;
-    }
-    startFlyCamera();
+    captureStill();
   }, [
     addCamera,
     cameraMoveReady,
     captureMode,
+    captureStill,
     exportCameraMoveVideo,
-    landShot,
-    project,
     selectedShot,
     setCameraMoveEnd,
     shotCameraFlying,
-    startFlyCamera,
   ]);
 
   const panoMatch = selectedShot && linkedPano
@@ -378,13 +437,13 @@ export function ShotsWorkspace() {
         frameResolutionLabel: `${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height}`,
         flyActive: shotCameraFlying,
         onCameraChange: handleFramingCameraChange,
-        onLockCamera: captureMode === 'video' ? setCameraMoveEnd : landShot,
+        onLockCamera: captureMode === 'video' ? setCameraMoveEnd : captureStill,
       }
       : undefined
   ), [
     captureMode,
+    captureStill,
     handleFramingCameraChange,
-    landShot,
     selectedShot?.camera,
     selectedShot?.exportSettings.height,
     selectedShot?.exportSettings.width,
@@ -399,6 +458,11 @@ export function ShotsWorkspace() {
   useEffect(() => {
     setCaptureMode('still');
     setLibraryOpen(false);
+    if (selectedShot) {
+      setVideoDurationSeconds(
+        getCameraMoveDurationSeconds(selectedShot.cameraKeyframes, DEFAULT_CAMERA_MOVE_DURATION_SECONDS),
+      );
+    }
   }, [selectedShot?.id]);
 
   const duplicateSelectedShot = useCallback(() => {
@@ -433,11 +497,13 @@ export function ShotsWorkspace() {
   const selectedIndex = selectedShot
     ? project.shots.findIndex((shot) => shot.id === selectedShot.id)
     : -1;
-  const previousShot = selectedIndex > 0 ? project.shots[selectedIndex - 1] : undefined;
-  // iPhone-style recents: prefer previous landed capture; fall back to current if only one.
-  const libraryThumbShot = previousShot
-    ?? (framingAccepted && !shotCameraFlying ? selectedShot : undefined)
-    ?? project.shots.find((shot) => shot.id !== selectedShot?.id && isShotFramingAccepted(project, shot.id))
+  // iPhone-style recents: most recently captured shot (highest index with framing accepted).
+  const lastCapturedShot = [...project.shots]
+    .reverse()
+    .find((shot) => isShotFramingAccepted(project, shot.id));
+  const libraryThumbShot = lastCapturedShot
+    ?? project.shots.find((shot) => shot.id !== selectedShot?.id)
+    ?? selectedShot
     ?? project.shots[0];
 
   const captureLabel = !selectedShot
@@ -448,15 +514,13 @@ export function ShotsWorkspace() {
         : isExportingCameraMove
           ? `Exporting ${Math.round(cameraMoveProgress * 100)}%`
           : 'Export video')
-      : (shotCameraFlying || !framingAccepted ? 'Capture' : 'Adjust');
+      : 'Capture';
 
   const captureHint = captureMode === 'video'
     ? (shotCameraFlying || !cameraMoveReady
       ? 'Fly to the end pose, then capture'
       : 'Export the graybox move as MP4')
-    : (shotCameraFlying || !framingAccepted
-      ? 'Capture this frame'
-      : 'Tap to adjust');
+    : 'Capture adds a shot — viewfinder stays live';
 
   const goAdjacentShot = (direction: -1 | 1) => {
     if (selectedIndex < 0) return;
@@ -617,11 +681,41 @@ export function ShotsWorkspace() {
           </div>
 
           {captureMode === 'video' && (
-            <p className="pointer-events-none text-center text-[11px] font-medium text-white/75">
-              {shotCameraFlying || !cameraMoveReady
-                ? 'Start set · fly to end · capture'
-                : 'End set · export when ready'}
-            </p>
+            <div className="pointer-events-auto flex w-full max-w-md flex-col items-center gap-2">
+              <p className="text-center text-[11px] font-medium text-white/75">
+                {shotCameraFlying || !cameraMoveReady
+                  ? 'Start set · pick length · fly to end · capture'
+                  : 'End set · export when ready'}
+              </p>
+              <div
+                data-shots-video-duration
+                className="flex flex-wrap items-center justify-center gap-1.5 rounded-full bg-black/45 px-2 py-1.5 backdrop-blur-md"
+                role="group"
+                aria-label="Video duration"
+              >
+                <span className="px-1.5 text-[10px] font-semibold uppercase tracking-wide text-white/55">
+                  Length
+                </span>
+                {VIDEO_DURATION_PRESETS_SECONDS.map((seconds) => {
+                  const active = Math.abs(videoDurationSeconds - seconds) < 0.05;
+                  return (
+                    <button
+                      key={seconds}
+                      type="button"
+                      onClick={() => changeCameraMoveDuration(seconds)}
+                      className={`min-w-[2.5rem] rounded-full px-2.5 py-1 text-xs font-bold tabular-nums transition ${
+                        active
+                          ? 'bg-white text-zinc-900 shadow-sm'
+                          : 'text-white/80 hover:bg-white/10 hover:text-white'
+                      }`}
+                      aria-pressed={active}
+                    >
+                      {seconds}s
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           {/* Shutter row */}
@@ -669,15 +763,10 @@ export function ShotsWorkspace() {
                     ? (shotCameraFlying || !cameraMoveReady
                       ? 'bg-red-500 group-active:scale-95'
                       : 'bg-[var(--accent)] group-active:scale-95')
-                    : framingAccepted && !shotCameraFlying
-                      ? 'bg-white/90 group-active:scale-95'
-                      : 'bg-white group-active:scale-90'
+                    : 'bg-white group-active:scale-90'
                 }`}
               />
-              {captureMode === 'still' && framingAccepted && !shotCameraFlying && (
-                <Check className="pointer-events-none absolute h-6 w-6 text-zinc-900" />
-              )}
-              {captureMode === 'video' && !shotCameraFlying && cameraMoveReady && (
+              {captureMode === 'video' && cameraMoveReady && !isExportingCameraMove && (
                 <Film className="pointer-events-none absolute h-5 w-5 text-white" />
               )}
             </button>
@@ -860,15 +949,14 @@ export function ShotsWorkspace() {
                 </div>
                 <Field
                   label="Duration Seconds"
-                  hint={cameraMoveKeyframes.length < 2 ? 'Capture the end keyframe before changing duration.' : undefined}
+                  hint="Also available as quick picks on the Video camera chrome while capturing the end pose."
                 >
                   <TextInput
                     type="number"
-                    min="0.5"
-                    max="30"
+                    min={MIN_CAMERA_MOVE_DURATION_SECONDS}
+                    max={MAX_CAMERA_MOVE_DURATION_SECONDS}
                     step="0.5"
                     value={cameraMoveDurationSeconds}
-                    disabled={cameraMoveKeyframes.length < 2}
                     onChange={(event) => changeCameraMoveDuration(Number(event.target.value))}
                   />
                 </Field>

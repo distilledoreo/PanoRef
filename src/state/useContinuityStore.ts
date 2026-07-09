@@ -118,7 +118,8 @@ interface ContinuityStore {
   setShotCameraFlying: (value: boolean, options?: { clearFramingAcceptance?: boolean }) => void;
   lockShotCamera: () => void;
   /** Commit framing: exit fly mode and mark shot framing accepted. */
-  landShotFraming: (shotId: string, camera?: CameraData) => void;
+  /** Commit camera + framing acceptance. By default exits fly; pass keepFlying for continuous capture. */
+  landShotFraming: (shotId: string, camera?: CameraData, options?: { keepFlying?: boolean }) => void;
   updateShot: (id: string, updates: Partial<Shot>) => void;
   removeShot: (id: string) => void;
   attachCameraMoveVideoToShot: (shotId: string, params: { name: string; dataUrl: string; mimeType: string; width: number; height: number; durationSeconds: number; frameRate: number }) => ProjectAsset;
@@ -229,17 +230,14 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const project = ensureProjectHasCamera(state.project);
     const shot = project.shots.find((item) => item.id === state.selectedShotId)
       ?? project.shots[0];
-    const framingAccepted = shot
-      ? Boolean(project.workflow.shotFramingAcceptedAtByShotId[shot.id])
-      : false;
     return {
       workspace,
       project,
       selectedShotId: shot.id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
       panoView: panoViewFromCamera(shot.camera),
-      // Only auto-fly unlanded shots; keep landed shots locked.
-      shotCameraFlying: !framingAccepted,
+      // Still camera is always live (phone-camera style); capture does not freeze.
+      shotCameraFlying: true,
     };
   }),
   setProject: (project) => {
@@ -608,12 +606,12 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   selectShot: (id) => set((state) => {
     const shot = state.project.shots.find((item) => item.id === id);
     if (!shot) return { selectedShotId: id, shotCameraFlying: true };
-    const framingAccepted = Boolean(state.project.workflow.shotFramingAcceptedAtByShotId[shot.id]);
     return {
       selectedShotId: id,
       activePanoId: shot.linkedPanoId ?? state.activePanoId,
       panoView: panoViewFromCamera(shot.camera),
-      shotCameraFlying: !framingAccepted,
+      // Keep the viewfinder live when switching shots (review via library thumbnails).
+      shotCameraFlying: true,
     };
   }),
   setShotCameraFlying: (value, options) => set((state) => {
@@ -638,14 +636,16 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     if (document.pointerLockElement) document.exitPointerLock();
     set({ shotCameraFlying: false });
   },
-  landShotFraming: (shotId, camera) => {
-    if (document.pointerLockElement) document.exitPointerLock();
+  landShotFraming: (shotId, camera, options) => {
+    const keepFlying = options?.keepFlying === true;
+    // Continuous capture (still camera) stays in fly — don't drop pointer lock.
+    if (!keepFlying && document.pointerLockElement) document.exitPointerLock();
     set((state) => {
       const shot = state.project.shots.find((item) => item.id === shotId);
       if (!shot) return state;
       const nextCamera = camera ?? shot.camera;
       return {
-        shotCameraFlying: false,
+        shotCameraFlying: keepFlying ? true : false,
         project: touchProject({
           ...state.project,
           shots: state.project.shots.map((item) => {

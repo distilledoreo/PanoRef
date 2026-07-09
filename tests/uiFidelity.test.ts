@@ -66,9 +66,14 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('data-shots-mode-switcher');
     expect(shots).toContain('data-shots-library-thumb');
     expect(shots).toContain('data-shots-settings-trigger');
+    expect(shots).toContain('data-shots-video-duration');
+    expect(shots).toContain('VIDEO_DURATION_PRESETS_SECONDS');
     expect(shots).toContain('landShotFraming');
+    expect(shots).toContain('keepFlying: true');
+    expect(shots).toContain('captureStill');
     expect(shots).toContain("captureMode === 'still'");
     expect(shots).toContain("captureMode === 'video'");
+    expect(shots).toContain('viewfinder stays live');
     expect(shots).not.toContain('data-shots-action-dock');
     expect(shots).not.toContain('data-shots-land-fork');
     expect(shots).not.toContain('ShotInfoCard');
@@ -356,7 +361,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(styles).toContain('--shots-overlay-bottom-safe');
     expect(shots).toContain('data-shots-camera-chrome');
     expect(shots).toContain('data-shots-shutter');
-    expect(shots).toContain('Capture this frame');
+    expect(shots).toContain('viewfinder stays live');
   });
 
   it('bundles a CC0 human mannequin glb for person scale references', () => {
