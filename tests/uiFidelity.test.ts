@@ -291,6 +291,8 @@ describe('ui revamp fidelity surfaces', () => {
     expect(review).toContain('navigateToShots: false');
     expect(review).toContain('WarningPopover');
     expect(review).toContain('data-review-warning');
+    expect(review).toContain('placement="below"');
+    expect(review).not.toMatch(/data-review-grid-card[\s\S]*overflow-hidden rounded-\[var\(--radius-card\)\]/);
     expect(store).toContain('navigateToShots?: boolean');
   });
 
@@ -390,7 +392,7 @@ describe('ui revamp fidelity surfaces', () => {
     const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
     expect(statusBadge).toContain('className?: string');
     expect(review).toContain('aspect-video max-h-[8.5rem]');
-    expect(review).toContain('StatusGlow level={level} showIcon={false} className="w-full"');
+    expect(review).toContain('StatusGlow level={level} showIcon={false} className="w-full overflow-hidden"');
     expect(review).toContain('renderViewportClay(project, shot.camera, previewSize.width, previewSize.height)');
     expect(review).toContain('getReviewShotControlSize');
     expect(review).toContain('overrideLabel="Graybox shot"');

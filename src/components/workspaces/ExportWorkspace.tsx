@@ -57,7 +57,7 @@ export function ExportWorkspace() {
       nextShotIds: nextIds,
       currentSelected: current,
     }));
-  }, [project.id, shotIdsKey, project.shots]);
+  }, [project.id, shotIdsKey]);
 
   const toggleShotSelection = (shotId: string) => {
     setSelectedShotIds((current) => {

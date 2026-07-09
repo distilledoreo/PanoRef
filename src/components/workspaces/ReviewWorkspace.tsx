@@ -382,17 +382,17 @@ function ShotReviewCard({
   return (
     <div
       data-review-grid-card={compactGrid ? 'compact' : 'default'}
-      className={`relative flex w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border transition ${
+      className={`relative flex w-full min-w-0 flex-col rounded-[var(--radius-card)] border transition ${
         selected ? 'border-[var(--accent)] ring-1 ring-[var(--accent)] bg-surface-raised shadow-card' : 'border-subtle bg-surface-raised hover:border-strong'
       }`}
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-1">
+      <div className="relative z-20 flex shrink-0 items-center justify-between gap-2 px-2.5 py-1">
         <button type="button" onClick={onSelect} className="min-w-0 flex-1 text-left">
           <div className="truncate text-[11px] font-semibold text-primary">{shot.shotNumber} {shot.name}</div>
         </button>
         {warnings.length > 0 ? (
           <div className="relative h-5 w-5 shrink-0" data-review-warning>
-            <WarningPopover warnings={warnings}>
+            <WarningPopover warnings={warnings} placement="below">
               <span className="block h-5 w-5" aria-hidden />
             </WarningPopover>
           </div>
@@ -400,9 +400,9 @@ function ShotReviewCard({
           <StatusIcon level={level} className="!h-4 !w-4 shrink-0 [&_svg]:!h-3 [&_svg]:!w-3" />
         )}
       </div>
-      <button type="button" onClick={onSelect} className="w-full text-left">
-        <StatusGlow level={level} showIcon={false} className="w-full">
-          <div className="relative">
+      <button type="button" onClick={onSelect} className="w-full overflow-hidden text-left">
+        <StatusGlow level={level} showIcon={false} className="w-full overflow-hidden">
+          <div className="relative overflow-hidden">
             <ShotThumbnail
               project={project}
               shot={shot}

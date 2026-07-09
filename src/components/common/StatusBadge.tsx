@@ -58,9 +58,12 @@ export function StatusIcon({ level, className }: { level: StatusLevel; className
 export function WarningPopover({
   warnings,
   children,
+  placement = 'above',
 }: {
   warnings: WarningItem[];
   children: React.ReactNode;
+  /** Prefer `below` in top-of-card chrome so the panel is not clipped. */
+  placement?: 'above' | 'below';
 }) {
   const [open, setOpen] = useState(false);
   if (warnings.length === 0) return <>{children}</>;
@@ -89,7 +92,14 @@ export function WarningPopover({
         <StatusIcon level={level} />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-20 mb-2 w-64 rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-3 shadow-soft">
+        <div
+          data-warning-popover-panel={placement}
+          className={`absolute z-30 w-64 rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-3 shadow-soft ${
+            placement === 'below'
+              ? 'left-auto right-0 top-full mt-2'
+              : 'bottom-full left-0 mb-2'
+          }`}
+        >
           <ul className="space-y-2 text-xs text-secondary">
             {warnings.map((warning) => (
               <li key={warning.id} className="flex gap-2">
