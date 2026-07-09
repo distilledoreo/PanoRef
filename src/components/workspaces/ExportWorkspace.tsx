@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, Check, Download, FileJson, FolderArchive, Settings } from 'lucide-react';
 import { createShotPackageManifest, selectExportPathPreview } from '../../engine/exportManifest';
+import { reconcileExportSelectedShotIds } from '../../engine/exportSelection';
 import { buildShotPackage, downloadBlob } from '../../engine/packageExport';
 import { getProjectWarnings, getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
@@ -27,6 +28,9 @@ export function ExportWorkspace() {
   const [selectedShotIds, setSelectedShotIds] = useState<Set<string>>(() => new Set(project.shots.map((shot) => shot.id)));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportingShotId, setExportingShotId] = useState<string | undefined>();
+  const projectIdRef = useRef(project.id);
+  const prevShotIdsRef = useRef(project.shots.map((shot) => shot.id));
+  const shotIdsKey = project.shots.map((shot) => shot.id).join('\0');
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const manifest = useMemo(() => selectedShot ? createShotPackageManifest(project, selectedShot) : undefined, [project, selectedShot]);
   const primaryAction = useMemo(
@@ -38,6 +42,22 @@ export function ExportWorkspace() {
     }),
     [project, selectedShot?.id],
   );
+
+  // Keep multi-select in sync when opening another project or adding/removing shots.
+  useEffect(() => {
+    const nextIds = project.shots.map((shot) => shot.id);
+    const projectChanged = projectIdRef.current !== project.id;
+    const previousShotIds = prevShotIdsRef.current;
+    projectIdRef.current = project.id;
+    prevShotIdsRef.current = nextIds;
+
+    setSelectedShotIds((current) => reconcileExportSelectedShotIds({
+      projectChanged,
+      previousShotIds,
+      nextShotIds: nextIds,
+      currentSelected: current,
+    }));
+  }, [project.id, shotIdsKey, project.shots]);
 
   const toggleShotSelection = (shotId: string) => {
     setSelectedShotIds((current) => {
@@ -309,7 +329,7 @@ export function ExportWorkspace() {
               <FileJson className="h-4 w-4" />
               Export Final ZIP (current shot)
             </IconButton>
-            <IconButton onClick={addCamera} className="w-full">
+            <IconButton onClick={() => addCamera({ navigateToShots: false })} className="w-full">
               Add Camera
             </IconButton>
           </div>

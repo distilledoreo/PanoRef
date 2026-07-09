@@ -76,10 +76,15 @@ export function WarningPopover({
       <StatusGlow level={level} showIcon={false}>{children}</StatusGlow>
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen((value) => !value);
+        }}
         className="absolute -right-1 -top-1 z-10"
         aria-label={`${warnings.length} issue${warnings.length === 1 ? '' : 's'}`}
         title={`${warnings.length} issue${warnings.length === 1 ? '' : 's'}`}
+        data-warning-popover-trigger
       >
         <StatusIcon level={level} />
       </button>

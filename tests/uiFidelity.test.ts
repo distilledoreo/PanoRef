@@ -282,6 +282,18 @@ describe('ui revamp fidelity surfaces', () => {
     expect(review).not.toContain('gridTemplateColumns');
   });
 
+  it('keeps export multi-select reconciled and add-camera local to review/export', () => {
+    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
+    const review = readFileSync(new URL('../src/components/workspaces/ReviewWorkspace.tsx', import.meta.url), 'utf8');
+    const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
+    expect(exportWorkspace).toContain('reconcileExportSelectedShotIds');
+    expect(exportWorkspace).toContain('navigateToShots: false');
+    expect(review).toContain('navigateToShots: false');
+    expect(review).toContain('WarningPopover');
+    expect(review).toContain('data-review-warning');
+    expect(store).toContain('navigateToShots?: boolean');
+  });
+
   it('keeps export shot rows and composed package summary with a docked CTA footer', () => {
     const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
     expect(exportWorkspace).toContain('fitsCompactShotList');

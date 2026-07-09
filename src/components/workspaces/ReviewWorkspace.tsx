@@ -22,7 +22,7 @@ import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, TextArea } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { ShotThumbnail } from '../common/ShotThumbnail';
-import { StatusGlow, StatusIcon } from '../common/StatusBadge';
+import { StatusGlow, StatusIcon, WarningPopover } from '../common/StatusBadge';
 import { isAiBriefSent, resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { FullBleedLayout } from './WorkspaceShell';
 
@@ -301,7 +301,7 @@ export function ReviewWorkspace() {
                 AI brief marked sent.
               </p>
             )}
-            <IconButton onClick={addCamera} className="w-full">
+            <IconButton onClick={() => addCamera({ navigateToShots: false })} className="w-full">
               Add Camera
             </IconButton>
           </div>
@@ -340,79 +340,100 @@ function ShotReviewCard({
 
   if (view === 'list') {
     return (
-      <button
-        type="button"
-        onClick={onSelect}
-        className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2 text-left transition ${
+      <div
+        className={`relative flex w-full items-center gap-2.5 rounded-xl border px-3 py-2 transition ${
           selected ? 'border-[var(--accent)] bg-accent-soft' : 'border-subtle bg-surface-raised hover:border-strong'
         }`}
       >
-        <StatusGlow level={level}>
-          <ShotThumbnail
-            project={project}
-            shot={shot}
-            overrideSrc={shotControlSrc}
-            overrideLabel="Graybox shot"
-            className="h-11 w-20 shrink-0"
-            showSourceLabel
-            fallbackOnly
-          />
-        </StatusGlow>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-primary">{shot.shotNumber} {shot.name}</div>
-          <div className="text-[11px] text-secondary">{formatShotStatus(shot.status, warnings.length)} · {shotControlRendering ? 'Rendering shot frame' : 'Graybox shot frame'}</div>
-        </div>
-      </button>
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+        >
+          <StatusGlow level={level} showIcon={false}>
+            <ShotThumbnail
+              project={project}
+              shot={shot}
+              overrideSrc={shotControlSrc}
+              overrideLabel="Graybox shot"
+              className="h-11 w-20 shrink-0"
+              showSourceLabel
+              fallbackOnly
+            />
+          </StatusGlow>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-primary">{shot.shotNumber} {shot.name}</div>
+            <div className="text-[11px] text-secondary">{formatShotStatus(shot.status, warnings.length)} · {shotControlRendering ? 'Rendering shot frame' : 'Graybox shot frame'}</div>
+          </div>
+        </button>
+        {warnings.length > 0 ? (
+          <div className="relative h-5 w-5 shrink-0" data-review-warning>
+            <WarningPopover warnings={warnings}>
+              <span className="block h-5 w-5" aria-hidden />
+            </WarningPopover>
+          </div>
+        ) : (
+          <StatusIcon level={level} className="!h-4 !w-4 shrink-0 [&_svg]:!h-3 [&_svg]:!w-3" />
+        )}
+      </div>
     );
   }
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <div
       data-review-grid-card={compactGrid ? 'compact' : 'default'}
-      className={`flex w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border text-left transition ${
+      className={`relative flex w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border transition ${
         selected ? 'border-[var(--accent)] ring-1 ring-[var(--accent)] bg-surface-raised shadow-card' : 'border-subtle bg-surface-raised hover:border-strong'
       }`}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-1">
-        <div className="min-w-0">
+        <button type="button" onClick={onSelect} className="min-w-0 flex-1 text-left">
           <div className="truncate text-[11px] font-semibold text-primary">{shot.shotNumber} {shot.name}</div>
-        </div>
-        <StatusIcon level={level} className="!h-4 !w-4 [&_svg]:!h-3 [&_svg]:!w-3" />
+        </button>
+        {warnings.length > 0 ? (
+          <div className="relative h-5 w-5 shrink-0" data-review-warning>
+            <WarningPopover warnings={warnings}>
+              <span className="block h-5 w-5" aria-hidden />
+            </WarningPopover>
+          </div>
+        ) : (
+          <StatusIcon level={level} className="!h-4 !w-4 shrink-0 [&_svg]:!h-3 [&_svg]:!w-3" />
+        )}
       </div>
-      <StatusGlow level={level} showIcon={false} className="w-full">
-        <div className="relative">
-          <ShotThumbnail
-            project={project}
-            shot={shot}
-            overrideSrc={shotControlSrc}
-            overrideLabel="Graybox shot"
-            className={`w-full rounded-none border-y border-subtle ${
-              compactGrid ? 'aspect-video max-h-[8.5rem]' : 'aspect-video'
-            }`}
-            showSourceLabel
-            fallbackOnly
-          />
-          {shotControlRendering && (
-            <span className="absolute bottom-2 left-2 rounded-md bg-surface-overlay px-2 py-0.5 text-[10px] font-medium text-secondary shadow-card">
-              Rendering shot frame
-            </span>
-          )}
-          {aiResultAsset && (
-            <div className="absolute bottom-2 right-2 h-[36%] w-[36%] overflow-hidden rounded-md border border-white/70 bg-surface-muted shadow-card">
-              <img src={aiResultAsset.uri} alt="" className="h-full w-full object-cover" />
-              <span className="absolute left-1 top-1 rounded bg-black/55 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-white">
-                Result
+      <button type="button" onClick={onSelect} className="w-full text-left">
+        <StatusGlow level={level} showIcon={false} className="w-full">
+          <div className="relative">
+            <ShotThumbnail
+              project={project}
+              shot={shot}
+              overrideSrc={shotControlSrc}
+              overrideLabel="Graybox shot"
+              className={`w-full rounded-none border-y border-subtle ${
+                compactGrid ? 'aspect-video max-h-[8.5rem]' : 'aspect-video'
+              }`}
+              showSourceLabel
+              fallbackOnly
+            />
+            {shotControlRendering && (
+              <span className="absolute bottom-2 left-2 rounded-md bg-surface-overlay px-2 py-0.5 text-[10px] font-medium text-secondary shadow-card">
+                Rendering shot frame
               </span>
-            </div>
-          )}
-        </div>
-      </StatusGlow>
+            )}
+            {aiResultAsset && (
+              <div className="absolute bottom-2 right-2 h-[36%] w-[36%] overflow-hidden rounded-md border border-white/70 bg-surface-muted shadow-card">
+                <img src={aiResultAsset.uri} alt="" className="h-full w-full object-cover" />
+                <span className="absolute left-1 top-1 rounded bg-black/55 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-white">
+                  Result
+                </span>
+              </div>
+            )}
+          </div>
+        </StatusGlow>
+      </button>
       <div className="shrink-0 px-2.5 py-0.5 text-[11px] font-medium text-secondary">
         {formatShotStatus(shot.status, warnings.length)} · Graybox shot frame
       </div>
-    </button>
+    </div>
   );
 }
 
