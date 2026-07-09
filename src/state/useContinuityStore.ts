@@ -112,7 +112,7 @@ interface ContinuityStore {
   setActivePano: (id?: string) => void;
   updatePanoReference: (id: string, updates: Partial<PanoReference>) => void;
   setPanoView: (updates: Partial<PanoViewState>) => void;
-  addCamera: () => Shot;
+  addCamera: (options?: { navigateToShots?: boolean }) => Shot;
   selectShot: (id?: string) => void;
   setShotCameraFlying: (value: boolean) => void;
   lockShotCamera: () => void;
@@ -588,11 +588,14 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   setPanoView: (updates) => set((state) => ({
     panoView: { ...state.panoView, ...updates },
   })),
-  addCamera: () => {
+  addCamera: (options) => {
     const state = get();
     const originShot = createOriginShot(state.project, state.project.shots.length + 1);
     const pano = getActivePano(state.project, state.activePanoId);
-    return addShotWithCamera(originShot.camera, pano?.id, originShot.name);
+    return addShotWithCamera(originShot.camera, pano?.id, originShot.name, {
+      // Shots workspace defaults to navigating into fly mode; Review/Export can opt out.
+      navigateToShots: options?.navigateToShots ?? true,
+    });
   },
   selectShot: (id) => set((state) => {
     const shot = state.project.shots.find((item) => item.id === id);
@@ -1030,7 +1033,12 @@ function getActivePano(project: LocationProject, activePanoId?: string): PanoRef
     ?? project.panoRefs[0];
 }
 
-function addShotWithCamera(camera: CameraData, linkedPanoId?: string, name?: string): Shot {
+function addShotWithCamera(
+  camera: CameraData,
+  linkedPanoId?: string,
+  name?: string,
+  options?: { navigateToShots?: boolean },
+): Shot {
   const state = useContinuityStore.getState();
   const linkedPano = linkedPanoId
     ? state.project.panoRefs.find((pano) => pano.id === linkedPanoId)
@@ -1046,14 +1054,16 @@ function addShotWithCamera(camera: CameraData, linkedPanoId?: string, name?: str
   );
   if (name) shot.name = name;
 
+  const navigateToShots = options?.navigateToShots ?? true;
   useContinuityStore.setState((current) => ({
     project: touchProject({
       ...current.project,
       shots: [...current.project.shots, shot],
     }),
     selectedShotId: shot.id,
-    workspace: 'shots',
-    shotCameraFlying: true,
+    ...(navigateToShots
+      ? { workspace: 'shots' as const, shotCameraFlying: true }
+      : {}),
   }));
 
   return shot;
