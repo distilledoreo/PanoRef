@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Compass } from 'lucide-react';
 import { getCanonicalPano, getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
 import { downloadPanoImage } from '../../engine/panoImage';
@@ -22,6 +22,9 @@ const WORKSPACE_LABELS: Record<Workspace, string> = {
   shots: 'Shots',
   export: 'Export',
 };
+
+/** Only one workflow dialog is open at a time. */
+type GuidanceDialog = 'none' | 'objective' | 'advance' | 'alignmentIntro' | 'alignmentRetry';
 
 function ObjectiveBody({
   goal,
@@ -94,8 +97,11 @@ export function WorkflowGuidance() {
   } = useContinuityStore();
 
   const [isDownloadingGraybox, setIsDownloadingGraybox] = useState(false);
-  const [alignmentIntroOpen, setAlignmentIntroOpen] = useState(false);
-  const [alignmentRetryOpen, setAlignmentRetryOpen] = useState(false);
+  const [activeDialog, setActiveDialog] = useState<GuidanceDialog>('none');
+  const lastHandledObjectiveRequest = useRef(0);
+  const lastHandledAlignmentIntroRequest = useRef(0);
+  const lastHandledAlignmentRetryRequest = useRef(0);
+  const lastOpenedAdvanceKey = useRef<string | undefined>();
 
   const context = useMemo(() => ({
     project,
@@ -119,61 +125,78 @@ export function WorkflowGuidance() {
     && !hasStyledCanonicalPano(project)
     && Boolean(grayboxPano);
 
-  const [advanceOpen, setAdvanceOpen] = useState(false);
-  const [objectiveOpen, setObjectiveOpen] = useState(false);
+  const openExclusive = (dialog: GuidanceDialog) => {
+    setActiveDialog(dialog);
+  };
 
+  // Advance prompt wins over other guidance when it becomes newly eligible.
   useEffect(() => {
-    if (advancePrompt) {
-      setAdvanceOpen(true);
-      setObjectiveOpen(false);
-      setAlignmentIntroOpen(false);
+    if (!advancePrompt) {
+      lastOpenedAdvanceKey.current = undefined;
+      return;
     }
+    if (lastOpenedAdvanceKey.current === advancePrompt.promptKey) return;
+    lastOpenedAdvanceKey.current = advancePrompt.promptKey;
+    openExclusive('advance');
   }, [advancePrompt?.promptKey]);
 
+  // Alignment intro for a new styled pano (once per pano id).
   useEffect(() => {
     if (workspace !== 'reference' || !alignmentPending || !canonicalPano) return;
     if (seenAlignmentIntroForPanoId === canonicalPano.id) return;
-    setAlignmentIntroOpen(true);
-    setObjectiveOpen(false);
-  }, [workspace, alignmentPending, canonicalPano?.id, seenAlignmentIntroForPanoId, alignmentIntroRequest]);
+    // Do not interrupt an advance dialog that just opened.
+    if (activeDialog === 'advance') return;
+    openExclusive('alignmentIntro');
+  }, [workspace, alignmentPending, canonicalPano?.id, seenAlignmentIntroForPanoId, alignmentIntroRequest, activeDialog]);
 
+  // Consume alignment retry requests by request id (not sticky > 0).
   useEffect(() => {
-    if (alignmentRetryModalRequest > 0) {
-      setAlignmentRetryOpen(true);
-    }
+    if (alignmentRetryModalRequest <= lastHandledAlignmentRetryRequest.current) return;
+    lastHandledAlignmentRetryRequest.current = alignmentRetryModalRequest;
+    openExclusive('alignmentRetry');
   }, [alignmentRetryModalRequest]);
 
+  // Consume objective modal requests by request id so alignmentPending flips
+  // cannot reopen the objective after advance has closed it.
   useEffect(() => {
-    if (objectiveModalRequest > 0) {
-      if (alignmentPending) {
-        setAlignmentIntroOpen(true);
-      } else {
-        setObjectiveOpen(true);
-      }
+    if (objectiveModalRequest <= lastHandledObjectiveRequest.current) return;
+    lastHandledObjectiveRequest.current = objectiveModalRequest;
+    if (alignmentPending && workspace === 'reference') {
+      openExclusive('alignmentIntro');
+    } else {
+      openExclusive('objective');
     }
-  }, [objectiveModalRequest, alignmentPending]);
+  }, [objectiveModalRequest, alignmentPending, workspace]);
 
+  // First-visit reference prompt builder (only when nothing else is open).
   useEffect(() => {
     if (workspace !== 'reference' || !showReferencePromptBuilder) return;
     if (seenObjectiveWorkspaces.includes('reference')) return;
-    if (advanceOpen && advancePrompt) return;
-    setObjectiveOpen(true);
-    setAlignmentIntroOpen(false);
+    if (activeDialog !== 'none') return;
+    if (advancePrompt) return;
+    openExclusive('objective');
   }, [
     workspace,
     showReferencePromptBuilder,
     seenObjectiveWorkspaces,
-    advanceOpen,
+    activeDialog,
     advancePrompt?.promptKey,
   ]);
 
+  // Explicit alignment intro request (button) — consume by id.
+  useEffect(() => {
+    if (alignmentIntroRequest <= lastHandledAlignmentIntroRequest.current) return;
+    lastHandledAlignmentIntroRequest.current = alignmentIntroRequest;
+    openExclusive('alignmentIntro');
+  }, [alignmentIntroRequest]);
+
   const closeObjective = () => {
-    setObjectiveOpen(false);
+    setActiveDialog('none');
     markObjectiveSeen(workspace);
   };
 
   const closeAlignmentIntro = () => {
-    setAlignmentIntroOpen(false);
+    setActiveDialog('none');
     if (canonicalPano) {
       markAlignmentIntroSeen(canonicalPano.id);
     }
@@ -187,18 +210,18 @@ export function WorkflowGuidance() {
       && !hasStyledCanonicalPano(project)
       && !seenObjectiveWorkspaces.includes('reference');
     dismissWorkflowAdvance(promptKey);
-    setAdvanceOpen(false);
+    setActiveDialog('none');
     setWorkspace(nextStep);
     if (shouldOpenReferenceObjective) {
-      setObjectiveOpen(true);
-      setAlignmentIntroOpen(false);
+      // Next tick so workspace effect does not race exclusive close.
+      window.setTimeout(() => openExclusive('objective'), 0);
     }
   };
 
   const handleAdvanceDismiss = () => {
     if (!advancePrompt) return;
     dismissWorkflowAdvance(advancePrompt.promptKey);
-    setAdvanceOpen(false);
+    setActiveDialog('none');
   };
 
   const downloadGrayboxForAi = async () => {
@@ -225,7 +248,7 @@ export function WorkflowGuidance() {
   return (
     <>
       <Modal
-        open={alignmentIntroOpen}
+        open={activeDialog === 'alignmentIntro'}
         title="Check pano alignment"
         onClose={closeAlignmentIntro}
         size="lg"
@@ -244,15 +267,15 @@ export function WorkflowGuidance() {
       </Modal>
 
       <Modal
-        open={alignmentRetryOpen}
+        open={activeDialog === 'alignmentRetry'}
         title="Try generating again"
-        onClose={() => setAlignmentRetryOpen(false)}
+        onClose={() => setActiveDialog('none')}
         size="xl"
         scrollBody
         footer={(
           <button
             type="button"
-            onClick={() => setAlignmentRetryOpen(false)}
+            onClick={() => setActiveDialog('none')}
             className="rounded-lg border border-subtle bg-surface-raised px-4 py-2 text-sm font-medium text-secondary transition hover:border-strong hover:bg-surface-muted hover:text-primary"
           >
             Close
@@ -269,7 +292,7 @@ export function WorkflowGuidance() {
       </Modal>
 
       <Modal
-        open={objectiveOpen}
+        open={activeDialog === 'objective'}
         title={showReferencePromptBuilder
           ? 'Style your graybox pano'
           : `${WORKSPACE_LABELS[workspace]} — What to do`}
@@ -306,7 +329,7 @@ export function WorkflowGuidance() {
       </Modal>
 
       <Modal
-        open={advanceOpen && Boolean(advancePrompt)}
+        open={activeDialog === 'advance' && Boolean(advancePrompt)}
         title={advancePrompt?.title ?? 'Ready for the next step'}
         onClose={handleAdvanceDismiss}
         footer={(

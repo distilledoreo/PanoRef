@@ -183,24 +183,81 @@ export function PanoViewer({
       onViewChange({ fovDegrees: Math.max(18, Math.min(120, viewRef.current.fovDegrees + event.deltaY * 0.04)) });
     };
 
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement) {
+        const tag = event.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target.isContentEditable) {
+          return;
+        }
+      }
+      const step = event.shiftKey ? 8 : 3;
+      const fovStep = event.shiftKey ? 4 : 2;
+      switch (event.key) {
+        case 'ArrowLeft':
+          event.preventDefault();
+          onViewChange({ yawDegrees: viewRef.current.yawDegrees - step });
+          break;
+        case 'ArrowRight':
+          event.preventDefault();
+          onViewChange({ yawDegrees: viewRef.current.yawDegrees + step });
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          onViewChange({
+            pitchDegrees: Math.max(-89, Math.min(89, viewRef.current.pitchDegrees + step)),
+          });
+          break;
+        case 'ArrowDown':
+          event.preventDefault();
+          onViewChange({
+            pitchDegrees: Math.max(-89, Math.min(89, viewRef.current.pitchDegrees - step)),
+          });
+          break;
+        case '+':
+        case '=':
+          event.preventDefault();
+          onViewChange({
+            fovDegrees: Math.max(18, Math.min(120, viewRef.current.fovDegrees - fovStep)),
+          });
+          break;
+        case '-':
+        case '_':
+          event.preventDefault();
+          onViewChange({
+            fovDegrees: Math.max(18, Math.min(120, viewRef.current.fovDegrees + fovStep)),
+          });
+          break;
+        default:
+          break;
+      }
+    };
+
     container.addEventListener('pointerdown', onPointerDown);
     container.addEventListener('pointermove', onPointerMove);
     container.addEventListener('pointerup', onPointerUp);
     container.addEventListener('wheel', onWheel, { passive: false });
+    container.addEventListener('keydown', onKeyDown);
     return () => {
       container.removeEventListener('pointerdown', onPointerDown);
       container.removeEventListener('pointermove', onPointerMove);
       container.removeEventListener('pointerup', onPointerUp);
       container.removeEventListener('wheel', onWheel);
+      container.removeEventListener('keydown', onKeyDown);
     };
   }, [onViewChange]);
 
   return (
-    <div className="relative h-full min-h-0 overflow-hidden bg-surface-base" ref={containerRef}>
+    <div
+      className="relative h-full min-h-0 overflow-hidden bg-surface-base outline-none"
+      ref={containerRef}
+      tabIndex={0}
+      role="application"
+      aria-label="360 panorama viewer. Drag or use arrow keys to look around. Plus and minus change field of view."
+    >
       {!imageUrl && (
         <div className="pointer-events-none absolute inset-0 z-0 flex flex-col items-center justify-center bg-surface-base text-secondary">
           <p className="text-sm font-medium">No panorama selected</p>
-          <p className="mt-1 text-xs">Render a graybox pano or import a styled pano.</p>
+          <p className="mt-1 text-xs">Render a graybox pano or import a styled pano. Drag or use arrow keys to look around.</p>
         </div>
       )}
     </div>

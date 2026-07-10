@@ -224,43 +224,46 @@ export function ReferenceWorkspace() {
 
             <div
               data-reference-bottom-chrome
-              className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-end gap-3 px-4 pb-4"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 px-3 pb-3 sm:flex-row sm:items-end sm:gap-3 sm:px-4 sm:pb-4"
             >
-              {grayboxAsset && grayboxPano && (
-                <div className="pointer-events-auto shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => void downloadPanoImage(
-                      grayboxAsset.uri,
-                      grayboxPano.width,
-                      grayboxPano.height,
-                      grayboxAsset.name || 'global_graybox.png',
-                      {
-                        letterboxEnabled: project.settings.panoLetterboxExports169,
-                        targetWidth: project.settings.defaultShotWidth,
-                        targetHeight: project.settings.defaultShotHeight,
-                      },
-                      downloadDataUrl,
-                    )}
-                    className="inline-flex items-center gap-2 rounded-[18px] border border-subtle bg-surface-raised px-4 py-2.5 text-sm font-medium text-secondary shadow-card transition hover:border-[var(--accent)] hover:text-accent"
-                  >
-                    <FileDown className="h-4 w-4" />
-                    Download Graybox 360
-                  </button>
-                </div>
-              )}
-              {activeAsset && project.landmarks.length > 0 && (
-                <div className="pointer-events-auto min-w-0 max-w-[calc(100%-var(--reference-cta-lane))]">
-                  <LandmarkStrip
-                    landmarks={project.landmarks.filter((landmark) => landmark.visible)}
-                    panoImageUrl={activeAsset.uri}
-                    panoOrigin={panoOrigin}
-                    focusedLandmarkId={focusedLandmarkId}
-                    onFocusLandmark={(landmarkId) => focusLandmark(landmarkId)}
-                  />
-                </div>
-              )}
-              <div className="pointer-events-none ml-auto shrink-0">
+              <div className="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+                {grayboxAsset && grayboxPano && (
+                  <div className="pointer-events-auto shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => void downloadPanoImage(
+                        grayboxAsset.uri,
+                        grayboxPano.width,
+                        grayboxPano.height,
+                        grayboxAsset.name || 'global_graybox.png',
+                        {
+                          letterboxEnabled: project.settings.panoLetterboxExports169,
+                          targetWidth: project.settings.defaultShotWidth,
+                          targetHeight: project.settings.defaultShotHeight,
+                        },
+                        downloadDataUrl,
+                      )}
+                      className="inline-flex min-h-11 items-center gap-2 rounded-[18px] border border-subtle bg-surface-raised px-4 py-2.5 text-sm font-medium text-secondary shadow-card transition hover:border-[var(--accent)] hover:text-accent"
+                    >
+                      <FileDown className="h-4 w-4" />
+                      <span className="hidden xs:inline sm:inline">Download Graybox 360</span>
+                      <span className="sm:hidden">Graybox</span>
+                    </button>
+                  </div>
+                )}
+                {activeAsset && project.landmarks.length > 0 && (
+                  <div className="pointer-events-auto min-w-0 max-w-full flex-1 sm:max-w-[calc(100%-var(--reference-cta-lane))]">
+                    <LandmarkStrip
+                      landmarks={project.landmarks.filter((landmark) => landmark.visible)}
+                      panoImageUrl={activeAsset.uri}
+                      panoOrigin={panoOrigin}
+                      focusedLandmarkId={focusedLandmarkId}
+                      onFocusLandmark={(landmarkId) => focusLandmark(landmarkId)}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="pointer-events-none w-full shrink-0 sm:ml-auto sm:w-auto">
                 <PrimaryCTA
                   icon={<Check className="h-5 w-5" />}
                   label="Approve as Reference"

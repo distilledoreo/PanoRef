@@ -32,11 +32,12 @@
   --shots-bottom-chrome-pad: 1.5rem;
   --shots-bottom-chrome-gap: 0.5rem;
   --shots-cta-hint-block: 1.125rem;
-  --shots-cta-lane: 15.5rem;
+  --shots-cta-lane: min(15.5rem, 100%);
   /* Space reserved so viewfinder content clears the camera shutter chrome */
   --shots-overlay-bottom-safe: 11rem;
-  --reference-cta-lane: 17.5rem;
-  --stage-header-safe: 4.75rem;
+  --reference-cta-lane: min(17.5rem, 100%);
+  /* Two-row mobile header (brand + stage nav) */
+  --stage-header-safe: 6.75rem;
   --radius-card: 14px;
   --radius-pill: 999px;
   --thumbnail-fallback-sky: #e8e4de;

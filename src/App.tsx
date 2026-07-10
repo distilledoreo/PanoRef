@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import {
   Boxes,
   Camera,
@@ -19,15 +19,16 @@ import { downloadProject, parseProject, readFileAsText } from './engine/projectI
 import { useAppModeStore } from './state/useAppModeStore';
 import { useContinuityStore } from './state/useContinuityStore';
 import { useThemeStore } from './state/useThemeStore';
-import { BuildWorkspace } from './components/workspaces/BuildWorkspace';
-import { ReferenceWorkspace } from './components/workspaces/ReferenceWorkspace';
-import { ShotsWorkspace } from './components/workspaces/ShotsWorkspace';
-import { ExportWorkspace } from './components/workspaces/ExportWorkspace';
-import { PanoViewerWorkspace } from './components/workspaces/PanoViewerWorkspace';
 import { ModeChooser } from './components/common/ModeChooser';
 import { WorkflowGuidance } from './components/common/WorkflowGuidance';
 import SplashScreen from './components/common/SplashScreen';
 import { TextInput } from './components/common/Field';
+
+const BuildWorkspace = lazy(() => import('./components/workspaces/BuildWorkspace').then((m) => ({ default: m.BuildWorkspace })));
+const ReferenceWorkspace = lazy(() => import('./components/workspaces/ReferenceWorkspace').then((m) => ({ default: m.ReferenceWorkspace })));
+const ShotsWorkspace = lazy(() => import('./components/workspaces/ShotsWorkspace').then((m) => ({ default: m.ShotsWorkspace })));
+const ExportWorkspace = lazy(() => import('./components/workspaces/ExportWorkspace').then((m) => ({ default: m.ExportWorkspace })));
+const PanoViewerWorkspace = lazy(() => import('./components/workspaces/PanoViewerWorkspace').then((m) => ({ default: m.PanoViewerWorkspace })));
 
 const workspaceItems: Array<{ id: Workspace; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'build', label: 'Build', icon: Boxes },
@@ -129,118 +130,165 @@ export default function App() {
   return (
     <div className="relative h-screen w-full overflow-hidden bg-surface-base text-primary">
       <main className="absolute inset-0">
-        {isPanoViewer ? (
-          <PanoViewerWorkspace />
-        ) : (
-          <>
-            {workspace === 'build' && <BuildWorkspace />}
-            {workspace === 'reference' && <ReferenceWorkspace />}
-            {workspace === 'shots' && <ShotsWorkspace />}
-            {workspace === 'export' && <ExportWorkspace />}
-          </>
-        )}
+        <Suspense
+          fallback={(
+            <div className="flex h-full items-center justify-center bg-surface-base text-sm text-secondary">
+              Loading workspace…
+            </div>
+          )}
+        >
+          {isPanoViewer ? (
+            <PanoViewerWorkspace />
+          ) : (
+            <>
+              {workspace === 'build' && <BuildWorkspace />}
+              {workspace === 'reference' && <ReferenceWorkspace />}
+              {workspace === 'shots' && <ShotsWorkspace />}
+              {workspace === 'export' && <ExportWorkspace />}
+            </>
+          )}
+        </Suspense>
       </main>
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-40">
-        <div className="flex h-[72px] items-center justify-between gap-4 px-7 pt-3">
-          <div ref={projectMenuRef} className="pointer-events-auto relative min-w-0">
-            <button
-              type="button"
-              onClick={() => setProjectMenuOpen((open) => !open)}
-              className="flex min-w-0 items-center gap-2 rounded-2xl border border-transparent py-1 pl-1 pr-2.5 transition hover:border-subtle hover:bg-surface-overlay/70"
-              title="Open menu"
-              aria-label="Open app menu"
-              aria-expanded={projectMenuOpen}
-              aria-haspopup="menu"
-              data-brand-menu-trigger
-            >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center text-accent">
-                <Boxes className="h-9 w-9" strokeWidth={2.2} />
-              </span>
-              <span className="min-w-0 truncate text-xl font-semibold tracking-normal text-primary">
-                {isPanoViewer ? '360 Viewer' : 'Continuity Stage'}
-              </span>
-              <ChevronDown
-                className={`h-4 w-4 shrink-0 text-secondary transition ${projectMenuOpen ? 'rotate-180 text-accent' : ''}`}
-                aria-hidden
-              />
-            </button>
-            {projectMenuOpen && (
-              <div
-                role="menu"
-                className="absolute left-0 top-[calc(100%+10px)] z-50 w-72 overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-2 shadow-soft backdrop-blur"
+        <div className="flex flex-col gap-1.5 px-3 pt-2 md:h-[72px] md:flex-row md:items-center md:justify-between md:gap-4 md:px-7 md:pt-3">
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <div ref={projectMenuRef} className="pointer-events-auto relative min-w-0">
+              <button
+                type="button"
+                onClick={() => setProjectMenuOpen((open) => !open)}
+                className="flex min-w-0 max-w-[min(100%,14rem)] items-center gap-1.5 rounded-2xl border border-transparent py-1 pl-1 pr-2 transition hover:border-subtle hover:bg-surface-overlay/70 sm:max-w-none sm:gap-2 sm:pr-2.5"
+                title="Open menu"
+                aria-label="Open app menu"
+                aria-expanded={projectMenuOpen}
+                aria-haspopup="menu"
+                data-brand-menu-trigger
               >
-                {!isPanoViewer && (
-                  <div className="border-b border-subtle px-3 py-2">
-                    <label className="block text-xs text-secondary" htmlFor="project-name-input">
-                      Project name
-                    </label>
-                    <TextInput
-                      id="project-name-input"
-                      value={project.name}
-                      onChange={(event) => updateProjectInfo({ name: event.target.value })}
-                      aria-label="Project name"
-                      data-project-name-input
-                      className="mt-1 h-8 border-subtle bg-surface-raised px-2 py-1 text-sm font-semibold"
-                    />
-                    <div className="mt-1 text-xs text-secondary">Project actions</div>
-                  </div>
-                )}
-                {isPanoViewer ? (
-                  <ProjectMenuButton
-                    icon={<Boxes className="h-4 w-4" />}
-                    label="Open Continuity Stage"
-                    onClick={() => {
-                      setAppMode('continuity');
-                      setProjectMenuOpen(false);
-                    }}
-                  />
-                ) : (
-                  <>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center text-accent md:h-11 md:w-11">
+                  <Boxes className="h-7 w-7 md:h-9 md:w-9" strokeWidth={2.2} />
+                </span>
+                <span className="min-w-0 truncate text-base font-semibold tracking-normal text-primary md:text-xl">
+                  {isPanoViewer ? '360 Viewer' : 'Continuity Stage'}
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 shrink-0 text-secondary transition ${projectMenuOpen ? 'rotate-180 text-accent' : ''}`}
+                  aria-hidden
+                />
+              </button>
+              {projectMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-[calc(100%+10px)] z-50 w-72 overflow-hidden rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-2 shadow-soft backdrop-blur"
+                >
+                  {!isPanoViewer && (
+                    <div className="border-b border-subtle px-3 py-2">
+                      <label className="block text-xs text-secondary" htmlFor="project-name-input">
+                        Project name
+                      </label>
+                      <TextInput
+                        id="project-name-input"
+                        value={project.name}
+                        onChange={(event) => updateProjectInfo({ name: event.target.value })}
+                        aria-label="Project name"
+                        data-project-name-input
+                        className="mt-1 h-8 border-subtle bg-surface-raised px-2 py-1 text-sm font-semibold"
+                      />
+                      <div className="mt-1 text-xs text-secondary">Project actions</div>
+                    </div>
+                  )}
+                  {isPanoViewer ? (
                     <ProjectMenuButton
-                      icon={<Compass className="h-4 w-4" />}
-                      label="Current Objective"
+                      icon={<Boxes className="h-4 w-4" />}
+                      label="Open Continuity Stage"
                       onClick={() => {
-                        requestObjectiveModal();
+                        setAppMode('continuity');
                         setProjectMenuOpen(false);
                       }}
                     />
-                    <ProjectMenuButton
-                      icon={<Globe className="h-4 w-4" />}
-                      label="Simple 360 Viewer"
-                      onClick={() => {
-                        setAppMode('panoViewer');
-                        setProjectMenuOpen(false);
-                      }}
-                    />
-                    <ProjectMenuButton
-                      icon={<FolderOpen className="h-4 w-4" />}
-                      label="Open Project"
-                      onClick={() => {
-                        openProjectPicker();
-                        setProjectMenuOpen(false);
-                      }}
-                    />
-                    <ProjectMenuButton
-                      icon={<FileJson className="h-4 w-4" />}
-                      label="Save Project"
-                      onClick={() => {
-                        downloadProject(project);
-                        setProjectMenuOpen(false);
-                      }}
-                    />
-                    <ProjectMenuButton
-                      icon={<Package className="h-4 w-4" />}
-                      label="Package Export"
-                      onClick={() => {
-                        setWorkspace('export');
-                        setProjectMenuOpen(false);
-                      }}
-                    />
-                  </>
-                )}
-              </div>
-            )}
+                  ) : (
+                    <>
+                      <ProjectMenuButton
+                        icon={<Compass className="h-4 w-4" />}
+                        label="Current Objective"
+                        onClick={() => {
+                          requestObjectiveModal();
+                          setProjectMenuOpen(false);
+                        }}
+                      />
+                      <ProjectMenuButton
+                        icon={<Globe className="h-4 w-4" />}
+                        label="Simple 360 Viewer"
+                        onClick={() => {
+                          setAppMode('panoViewer');
+                          setProjectMenuOpen(false);
+                        }}
+                      />
+                      <ProjectMenuButton
+                        icon={<FolderOpen className="h-4 w-4" />}
+                        label="Open Project"
+                        onClick={() => {
+                          openProjectPicker();
+                          setProjectMenuOpen(false);
+                        }}
+                      />
+                      <ProjectMenuButton
+                        icon={<FileJson className="h-4 w-4" />}
+                        label="Save Project"
+                        onClick={() => {
+                          downloadProject(project);
+                          setProjectMenuOpen(false);
+                        }}
+                      />
+                      <ProjectMenuButton
+                        icon={<Package className="h-4 w-4" />}
+                        label="Package Export"
+                        onClick={() => {
+                          setWorkspace('export');
+                          setProjectMenuOpen(false);
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,application/json"
+              aria-label="Open project JSON"
+              data-project-import-input
+              className="hidden"
+              onChange={(event) => void importProject(event.target.files?.[0])}
+            />
+            <div
+              className="pointer-events-auto flex shrink-0 items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm"
+              data-header-actions
+            >
+              {!isPanoViewer && (
+                <>
+                  <HeaderToolbarButton onClick={openProjectPicker} title="Open project">
+                    <FolderOpen className="h-4 w-4" />
+                  </HeaderToolbarButton>
+                  <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
+                  <HeaderToolbarButton
+                    onClick={() => downloadProject(project)}
+                    title="Save project"
+                    data-project-export-button
+                  >
+                    <Save className="h-4 w-4" />
+                  </HeaderToolbarButton>
+                  <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
+                </>
+              )}
+              <HeaderToolbarButton
+                onClick={toggleTheme}
+                title={theme === 'light' ? 'Dark mode' : 'Light mode'}
+              >
+                {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+              </HeaderToolbarButton>
+            </div>
           </div>
 
           {!isPanoViewer && (
@@ -274,7 +322,10 @@ export default function App() {
                 })}
               </nav>
 
-              <nav className="pointer-events-auto flex max-w-[42vw] items-center gap-1 overflow-x-auto md:hidden">
+              <nav
+                className="pointer-events-auto flex w-full items-center gap-1 overflow-x-auto pb-0.5 md:hidden"
+                aria-label="Workspace stages"
+              >
                 {workspaceItems.map((item) => {
                   const Icon = item.icon;
                   const active = workspace === item.id;
@@ -282,7 +333,7 @@ export default function App() {
                     <button
                       key={item.id}
                       onClick={() => setWorkspace(item.id)}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                      className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium transition ${
                         active ? 'bg-[var(--accent)] text-white' : 'bg-surface-overlay/80 text-secondary backdrop-blur-sm'
                       }`}
                     >
@@ -294,43 +345,6 @@ export default function App() {
               </nav>
             </>
           )}
-
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".json,application/json"
-            aria-label="Open project JSON"
-            data-project-import-input
-            className="hidden"
-            onChange={(event) => void importProject(event.target.files?.[0])}
-          />
-          <div
-            className="pointer-events-auto flex items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm"
-            data-header-actions
-          >
-            {!isPanoViewer && (
-              <>
-                <HeaderToolbarButton onClick={openProjectPicker} title="Open project">
-                  <FolderOpen className="h-4 w-4" />
-                </HeaderToolbarButton>
-                <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
-                <HeaderToolbarButton
-                  onClick={() => downloadProject(project)}
-                  title="Save project"
-                  data-project-export-button
-                >
-                  <Save className="h-4 w-4" />
-                </HeaderToolbarButton>
-                <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
-              </>
-            )}
-            <HeaderToolbarButton
-              onClick={toggleTheme}
-              title={theme === 'light' ? 'Dark mode' : 'Light mode'}
-            >
-              {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-            </HeaderToolbarButton>
-          </div>
         </div>
       </header>
 
@@ -396,7 +410,7 @@ function HeaderToolbarButton({
       {...rest}
       onClick={onClick}
       title={title}
-      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center border-0 bg-transparent text-secondary shadow-none outline-none transition hover:bg-surface-muted/80 hover:text-primary focus-visible:bg-surface-muted/80 focus-visible:text-primary ${className ?? ''}`}
+      className={`inline-flex h-11 w-11 shrink-0 items-center justify-center border-0 bg-transparent text-secondary shadow-none outline-none transition hover:bg-surface-muted/80 hover:text-primary focus-visible:bg-surface-muted/80 focus-visible:text-primary ${className ?? ''}`}
     >
       {children}
     </button>

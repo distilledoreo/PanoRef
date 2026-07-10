@@ -7,6 +7,15 @@ const sizeClasses = {
   xl: 'max-w-3xl',
 } as const;
 
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'textarea:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
 export function Modal({
   open,
   title,
@@ -30,22 +39,57 @@ export function Modal({
   const titleId = labelledBy ?? `${fallbackId}-title`;
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
 
+    previouslyFocusedRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCloseRef.current?.();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current?.();
+        return;
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return;
+
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll(FOCUSABLE_SELECTOR),
+      ).filter((node): node is HTMLElement => (
+        node instanceof HTMLElement && !node.hasAttribute('disabled') && node.tabIndex !== -1
+      ));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panelRef.current.focus();
+        return;
+      }
+      const first: HTMLElement = focusable[0];
+      const last: HTMLElement = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open]);
+    // Prefer first focusable control; fall back to the panel.
+    const focusable = panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+    const firstFocusable = focusable?.[0];
+    (firstFocusable ?? panelRef.current)?.focus();
 
-  useEffect(() => {
-    if (!open) return;
-    panelRef.current?.focus();
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      previouslyFocusedRef.current?.focus?.();
+      previouslyFocusedRef.current = null;
+    };
   }, [open]);
 
   if (!open) return null;

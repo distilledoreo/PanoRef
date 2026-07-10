@@ -51,13 +51,13 @@ export function PrimaryCTA({
     return (
       <div
         data-primary-cta="inline"
-        className="pointer-events-auto flex w-[var(--shots-cta-lane,15.5rem)] min-w-[var(--shots-cta-lane,15.5rem)] shrink-0 flex-col items-end gap-0.5"
+        className="pointer-events-auto flex w-full max-w-[var(--shots-cta-lane,15.5rem)] shrink-0 flex-col items-stretch gap-0.5 sm:w-[var(--shots-cta-lane,15.5rem)] sm:min-w-[var(--shots-cta-lane,15.5rem)] sm:items-end"
       >
         {button}
         {hint && (
           <p
             data-primary-cta-hint
-            className="m-0 w-full text-right text-xs leading-[var(--shots-cta-hint-block,1.125rem)] text-secondary whitespace-nowrap"
+            className="m-0 w-full text-left text-xs leading-[var(--shots-cta-hint-block,1.125rem)] text-secondary sm:text-right sm:whitespace-nowrap"
           >
             {hint}
           </p>
@@ -67,10 +67,10 @@ export function PrimaryCTA({
   }
 
   return (
-    <div className="pointer-events-auto flex flex-col items-end gap-1.5">
+    <div className="pointer-events-auto flex max-w-full flex-col items-stretch gap-1.5 sm:items-end">
       {button}
       {hint && (
-        <p className="max-w-xs text-right text-xs text-secondary">{hint}</p>
+        <p className="max-w-xs text-left text-xs text-secondary sm:text-right">{hint}</p>
       )}
     </div>
   );

@@ -290,12 +290,22 @@ export function getNextProductionStep(step: ProductionStepId): ProductionStepId 
   return STEP_ORDER[index + 1];
 }
 
+/**
+ * Build/Reference advance prompts are global (not per shot).
+ * Shots advance prompt is once per session/project — later captures stay toast-only.
+ */
 export function buildAdvancePromptKey(
   completedStep: ProductionStepId,
   nextStep: ProductionStepId,
-  shotId?: string,
+  _shotId?: string,
 ): string {
-  return `${completedStep}->${nextStep}:${shotId ?? 'global'}`;
+  if (completedStep === 'build' || completedStep === 'reference') {
+    return `${completedStep}->${nextStep}:global`;
+  }
+  if (completedStep === 'shots') {
+    return `${completedStep}->${nextStep}:session`;
+  }
+  return `${completedStep}->${nextStep}:global`;
 }
 
 export interface WorkflowAdvancePrompt {

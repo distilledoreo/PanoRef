@@ -123,6 +123,7 @@ interface ContinuityStore {
   updateShot: (id: string, updates: Partial<Shot>) => void;
   removeShot: (id: string) => void;
   attachCameraMoveVideoToShot: (shotId: string, params: { name: string; dataUrl: string; mimeType: string; width: number; height: number; durationSeconds: number; frameRate: number }) => ProjectAsset;
+  attachViewportRenderToShot: (shotId: string, params: { name: string; dataUrl: string; width: number; height: number }) => ProjectAsset;
   attachAiResultFrameToShot: (shotId: string, params: { name: string; dataUrl: string; width?: number; height?: number }) => ProjectAsset;
   addLandmark: () => Landmark;
   updateLandmark: (id: string, updates: Partial<Landmark>) => void;
@@ -720,6 +721,43 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
               assets: {
                 ...item.assets,
                 cameraMoveVideoAssetId: asset.id,
+              },
+              updatedAt: new Date().toISOString(),
+            }
+          : item),
+      }),
+    }));
+    return asset;
+  },
+  attachViewportRenderToShot: (shotId, params) => {
+    const state = get();
+    const shot = state.project.shots.find((item) => item.id === shotId);
+    if (!shot) throw new Error('Select a shot before attaching a viewport render.');
+    const asset = createPanoAsset({
+      name: params.name || `shot_${shot.shotNumber}_viewport.png`,
+      uri: params.dataUrl,
+      width: params.width,
+      height: params.height,
+      metadata: {
+        source: 'viewport_render',
+        shotId: shot.id,
+      },
+    });
+    set((current) => ({
+      project: touchProject({
+        ...current.project,
+        assets: {
+          assets: {
+            ...current.project.assets.assets,
+            [asset.id]: asset,
+          },
+        },
+        shots: current.project.shots.map((item) => item.id === shot.id
+          ? {
+              ...item,
+              assets: {
+                ...item.assets,
+                viewportRenderAssetId: asset.id,
               },
               updatedAt: new Date().toISOString(),
             }

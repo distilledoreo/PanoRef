@@ -44,6 +44,13 @@ import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
 import { FullBleedLayout } from './WorkspaceShell';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
+const STATUS_LABELS: Record<ShotStatus, string> = {
+  planned: 'Planned',
+  exported: 'Exported',
+  needs_fix: 'Needs fix',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
 
 /** Quick picks shown on the camera chrome while capturing a move end. */
 const VIDEO_DURATION_PRESETS_SECONDS = [1, 2, 3, 5, 8] as const;
@@ -71,6 +78,7 @@ export function ShotsWorkspace() {
     setShotCameraFlying,
     landShotFraming,
     attachCameraMoveVideoToShot,
+    attachViewportRenderToShot,
     setWorkspace,
     setActivePano,
   } = useContinuityStore();
@@ -78,13 +86,16 @@ export function ShotsWorkspace() {
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
   const linkedAsset = linkedPano ? project.assets.assets[linkedPano.imageAssetId] : undefined;
   const draftCameraRef = useRef<CameraData | undefined>();
-  const [framePreviewUrl, setFramePreviewUrl] = useState<string | undefined>();
+  /** Transient live previews keyed by shot id — never reuse across shots. */
+  const [framePreviewByShotId, setFramePreviewByShotId] = useState<Record<string, string>>({});
+  const framePreviewUrl = selectedShot ? framePreviewByShotId[selectedShot.id] : undefined;
   const [isRenderingFrame, setIsRenderingFrame] = useState(false);
   const [isExportingFrame, setIsExportingFrame] = useState(false);
   const [cameraMovePreviewUrl, setCameraMovePreviewUrl] = useState<string | undefined>();
   const [isExportingCameraMove, setIsExportingCameraMove] = useState(false);
   const [cameraMoveProgress, setCameraMoveProgress] = useState(0);
   const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
+  const cameraMoveAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -139,13 +150,23 @@ export function ShotsWorkspace() {
     : undefined;
   const supportedMp4MimeType = getSupportedCameraMoveMp4MimeType();
 
+  const setShotFramePreview = useCallback((shotId: string, dataUrl: string) => {
+    setFramePreviewByShotId((current) => ({ ...current, [shotId]: dataUrl }));
+  }, []);
+
   const exportCameraFrame = useCallback(async () => {
     const previewShot = getPreviewShot();
     if (!previewShot) return;
     setIsExportingFrame(true);
     try {
       const frame = await renderShotFrame(project, previewShot);
-      setFramePreviewUrl(frame.dataUrl);
+      setShotFramePreview(previewShot.id, frame.dataUrl);
+      attachViewportRenderToShot(previewShot.id, {
+        name: exportFrameFileName,
+        dataUrl: frame.dataUrl,
+        width: frame.width,
+        height: frame.height,
+      });
       downloadDataUrl(frame.dataUrl, exportFrameFileName);
       if (!shotCameraFlying) {
         updateShot(previewShot.id, { status: 'exported' });
@@ -153,7 +174,7 @@ export function ShotsWorkspace() {
     } finally {
       setIsExportingFrame(false);
     }
-  }, [exportFrameFileName, getPreviewShot, project, shotCameraFlying, updateShot]);
+  }, [attachViewportRenderToShot, exportFrameFileName, getPreviewShot, project, setShotFramePreview, shotCameraFlying, updateShot]);
 
   const updateCameraMoveKeyframes = useCallback((keyframes: typeof cameraMoveKeyframes) => {
     if (!selectedShot) return;
@@ -198,7 +219,7 @@ export function ShotsWorkspace() {
     if (!selectedShot) return;
     const mimeType = getSupportedCameraMoveMp4MimeType();
     if (!mimeType) {
-      setCameraMoveError('MP4 export is not supported in this browser.');
+      setCameraMoveError('MP4 export is not supported in this browser. Try Chrome or Edge.');
       return;
     }
     if (!hasRenderableCameraMove(selectedShot.cameraKeyframes)) {
@@ -206,15 +227,29 @@ export function ShotsWorkspace() {
       return;
     }
 
+    const exportToken = { cancelled: false };
+    cameraMoveAbortRef.current = exportToken;
     setIsExportingCameraMove(true);
     setCameraMoveProgress(0);
     setCameraMoveError(undefined);
+
+    const MP4_EXPORT_TIMEOUT_MS = 90_000;
     try {
-      const video = await renderShotCameraMoveMp4(project, selectedShot, {
-        mimeType,
-        frameRate: 30,
-        onProgress: setCameraMoveProgress,
-      });
+      const video = await Promise.race([
+        renderShotCameraMoveMp4(project, selectedShot, {
+          mimeType,
+          frameRate: 30,
+          onProgress: (progress) => {
+            if (!exportToken.cancelled) setCameraMoveProgress(progress);
+          },
+        }),
+        new Promise<never>((_, reject) => {
+          window.setTimeout(() => {
+            reject(new Error('MP4 export timed out after 90 seconds. Try a shorter move or smaller resolution.'));
+          }, MP4_EXPORT_TIMEOUT_MS);
+        }),
+      ]);
+      if (exportToken.cancelled) return;
       const asset = attachCameraMoveVideoToShot(selectedShot.id, {
         name: cameraMoveFileName,
         dataUrl: video.dataUrl,
@@ -227,9 +262,13 @@ export function ShotsWorkspace() {
       setCameraMovePreviewUrl(asset.uri);
       downloadDataUrl(asset.uri, asset.name);
     } catch (error) {
-      setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
+      if (!exportToken.cancelled) {
+        setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
+      }
     } finally {
-      setIsExportingCameraMove(false);
+      if (!exportToken.cancelled) {
+        setIsExportingCameraMove(false);
+      }
     }
   }, [attachCameraMoveVideoToShot, cameraMoveFileName, project, selectedShot]);
 
@@ -278,9 +317,11 @@ export function ShotsWorkspace() {
 
     let cancelled = false;
     setIsRenderingFrame(true);
+    // Transient preview only — do not write project assets here (would re-trigger this effect).
     void renderShotFrame(project, previewShot)
       .then((frame) => {
-        if (!cancelled) setFramePreviewUrl(frame.dataUrl);
+        if (cancelled) return;
+        setShotFramePreview(previewShot.id, frame.dataUrl);
       })
       .finally(() => {
         if (!cancelled) setIsRenderingFrame(false);
@@ -289,7 +330,7 @@ export function ShotsWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [framePreviewKey, getPreviewShot, project, shotCameraFlying]);
+  }, [framePreviewKey, getPreviewShot, project, setShotFramePreview, shotCameraFlying]);
 
   const handleFramingCameraChange = useCallback((camera: CameraData) => {
     if (!selectedShot) return;
@@ -303,7 +344,7 @@ export function ShotsWorkspace() {
     setShotCameraFlying(true, options);
   }, [selectedShot?.camera, setShotCameraFlying]);
 
-  const snapshotPreview = useCallback((shot: { id: string; exportSettings: { width: number; height: number }; camera: CameraData }, camera: CameraData) => {
+  const snapshotPreview = useCallback((shot: { id: string; name?: string; exportSettings: { width: number; height: number }; camera: CameraData }, camera: CameraData) => {
     // Use latest project from the store so freshly created shots are not missing
     // from a stale React closure after addCamera.
     const latestProject = useContinuityStore.getState().project;
@@ -317,9 +358,15 @@ export function ShotsWorkspace() {
       },
     };
     void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number]).then((frame) => {
-      setFramePreviewUrl(frame.dataUrl);
+      setShotFramePreview(shot.id, frame.dataUrl);
+      useContinuityStore.getState().attachViewportRenderToShot(shot.id, {
+        name: `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}_viewport.png`,
+        dataUrl: frame.dataUrl,
+        width: frame.width,
+        height: frame.height,
+      });
     });
-  }, []);
+  }, [setShotFramePreview]);
 
   /**
    * Still capture = iPhone shutter: commit pose to gallery, keep viewfinder live.
@@ -652,7 +699,7 @@ export function ShotsWorkspace() {
                         <ShotThumbnail
                           project={project}
                           shot={shot}
-                          overrideSrc={shot.id === selectedShot?.id ? framePreviewUrl : undefined}
+                          overrideSrc={framePreviewByShotId[shot.id]}
                           className="h-20 w-28 object-cover"
                         />
                         <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
@@ -771,9 +818,7 @@ export function ShotsWorkspace() {
                 <ShotThumbnail
                   project={project}
                   shot={libraryThumbShot}
-                  overrideSrc={
-                    libraryThumbShot.id === selectedShot?.id ? framePreviewUrl : undefined
-                  }
+                  overrideSrc={framePreviewByShotId[libraryThumbShot.id]}
                   className="h-full w-full object-cover"
                   compact
                 />
@@ -865,7 +910,9 @@ export function ShotsWorkspace() {
             </Field>
             <Field label="Status">
               <Select value={selectedShot.status} onChange={(event) => updateShot(selectedShot.id, { status: event.target.value as ShotStatus })}>
-                {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                {statuses.map((status) => (
+                  <option key={status} value={status}>{STATUS_LABELS[status]}</option>
+                ))}
               </Select>
             </Field>
             <Field label="Description">

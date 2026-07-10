@@ -150,6 +150,8 @@ export function SceneViewport({
     pitchDegrees: 0,
   });
   const flyKeysRef = useRef(new Set<string>());
+  /** Continuous axes from touch pad: forward/back, strafe, up/down in [-1, 1]. */
+  const flyAxesRef = useRef({ forward: 0, strafe: 0, vertical: 0 });
   const flyBoundsRef = useRef(computeSceneFlyBounds(project.scene));
   const lastFrameTimeRef = useRef(performance.now());
   const flyDirtyRef = useRef(false);
@@ -305,30 +307,27 @@ export function SceneViewport({
 
     const processFlyMovement = (deltaSeconds: number) => {
       const keys = flyKeysRef.current;
-      if (keys.size === 0) return;
+      const axes = flyAxesRef.current;
+      let axisForward = 0;
+      let axisStrafe = 0;
+      let axisVertical = 0;
+      if (keys.has('KeyW')) axisForward += 1;
+      if (keys.has('KeyS')) axisForward -= 1;
+      if (keys.has('KeyA')) axisStrafe -= 1;
+      if (keys.has('KeyD')) axisStrafe += 1;
+      if (keys.has('Space')) axisVertical += 1;
+      if (keys.has('ShiftLeft') || keys.has('ShiftRight')) axisVertical -= 1;
+      // Touch pad fills axes when keyboard is not driving that channel.
+      if (axisForward === 0) axisForward = axes.forward;
+      if (axisStrafe === 0) axisStrafe = axes.strafe;
+      if (axisVertical === 0) axisVertical = axes.vertical;
+      if (axisForward === 0 && axisStrafe === 0 && axisVertical === 0) return;
+
       const fly = flyRef.current;
       const { forward, right } = horizontalFlyDirections(fly.yawDegrees);
-      let moveX = 0;
-      let moveY = 0;
-      let moveZ = 0;
-      if (keys.has('KeyW')) {
-        moveX += forward[0];
-        moveZ += forward[2];
-      }
-      if (keys.has('KeyS')) {
-        moveX -= forward[0];
-        moveZ -= forward[2];
-      }
-      if (keys.has('KeyA')) {
-        moveX -= right[0];
-        moveZ -= right[2];
-      }
-      if (keys.has('KeyD')) {
-        moveX += right[0];
-        moveZ += right[2];
-      }
-      if (keys.has('Space')) moveY += 1;
-      if (keys.has('ShiftLeft') || keys.has('ShiftRight')) moveY -= 1;
+      const moveX = forward[0] * axisForward + right[0] * axisStrafe;
+      const moveY = axisVertical;
+      const moveZ = forward[2] * axisForward + right[2] * axisStrafe;
       const length = Math.hypot(moveX, moveY, moveZ);
       if (length === 0) return;
       const sprinting = keys.has('ControlLeft') || keys.has('ControlRight');
@@ -887,8 +886,17 @@ export function SceneViewport({
   useEffect(() => {
     if (!shotFraming?.flyActive) {
       flyKeysRef.current.clear();
+      flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
     }
   }, [shotFraming?.flyActive]);
+
+  const setFlyAxes = useCallback((axes: { forward: number; strafe: number; vertical?: number }) => {
+    flyAxesRef.current = {
+      forward: clampUnit(axes.forward),
+      strafe: clampUnit(axes.strafe),
+      vertical: clampUnit(axes.vertical ?? 0),
+    };
+  }, []);
 
   useEffect(() => {
     if (!shotFraming || dragRef.current.kind === 'shot_framing') return;
@@ -973,6 +981,118 @@ export function SceneViewport({
           variant="full"
         />
       )}
+      {shotFraming?.flyActive && (
+        <TouchFlyPad
+          onAxesChange={setFlyAxes}
+        />
+      )}
+    </div>
+  );
+}
+
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(-1, Math.min(1, value));
+}
+
+/** On-screen move pad for touch devices (keyboard WASD has no mobile equivalent). */
+function TouchFlyPad({
+  onAxesChange,
+}: {
+  onAxesChange: (axes: { forward: number; strafe: number; vertical?: number }) => void;
+}) {
+  const padRef = useRef<HTMLDivElement>(null);
+  const activePointerId = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => onAxesChange({ forward: 0, strafe: 0, vertical: 0 });
+  }, [onAxesChange]);
+
+  const updateFromPoint = (clientX: number, clientY: number) => {
+    const pad = padRef.current;
+    if (!pad) return;
+    const rect = pad.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const radius = Math.max(1, Math.min(rect.width, rect.height) / 2);
+    const dx = (clientX - cx) / radius;
+    const dy = (clientY - cy) / radius;
+    const length = Math.hypot(dx, dy);
+    const scale = length > 1 ? 1 / length : 1;
+    onAxesChange({
+      strafe: dx * scale,
+      forward: -dy * scale,
+    });
+  };
+
+  return (
+    <div
+      className="pointer-events-none absolute bottom-[7.5rem] left-3 z-30 flex flex-col items-center gap-2 md:hidden"
+      data-touch-fly-pad
+    >
+      <div className="pointer-events-auto flex gap-2">
+        <button
+          type="button"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/25 bg-black/45 text-xs font-semibold text-white/90 backdrop-blur-sm active:bg-black/70"
+          aria-label="Move camera up"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            onAxesChange({ forward: 0, strafe: 0, vertical: 1 });
+          }}
+          onPointerUp={() => onAxesChange({ forward: 0, strafe: 0, vertical: 0 })}
+          onPointerCancel={() => onAxesChange({ forward: 0, strafe: 0, vertical: 0 })}
+        >
+          Up
+        </button>
+        <button
+          type="button"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/25 bg-black/45 text-xs font-semibold text-white/90 backdrop-blur-sm active:bg-black/70"
+          aria-label="Move camera down"
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            onAxesChange({ forward: 0, strafe: 0, vertical: -1 });
+          }}
+          onPointerUp={() => onAxesChange({ forward: 0, strafe: 0, vertical: 0 })}
+          onPointerCancel={() => onAxesChange({ forward: 0, strafe: 0, vertical: 0 })}
+        >
+          Dn
+        </button>
+      </div>
+      <div
+        ref={padRef}
+        className="pointer-events-auto relative h-28 w-28 touch-none rounded-full border border-white/25 bg-black/40 shadow-card backdrop-blur-sm"
+        role="application"
+        aria-label="Drag to move camera. Drag up/down for forward/back, left/right to strafe."
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          activePointerId.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          updateFromPoint(event.clientX, event.clientY);
+        }}
+        onPointerMove={(event) => {
+          if (activePointerId.current !== event.pointerId) return;
+          event.preventDefault();
+          event.stopPropagation();
+          updateFromPoint(event.clientX, event.clientY);
+        }}
+        onPointerUp={(event) => {
+          if (activePointerId.current !== event.pointerId) return;
+          activePointerId.current = null;
+          onAxesChange({ forward: 0, strafe: 0, vertical: 0 });
+        }}
+        onPointerCancel={() => {
+          activePointerId.current = null;
+          onAxesChange({ forward: 0, strafe: 0, vertical: 0 });
+        }}
+      >
+        <div className="pointer-events-none absolute inset-3 rounded-full border border-white/10" />
+        <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-medium uppercase tracking-wide text-white/55">
+          Move
+        </span>
+      </div>
     </div>
   );
 }

@@ -105,15 +105,7 @@ export function PanoViewerWorkspace() {
                 Drop in an equirectangular image, look around, then download the current view as a flat PNG.
                 This mode does not change your Continuity Stage project.
               </p>
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={isImporting}
-                className="inline-flex items-center gap-2 rounded-xl border border-[var(--accent)] bg-accent-soft px-4 py-2 text-sm font-semibold text-accent transition hover:bg-[var(--accent)] hover:text-white disabled:opacity-50"
-              >
-                {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
-                {isImporting ? 'Importing…' : 'Import pano'}
-              </button>
+              <p className="text-xs text-muted">Use Import pano in the bottom bar to get started.</p>
             </div>
           </div>
         )}
@@ -132,10 +124,10 @@ export function PanoViewerWorkspace() {
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={isImporting}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-subtle bg-surface-overlay/90 px-3 py-2 text-xs font-semibold text-secondary shadow-card backdrop-blur-sm transition hover:border-accent hover:text-accent disabled:opacity-50"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-subtle bg-surface-overlay/90 px-3 py-2 text-xs font-semibold text-secondary shadow-card backdrop-blur-sm transition hover:border-accent hover:text-accent disabled:opacity-50"
             >
-              <ImagePlus className="h-3.5 w-3.5" />
-              {imageUrl ? 'Replace pano' : 'Import pano'}
+              {isImporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
+              {isImporting ? 'Importing…' : imageUrl ? 'Replace pano' : 'Import pano'}
             </button>
             {imageUrl && (
               <label className="inline-flex items-center gap-2 rounded-xl border border-subtle bg-surface-overlay/90 px-3 py-2 text-xs text-secondary shadow-card backdrop-blur-sm">

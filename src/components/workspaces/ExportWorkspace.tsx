@@ -28,6 +28,7 @@ export function ExportWorkspace() {
   const [selectedShotIds, setSelectedShotIds] = useState<Set<string>>(() => new Set(project.shots.map((shot) => shot.id)));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportingShotId, setExportingShotId] = useState<string | undefined>();
+  const [exportError, setExportError] = useState<string | undefined>();
   const projectIdRef = useRef(project.id);
   const prevShotIdsRef = useRef(project.shots.map((shot) => shot.id));
   const shotIdsKey = project.shots.map((shot) => shot.id).join('\0');
@@ -72,14 +73,29 @@ export function ExportWorkspace() {
     const shotsToExport = project.shots.filter((shot) => selectedShotIds.has(shot.id));
     if (shotsToExport.length === 0) return;
     setExportingPackage(true);
+    setExportError(undefined);
+    const exported: string[] = [];
+    const failed: string[] = [];
     try {
       for (const shot of shotsToExport) {
         setExportingShotId(shot.id);
-        const result = await buildShotPackage(project, shot);
-        downloadBlob(result.blob, result.fileName);
-        setLastExport(result.manifestPaths);
-        updateShot(shot.id, { status: 'exported' });
-        markFinalPackageExported(shot.id);
+        try {
+          const result = await buildShotPackage(project, shot);
+          downloadBlob(result.blob, result.fileName);
+          setLastExport(result.manifestPaths);
+          updateShot(shot.id, { status: 'exported' });
+          markFinalPackageExported(shot.id);
+          exported.push(shot.shotNumber);
+        } catch (error) {
+          failed.push(shot.shotNumber);
+          const message = error instanceof Error ? error.message : 'Unknown export error';
+          setExportError(
+            failed.length === shotsToExport.length
+              ? `Export failed for ${shot.shotNumber}: ${message}`
+              : `Exported ${exported.join(', ')}; failed on ${shot.shotNumber}: ${message}`,
+          );
+          // Continue remaining shots so one failure does not abort the batch silently.
+        }
       }
     } finally {
       setExportingPackage(false);
@@ -90,12 +106,15 @@ export function ExportWorkspace() {
   const exportShot = async () => {
     if (!selectedShot) return;
     setExportingPackage(true);
+    setExportError(undefined);
     try {
       const result = await buildShotPackage(project, selectedShot);
       downloadBlob(result.blob, result.fileName);
       setLastExport(result.manifestPaths);
       updateShot(selectedShot.id, { status: 'exported' });
       markFinalPackageExported(selectedShot.id);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'Export failed.');
     } finally {
       setExportingPackage(false);
     }
@@ -259,7 +278,16 @@ export function ExportWorkspace() {
                 <p className="text-sm text-secondary">No shots yet.</p>
               )}
             </div>
-            <div className="shrink-0 border-t border-subtle px-2 py-2">
+            <div className="shrink-0 border-t border-subtle space-y-2 px-2 py-2">
+              {exportError && (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-2 text-xs text-primary"
+                  data-export-error
+                >
+                  {exportError}
+                </p>
+              )}
               <PrimaryCTA
                 icon={<Download className="h-4 w-4" />}
                 label={isExportingPackage ? 'Building Package...' : 'Export Selected Shots'}

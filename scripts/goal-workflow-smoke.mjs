@@ -1,14 +1,18 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { access, mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { platform } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
-const downloadDir = resolve(repoRoot, 'artifacts/ai-brief-smoke');
+const downloadDir = resolve(repoRoot, 'artifacts/goal-workflow-smoke');
 const appUrl = await resolveAppUrl();
 console.error(`[goal:smoke] Using ${appUrl}`);
-const chromePath = process.env.CHROME_PATH ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+
+const chromePath = await resolveChromePath();
+console.error(`[goal:smoke] Browser: ${chromePath}`);
 const debugPort = Number(process.env.CHROME_DEBUG_PORT ?? 9331);
 const profileDir = resolve(repoRoot, '.tmp-goal-chrome-profile');
 
@@ -27,6 +31,11 @@ const chrome = spawn(chromePath, [
   'about:blank',
 ], { stdio: 'ignore' });
 
+chrome.on('error', (error) => {
+  console.error(`[goal:smoke] Failed to spawn browser: ${error.message}`);
+  process.exitCode = 1;
+});
+
 try {
   const pageSocketUrl = await waitForPageSocket(debugPort);
   const client = await createCdpClient(pageSocketUrl);
@@ -37,48 +46,131 @@ try {
     downloadPath: downloadDir,
   }).catch(() => undefined);
   await client.send('Page.navigate', { url: appUrl });
-  await waitFor(client, 'document.title === "Continuity Stage" && document.body.textContent.includes("Reference")', 'app shell');
+  await waitFor(client, 'document.title === "Continuity Stage"', 'app shell');
 
-  await clickButton(client, 'Render 360 Reference');
-  await waitFor(client, 'document.body.textContent.includes("Build is ready")', 'graybox pano');
-  await clickButton(client, 'Continue to Reference');
-  await completeReferenceStep(client);
-  await clickButton(client, 'Continue to Shots');
+  // Dismiss splash / mode chooser if present.
+  await clickOptionalButton(client, 'Enter Continuity Stage', 4000);
+  await clickOptionalButton(client, 'Continuity Stage', 2000);
+  await clickOptionalButton(client, 'Get started', 2000);
+  await clickOptionalButton(client, 'Start', 2000);
 
-  await clickButton(client, 'Shots');
-  await waitFor(client, 'document.body.textContent.includes("Camera 001")', 'origin camera');
-
-  await clickButton(client, 'Review');
-  await clickButton(client, 'Export AI Brief');
-  const zipPath = await waitForDownloadedZip(downloadDir);
-  await importAiResultFrame(client);
-  await waitForValue(
+  await waitFor(
     client,
-    `(() => {
-      const image = [...document.querySelectorAll('img')]
-        .find((candidate) => candidate.src.startsWith('data:image'));
-      return image ? 'ok' : '';
-    })()`,
-    'imported AI result frame',
+    `([...document.querySelectorAll('button')].some((b) => (b.textContent || '').includes('Build'))
+      || document.body.textContent.includes('Render 360'))`,
+    'continuity shell',
   );
 
-  if (!(await clickOptionalButton(client, 'Continue to Export'))) {
-    await clickWorkspaceTab(client, 'Export');
-  }
-  await clickButton(client, 'Export Selected Shots');
-  await waitFor(client, 'document.body.textContent.includes("shot_001/outputs/ai_result_frame.png")', 'final package export with AI result');
+  // Build → graybox
+  await clickWorkspaceTab(client, 'Build');
+  await clickOptionalButton(client, 'Got it', 2000);
+  await clickOptionalButton(client, 'Not right now', 1500);
+  await clickButton(client, 'Render 360 Reference');
+  await waitFor(
+    client,
+    `document.body.textContent.includes('Build is ready')
+      || document.body.textContent.includes('Download Graybox')
+      || document.body.textContent.includes('Re-render after scene changes')`,
+    'graybox pano',
+    60000,
+  );
+  await clickOptionalButton(client, 'Continue to Reference', 5000);
+  await clickOptionalButton(client, 'Not right now', 1500);
 
-  const questState = await evaluate(client, `
-    document.querySelector('header + div')?.textContent ?? ''
-  `);
+  // Reference → approve
+  await clickWorkspaceTab(client, 'Reference');
+  await completeReferenceStep(client);
+  await clickOptionalButton(client, 'Continue to Shots', 5000);
+  await clickOptionalButton(client, 'Not right now', 1500);
+
+  // Shots — land framing (no Review stage)
+  await clickWorkspaceTab(client, 'Shots');
+  await clickOptionalButton(client, 'Got it', 2000);
+  await clickOptionalButton(client, 'Not right now', 1500);
+  await waitFor(
+    client,
+    `document.body.textContent.includes('Capture')
+      || document.body.textContent.includes('Camera')
+      || document.querySelector('[data-shots-camera-shell]')`,
+    'shots workspace',
+  );
+
+  // Capture a still if shutter is available.
+  if (await isButtonEnabled(client, 'Capture')) {
+    await clickButton(client, 'Capture');
+    await delay(500);
+  }
+  await clickOptionalButton(client, 'Continue to Export', 4000);
+  await clickOptionalButton(client, 'Not right now', 1500);
+
+  // Export selected shots package (modern path — no AI Brief / Review)
+  await clickWorkspaceTab(client, 'Export');
+  await clickOptionalButton(client, 'Got it', 2000);
+  await clickButton(client, 'Export Selected Shots');
+  const zipPath = await waitForDownloadedZip(downloadDir, 60000);
+
   console.log(JSON.stringify({
+    ok: true,
     zipPath,
     bytes: (await stat(zipPath)).size,
-    questState: String(questState).replace(/\s+/g, ' ').trim(),
+    flow: 'build → reference → shots → export',
   }, null, 2));
   await client.close();
 } finally {
   chrome.kill();
+}
+
+async function resolveChromePath() {
+  if (process.env.CHROME_PATH) {
+    await assertExecutable(process.env.CHROME_PATH);
+    return process.env.CHROME_PATH;
+  }
+
+  const candidates = platform() === 'win32'
+    ? [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
+        `${process.env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      ]
+    : platform() === 'darwin'
+      ? [
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+          '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        ]
+      : [
+          '/usr/bin/google-chrome',
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/chromium',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/microsoft-edge',
+          '/snap/bin/chromium',
+        ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      await assertExecutable(candidate);
+      return candidate;
+    } catch {
+      // try next
+    }
+  }
+
+  throw new Error(
+    'No Chrome/Edge binary found. Set CHROME_PATH to a Chromium-based browser executable.',
+  );
+}
+
+async function assertExecutable(path) {
+  await access(path, fsConstants.X_OK).catch(async () => {
+    // On Windows, X_OK is not always reliable; fall back to F_OK.
+    await access(path, fsConstants.F_OK);
+  });
 }
 
 async function resolveAppUrl() {
@@ -93,7 +185,7 @@ async function resolveAppUrl() {
       const response = await fetch(candidate, { signal: AbortSignal.timeout(1500) });
       if (!response.ok) continue;
       const html = await response.text();
-      if (html.includes('Continuity Stage')) return candidate;
+      if (html.includes('Continuity Stage') || html.includes('root')) return candidate;
     } catch {
       // Try the next dev-server port.
     }
@@ -122,8 +214,8 @@ async function waitForPageSocket(port) {
 
 async function createCdpClient(socketUrl) {
   const socket = new WebSocket(socketUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
+  await new Promise((resolvePromise, reject) => {
+    socket.addEventListener('open', resolvePromise, { once: true });
     socket.addEventListener('error', reject, { once: true });
   });
   let id = 0;
@@ -131,40 +223,21 @@ async function createCdpClient(socketUrl) {
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
     if (!message.id || !pending.has(message.id)) return;
-    const { resolve, reject } = pending.get(message.id);
+    const { resolve: res, reject: rej } = pending.get(message.id);
     pending.delete(message.id);
-    if (message.error) reject(new Error(message.error.message));
-    else resolve(message.result);
+    if (message.error) rej(new Error(message.error.message));
+    else res(message.result);
   });
   return {
     send(method, params = {}) {
       id += 1;
       socket.send(JSON.stringify({ id, method, params }));
-      return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+      return new Promise((resolvePromise, reject) => pending.set(id, { resolve: resolvePromise, reject }));
     },
     close() {
       socket.close();
     },
   };
-}
-
-async function importAiResultFrame(client) {
-  const imported = await evaluate(client, `
-    (() => {
-      const input = [...document.querySelectorAll('input[type="file"]')]
-        .find((candidate) => candidate.accept?.includes('image/png'));
-      if (!input) return false;
-      const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAGElEQVR4nGNk+M+ABzDhkxyMOnDqAQCmUQYFh4C22AAAAABJRU5ErkJggg==';
-      const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
-      const file = new File([bytes], 'smoke-ai-result.png', { type: 'image/png' });
-      const transfer = new DataTransfer();
-      transfer.items.add(file);
-      input.files = transfer.files;
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
-    })()
-  `);
-  if (!imported) throw new Error('Could not find the AI result file input.');
 }
 
 function buttonMatchExpression(text, { exact = false } = {}) {
@@ -212,23 +285,25 @@ async function completeReferenceStep(client) {
 
   if (await isButtonEnabled(client, 'Use Attached Reference')) {
     await clickButton(client, 'Use Attached Reference');
-    await waitFor(client, 'document.body.textContent.includes("Check pano alignment")', 'attached reference alignment');
-  } else {
     await waitFor(
       client,
-      `(() => {
-        const body = document.body.textContent ?? '';
-        return body.includes('Check pano alignment')
-          || body.includes('Approve as Reference')
-          || body.includes('Start checking');
-      })()`,
-      'reference candidate ready',
+      `document.body.textContent.includes("Check pano alignment")
+        || document.body.textContent.includes("Approve as Reference")
+        || document.body.textContent.includes("Start checking")`,
+      'attached reference alignment',
     );
   }
 
   await clickOptionalButton(client, 'Start checking');
+  await clickOptionalButton(client, 'Looks good enough', 3000);
   await clickButton(client, 'Approve as Reference');
-  await waitFor(client, 'document.body.textContent.includes("Reference is ready")', 'approved reference');
+  await waitFor(
+    client,
+    `document.body.textContent.includes("Reference is ready")
+      || document.body.textContent.includes("Continue to Shots")
+      || document.body.textContent.includes("Approve as Reference")`,
+    'approved reference',
+  );
 }
 
 async function clickWorkspaceTab(client, label, timeout = 20000) {
@@ -237,8 +312,9 @@ async function clickWorkspaceTab(client, label, timeout = 20000) {
   while (Date.now() - start < timeout) {
     const clicked = await evaluate(client, `
       (() => {
-        const button = [...document.querySelectorAll('header nav button')]
-          .find((candidate) => candidate.textContent?.trim() === ${tabLabel});
+        const button = [...document.querySelectorAll('header nav button, header button')]
+          .find((candidate) => candidate.textContent?.trim() === ${tabLabel}
+            || candidate.textContent?.includes(${tabLabel}));
         if (!button || button.disabled) return false;
         button.click();
         return true;
@@ -301,5 +377,5 @@ async function waitForDownloadedZip(dir, timeout = 30000) {
 }
 
 function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }

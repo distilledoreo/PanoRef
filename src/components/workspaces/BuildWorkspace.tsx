@@ -65,14 +65,14 @@ const primitiveTypes: SceneObjectType[] = [
 ];
 
 const trayItems: Array<{ type: SceneObjectType; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { type: 'box', label: 'Block', icon: Box },
-  { type: 'floor', label: 'Plane', icon: Square },
+  { type: 'box', label: 'Box', icon: Box },
+  { type: 'floor', label: 'Floor', icon: Square },
   { type: 'wall', label: 'Wall', icon: Layers },
   { type: 'doorway', label: 'Doorway', icon: DoorOpen },
   { type: 'tree_blob', label: 'Tree', icon: TreeDeciduous },
-  { type: 'column', label: 'Cylinder', icon: Circle },
+  { type: 'column', label: 'Column', icon: Circle },
   { type: 'stairs', label: 'Stairs', icon: SquareStack },
-  { type: 'sun_marker', label: 'Light', icon: Sun },
+  { type: 'sun_marker', label: 'Sun', icon: Sun },
   { type: 'arch', label: 'Arch', icon: DoorOpen },
   { type: 'terrain_mass', label: 'Terrain', icon: Mountain },
   { type: 'background_card', label: 'Backdrop', icon: Columns3 },
@@ -422,7 +422,7 @@ export function BuildWorkspace() {
         {/* Isolated stacking context so the viewport canvas cannot swallow CTA clicks. */}
         <div
           data-build-graybox-cta
-          className="pointer-events-auto absolute bottom-6 right-6 z-30 flex flex-col items-end gap-2"
+          className="pointer-events-auto absolute bottom-[5.5rem] right-3 z-30 flex max-w-[min(100%-1.5rem,20rem)] flex-col items-end gap-2 sm:bottom-6 sm:right-6 sm:max-w-none"
         >
           {grayboxAsset && grayboxPano ? (
             <>
@@ -554,9 +554,9 @@ function BuildObjectTray({
   const [toolsOpen, setToolsOpen] = useState(false);
 
   return (
-    <div className="pointer-events-none absolute bottom-6 left-6 z-10 max-w-[calc(100%-2rem)]">
+    <div className="pointer-events-none absolute bottom-3 left-3 z-10 w-[min(100%-1.5rem,calc(100%-1.5rem))] max-w-[calc(100vw-1.5rem)] sm:bottom-6 sm:left-6 sm:max-w-[calc(100%-2rem)]">
       {toolsOpen && (
-        <div className="pointer-events-auto mb-2 w-72 rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-3 shadow-soft backdrop-blur">
+        <div className="pointer-events-auto mb-2 max-h-[40vh] w-full max-w-72 overflow-y-auto rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-3 shadow-soft backdrop-blur">
           <div className="mb-2 grid grid-cols-3 gap-2">
             <TrayButton active={buildMode === 'select'} label="Select" compact onClick={() => onModeChange('select')}>
               <Move3D className="h-4 w-4" />
@@ -584,12 +584,12 @@ function BuildObjectTray({
           </div>
         </div>
       )}
-      <div className="pointer-events-auto rounded-[22px] border border-subtle bg-surface-overlay px-3 py-2.5 shadow-[var(--tray-glow)] backdrop-blur dark:border-[var(--accent)]/25">
-        <div className="flex items-center gap-1">
+      <div className="pointer-events-auto max-w-full rounded-[22px] border border-subtle bg-surface-overlay px-2 py-2 shadow-[var(--tray-glow)] backdrop-blur dark:border-[var(--accent)]/25 sm:px-3 sm:py-2.5">
+        <div className="flex max-w-full items-stretch gap-1 overflow-x-auto overscroll-x-contain pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {primaryTrayItems.map(({ type, label, icon: Icon }) => {
             const shortcut = getPrimitiveShortcutLabel(type);
             return (
-              <div key={type}>
+              <div key={type} className="shrink-0">
                 <TrayButton
                   active={buildMode === 'place' && activePrimitive === type}
                   label={label}
@@ -601,12 +601,14 @@ function BuildObjectTray({
               </div>
             );
           })}
-          <TrayButton active={toolsOpen} label="More" onClick={() => setToolsOpen((open) => !open)}>
-            <Wrench className="h-5 w-5" />
-          </TrayButton>
+          <div className="shrink-0">
+            <TrayButton active={toolsOpen} label="More" onClick={() => setToolsOpen((open) => !open)}>
+              <Wrench className="h-5 w-5" />
+            </TrayButton>
+          </div>
         </div>
         {toolsOpen && (
-          <p className="mt-2 border-t border-subtle pt-2 text-[10px] leading-relaxed text-muted" data-build-shortcuts-hint>
+          <p className="mt-2 hidden border-t border-subtle pt-2 text-[10px] leading-relaxed text-muted sm:block" data-build-shortcuts-hint>
             Keys: 1–9/0 stamp · V/Esc select · O origin · G snap · D dup · R rotate · [ ] scale · T/E/S gizmo · I precision · Del delete · Ctrl+Z build undo · Ctrl+Shift+Z build redo
           </p>
         )}
@@ -635,7 +637,7 @@ function TrayButton({
       type="button"
       onClick={onClick}
       title={shortcut ? `${label} (${shortcut})` : label}
-      className={`relative flex shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition ${
+      className={`relative flex min-h-11 shrink-0 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1.5 transition ${
         compact ? 'w-full' : 'w-16'
       } ${
         active ? 'bg-accent-soft text-accent' : 'text-secondary hover:bg-surface-muted hover:text-primary'

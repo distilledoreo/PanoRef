@@ -117,7 +117,9 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain('letterboxEnabled: false');
     expect(guidance).toContain('showReferencePromptBuilder');
     expect(guidance).toContain('seenObjectiveWorkspaces.includes(\'reference\')');
-    expect(guidance).toMatch(/advanceOpen && Boolean\(advancePrompt\)[\s\S]*onClose=\{handleAdvanceDismiss\}/);
+    expect(guidance).toMatch(/activeDialog === 'advance' && Boolean\(advancePrompt\)[\s\S]*onClose=\{handleAdvanceDismiss\}/);
+    expect(guidance).toContain("type GuidanceDialog = 'none' | 'objective' | 'advance' | 'alignmentIntro' | 'alignmentRetry'");
+    expect(guidance).toContain('lastHandledObjectiveRequest');
     expect(referenceGuide).toContain('Your graybox 360 is ready');
     expect(referenceGuide).toContain('Download the graybox image.');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
