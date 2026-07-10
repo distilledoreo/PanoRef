@@ -23,7 +23,7 @@ function snap(name: string, selectedObjectId?: string): BuildHistorySnapshot {
     objects: [object],
     panoOrigin: [0, 1.65, 0],
     panoRotation: [0, 0, 0],
-    selectedObjectId,
+    selectedObjectIds: selectedObjectId ? [selectedObjectId] : [],
   });
 }
 
@@ -56,7 +56,7 @@ describe('buildHistory', () => {
     const undone = undoBuildHistory(stacks, after);
     expect(undone).toBeTruthy();
     expect(undone!.restored.objects[0].name).toBe('before');
-    expect(undone!.restored.selectedObjectId).toBe('sel-1');
+    expect(undone!.restored.selectedObjectIds).toEqual(['sel-1']);
     expect(canUndoBuild(undone!.stacks)).toBe(false);
     expect(canRedoBuild(undone!.stacks)).toBe(true);
 

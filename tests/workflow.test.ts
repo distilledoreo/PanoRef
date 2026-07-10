@@ -135,6 +135,34 @@ describe('workflow resolver', () => {
     expect(resolveWorkflowAdvancePrompt(context, [prompt!.promptKey])).toBeUndefined();
   });
 
+  it('keeps Build/Reference advance keys global and Shots once-per-session', () => {
+    expect(buildAdvancePromptKey('build', 'reference', 'shot-a'))
+      .toBe(buildAdvancePromptKey('build', 'reference', 'shot-b'));
+    expect(buildAdvancePromptKey('reference', 'shots', 'shot-a'))
+      .toBe('reference->shots:global');
+    expect(buildAdvancePromptKey('shots', 'export', 'shot-a'))
+      .toBe(buildAdvancePromptKey('shots', 'export', 'shot-b'));
+    expect(buildAdvancePromptKey('shots', 'export')).toBe('shots->export:session');
+
+    const project = withGraybox();
+    project.workflow.grayboxApprovedForReferenceAt = new Date().toISOString();
+    const shotA = project.shots[0].id;
+    project.workflow.shotFramingAcceptedAtByShotId[shotA] = new Date().toISOString();
+    const promptA = resolveWorkflowAdvancePrompt({
+      project,
+      workspace: 'shots',
+      selectedShotId: shotA,
+      shotCameraFlying: false,
+    });
+    expect(promptA?.promptKey).toBe('shots->export:session');
+    expect(resolveWorkflowAdvancePrompt({
+      project,
+      workspace: 'shots',
+      selectedShotId: shotA,
+      shotCameraFlying: false,
+    }, [promptA!.promptKey])).toBeUndefined();
+  });
+
   it('highlights the next major action for each workspace', () => {
     const project = createDefaultProject();
     expect(resolveWorkspacePrimaryAction({ project, workspace: 'build', shotCameraFlying: false })?.id).toBe('render-graybox');

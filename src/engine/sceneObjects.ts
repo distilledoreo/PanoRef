@@ -160,7 +160,7 @@ export function resolveSurfaceStyle(object: SceneObject): ObjectSurfaceStyle {
 export function buildScene(
   project: LocationProject,
   options: {
-    selectedObjectId?: string;
+    selectedObjectIds?: string[];
     selectedShotId?: string;
     hideShotFrustums?: boolean;
     showHelpers?: boolean;
@@ -218,7 +218,11 @@ export function buildScene(
   for (const object of project.scene.objects) {
     if (!object.visible) continue;
     if (hiddenTypes.has(object.type)) continue;
-    const mesh = createObject3D(object, object.id === options.selectedObjectId, theme);
+    const mesh = createObject3D(
+      object,
+      Boolean(options.selectedObjectIds?.includes(object.id)),
+      theme,
+    );
     mesh.userData.sceneObjectId = object.id;
     scene.add(mesh);
   }

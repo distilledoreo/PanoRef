@@ -56,7 +56,7 @@ describe('sandbox build interactions', () => {
   it('stores placed objects without changing project schema version', () => {
     useContinuityStore.setState({
       project: createDefaultProject(),
-      selectedObjectId: undefined,
+      selectedObjectIds: [],
       gridSnap: true,
       buildMode: 'place',
       activePrimitive: 'box',
@@ -66,7 +66,7 @@ describe('sandbox build interactions', () => {
     const state = useContinuityStore.getState();
 
     expect(state.project.schemaVersion).toBe('0.1');
-    expect(state.selectedObjectId).toBeUndefined();
+    expect(state.selectedObjectIds).toEqual([]);
     expect(state.buildMode).toBe('place');
     expect(object.transform.position).toEqual([1, 0.7, 1.5]);
   });
@@ -76,7 +76,7 @@ describe('sandbox build interactions', () => {
     const selected = project.scene.objects[1];
     useContinuityStore.setState({
       project,
-      selectedObjectId: selected.id,
+      selectedObjectIds: [selected.id],
       buildMode: 'select',
       activePrimitive: 'box',
     });
@@ -86,13 +86,13 @@ describe('sandbox build interactions', () => {
     const state = useContinuityStore.getState();
     expect(state.buildMode).toBe('place');
     expect(state.activePrimitive).toBe('wall');
-    expect(state.selectedObjectId).toBeUndefined();
+    expect(state.selectedObjectIds).toEqual([]);
   });
 
   it('moves unlocked objects to a new ground point when dragged', () => {
     const project = createDefaultProject();
     const object = project.scene.objects[2];
-    useContinuityStore.setState({ project, gridSnap: true, selectedObjectId: object.id });
+    useContinuityStore.setState({ project, gridSnap: true, selectedObjectIds: [object.id] });
 
     useContinuityStore.getState().moveObjectToGroundPoint(object.id, [2.4, 0, -1.8]);
 
@@ -115,7 +115,7 @@ describe('sandbox build interactions', () => {
       snapToGrid: true,
     });
     project.scene.objects.push(floor);
-    useContinuityStore.setState({ project, gridSnap: true, selectedObjectId: floor.id });
+    useContinuityStore.setState({ project, gridSnap: true, selectedObjectIds: [floor.id] });
 
     useContinuityStore.getState().moveObjectToGroundPoint(floor.id, [4.2, 0, 2.8]);
 
@@ -127,7 +127,7 @@ describe('sandbox build interactions', () => {
     const project = createDefaultProject();
     const object = project.scene.objects[2];
     const originalY = object.transform.position[1];
-    useContinuityStore.setState({ project, gridSnap: true, selectedObjectId: object.id });
+    useContinuityStore.setState({ project, gridSnap: true, selectedObjectIds: [object.id] });
 
     useContinuityStore.getState().moveObjectPosition(object.id, [2.4, originalY + 1.25, -1.8]);
 
@@ -184,7 +184,7 @@ describe('sandbox build interactions', () => {
     const object = project.scene.objects[1];
     useContinuityStore.setState({
       project,
-      selectedObjectId: object.id,
+      selectedObjectIds: [object.id],
       buildHistoryPast: [],
       buildHistoryFuture: [],
       buildHistoryBatchDepth: 0,
@@ -254,7 +254,7 @@ describe('sandbox build interactions', () => {
 
     useContinuityStore.setState({
       project,
-      selectedObjectId: object.id,
+      selectedObjectIds: [object.id],
       buildHistoryPast: [],
       buildHistoryFuture: [],
       buildHistoryBatchDepth: 0,
@@ -264,7 +264,7 @@ describe('sandbox build interactions', () => {
 
     useContinuityStore.getState().removeObject(object.id);
 
-    expect(useContinuityStore.getState().selectedObjectId).toBeUndefined();
+    expect(useContinuityStore.getState().selectedObjectIds).toEqual([]);
     expect(
       useContinuityStore.getState().project.scene.objects.some((item) => item.id === object.id),
     ).toBe(false);
@@ -278,11 +278,13 @@ describe('sandbox build interactions', () => {
         objects: project.scene.objects,
         panoOrigin: project.scene.panoOrigin,
         panoRotation: project.scene.panoRotation,
+        selectedObjectIds: [],
       }],
       buildHistoryFuture: [{
         objects: project.scene.objects,
         panoOrigin: project.scene.panoOrigin,
         panoRotation: project.scene.panoRotation,
+        selectedObjectIds: [],
       }],
       buildHistoryBatchDepth: 2,
       buildHistoryBatchCaptured: true,
@@ -306,7 +308,7 @@ describe('sandbox build interactions', () => {
     const project = createDefaultProject();
     const object = { ...project.scene.objects[1], locked: true };
     project.scene.objects[1] = object;
-    useContinuityStore.setState({ project, gridSnap: true, selectedObjectId: object.id });
+    useContinuityStore.setState({ project, gridSnap: true, selectedObjectIds: [object.id] });
 
     useContinuityStore.getState().moveObjectToGroundPoint(object.id, [4.2, 0, -2.8]);
 

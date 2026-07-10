@@ -18,7 +18,7 @@ export interface BuildHistorySnapshot {
   objects: SceneObject[];
   panoOrigin: Vec3;
   panoRotation: Euler;
-  selectedObjectId?: string;
+  selectedObjectIds: string[];
 }
 
 export interface BuildHistoryStacks {
@@ -34,13 +34,13 @@ export function captureBuildSnapshot(params: {
   objects: SceneObject[];
   panoOrigin: Vec3;
   panoRotation: Euler;
-  selectedObjectId?: string;
+  selectedObjectIds?: string[];
 }): BuildHistorySnapshot {
   return cloneBuildSnapshot({
     objects: params.objects,
     panoOrigin: params.panoOrigin,
     panoRotation: params.panoRotation,
-    selectedObjectId: params.selectedObjectId,
+    selectedObjectIds: params.selectedObjectIds ?? [],
   });
 }
 
@@ -57,7 +57,8 @@ export function vec3NearlyEqual(
 }
 
 export function buildSnapshotsEqual(a: BuildHistorySnapshot, b: BuildHistorySnapshot): boolean {
-  if (a.selectedObjectId !== b.selectedObjectId) return false;
+  if (a.selectedObjectIds.length !== b.selectedObjectIds.length) return false;
+  if (a.selectedObjectIds.some((id, index) => id !== b.selectedObjectIds[index])) return false;
   if (!vec3NearlyEqual(a.panoOrigin, b.panoOrigin)) return false;
   if (!vec3NearlyEqual(a.panoRotation, b.panoRotation)) return false;
   // Structural scene equality (order-sensitive). Fast enough for build-scale scenes.

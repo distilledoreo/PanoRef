@@ -44,6 +44,13 @@ import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
 import { FullBleedLayout } from './WorkspaceShell';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
+const STATUS_LABELS: Record<ShotStatus, string> = {
+  planned: 'Planned',
+  exported: 'Exported',
+  needs_fix: 'Needs fix',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
 
 /** Quick picks shown on the camera chrome while capturing a move end. */
 const VIDEO_DURATION_PRESETS_SECONDS = [1, 2, 3, 5, 8] as const;
@@ -71,6 +78,7 @@ export function ShotsWorkspace() {
     setShotCameraFlying,
     landShotFraming,
     attachCameraMoveVideoToShot,
+    attachViewportRenderToShot,
     setWorkspace,
     setActivePano,
   } = useContinuityStore();
@@ -78,13 +86,17 @@ export function ShotsWorkspace() {
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
   const linkedAsset = linkedPano ? project.assets.assets[linkedPano.imageAssetId] : undefined;
   const draftCameraRef = useRef<CameraData | undefined>();
-  const [framePreviewUrl, setFramePreviewUrl] = useState<string | undefined>();
+  /** Transient live previews keyed by shot id — never reuse across shots. */
+  const [framePreviewByShotId, setFramePreviewByShotId] = useState<Record<string, string>>({});
+  const framePreviewUrl = selectedShot ? framePreviewByShotId[selectedShot.id] : undefined;
   const [isRenderingFrame, setIsRenderingFrame] = useState(false);
   const [isExportingFrame, setIsExportingFrame] = useState(false);
   const [cameraMovePreviewUrl, setCameraMovePreviewUrl] = useState<string | undefined>();
   const [isExportingCameraMove, setIsExportingCameraMove] = useState(false);
   const [cameraMoveProgress, setCameraMoveProgress] = useState(0);
   const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
+  const [snapshotError, setSnapshotError] = useState<string | undefined>();
+  const cameraMoveAbortRef = useRef<{ cancelled: boolean; abort?: () => void }>({ cancelled: false });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -139,13 +151,23 @@ export function ShotsWorkspace() {
     : undefined;
   const supportedMp4MimeType = getSupportedCameraMoveMp4MimeType();
 
+  const setShotFramePreview = useCallback((shotId: string, dataUrl: string) => {
+    setFramePreviewByShotId((current) => ({ ...current, [shotId]: dataUrl }));
+  }, []);
+
   const exportCameraFrame = useCallback(async () => {
     const previewShot = getPreviewShot();
     if (!previewShot) return;
     setIsExportingFrame(true);
     try {
       const frame = await renderShotFrame(project, previewShot);
-      setFramePreviewUrl(frame.dataUrl);
+      setShotFramePreview(previewShot.id, frame.dataUrl);
+      attachViewportRenderToShot(previewShot.id, {
+        name: exportFrameFileName,
+        dataUrl: frame.dataUrl,
+        width: frame.width,
+        height: frame.height,
+      });
       downloadDataUrl(frame.dataUrl, exportFrameFileName);
       if (!shotCameraFlying) {
         updateShot(previewShot.id, { status: 'exported' });
@@ -153,7 +175,7 @@ export function ShotsWorkspace() {
     } finally {
       setIsExportingFrame(false);
     }
-  }, [exportFrameFileName, getPreviewShot, project, shotCameraFlying, updateShot]);
+  }, [attachViewportRenderToShot, exportFrameFileName, getPreviewShot, project, setShotFramePreview, shotCameraFlying, updateShot]);
 
   const updateCameraMoveKeyframes = useCallback((keyframes: typeof cameraMoveKeyframes) => {
     if (!selectedShot) return;
@@ -198,7 +220,7 @@ export function ShotsWorkspace() {
     if (!selectedShot) return;
     const mimeType = getSupportedCameraMoveMp4MimeType();
     if (!mimeType) {
-      setCameraMoveError('MP4 export is not supported in this browser.');
+      setCameraMoveError('MP4 export is not supported in this browser. Try Chrome or Edge.');
       return;
     }
     if (!hasRenderableCameraMove(selectedShot.cameraKeyframes)) {
@@ -206,15 +228,23 @@ export function ShotsWorkspace() {
       return;
     }
 
+    const abortController = new AbortController();
+    cameraMoveAbortRef.current = { cancelled: false, abort: () => abortController.abort() };
     setIsExportingCameraMove(true);
     setCameraMoveProgress(0);
     setCameraMoveError(undefined);
+
     try {
       const video = await renderShotCameraMoveMp4(project, selectedShot, {
         mimeType,
         frameRate: 30,
-        onProgress: setCameraMoveProgress,
+        timeoutMs: 90_000,
+        signal: abortController.signal,
+        onProgress: (progress) => {
+          if (!cameraMoveAbortRef.current.cancelled) setCameraMoveProgress(progress);
+        },
       });
+      if (cameraMoveAbortRef.current.cancelled) return;
       const asset = attachCameraMoveVideoToShot(selectedShot.id, {
         name: cameraMoveFileName,
         dataUrl: video.dataUrl,
@@ -227,9 +257,13 @@ export function ShotsWorkspace() {
       setCameraMovePreviewUrl(asset.uri);
       downloadDataUrl(asset.uri, asset.name);
     } catch (error) {
-      setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
+      if (!cameraMoveAbortRef.current.cancelled) {
+        setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
+      }
     } finally {
-      setIsExportingCameraMove(false);
+      if (!cameraMoveAbortRef.current.cancelled) {
+        setIsExportingCameraMove(false);
+      }
     }
   }, [attachCameraMoveVideoToShot, cameraMoveFileName, project, selectedShot]);
 
@@ -278,9 +312,11 @@ export function ShotsWorkspace() {
 
     let cancelled = false;
     setIsRenderingFrame(true);
+    // Transient preview only — do not write project assets here (would re-trigger this effect).
     void renderShotFrame(project, previewShot)
       .then((frame) => {
-        if (!cancelled) setFramePreviewUrl(frame.dataUrl);
+        if (cancelled) return;
+        setShotFramePreview(previewShot.id, frame.dataUrl);
       })
       .finally(() => {
         if (!cancelled) setIsRenderingFrame(false);
@@ -289,7 +325,7 @@ export function ShotsWorkspace() {
     return () => {
       cancelled = true;
     };
-  }, [framePreviewKey, getPreviewShot, project, shotCameraFlying]);
+  }, [framePreviewKey, getPreviewShot, project, setShotFramePreview, shotCameraFlying]);
 
   const handleFramingCameraChange = useCallback((camera: CameraData) => {
     if (!selectedShot) return;
@@ -303,7 +339,7 @@ export function ShotsWorkspace() {
     setShotCameraFlying(true, options);
   }, [selectedShot?.camera, setShotCameraFlying]);
 
-  const snapshotPreview = useCallback((shot: { id: string; exportSettings: { width: number; height: number }; camera: CameraData }, camera: CameraData) => {
+  const snapshotPreview = useCallback((shot: { id: string; name?: string; exportSettings: { width: number; height: number }; camera: CameraData }, camera: CameraData) => {
     // Use latest project from the store so freshly created shots are not missing
     // from a stale React closure after addCamera.
     const latestProject = useContinuityStore.getState().project;
@@ -316,10 +352,21 @@ export function ShotsWorkspace() {
         target: [...camera.target] as CameraData['target'],
       },
     };
-    void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number]).then((frame) => {
-      setFramePreviewUrl(frame.dataUrl);
-    });
-  }, []);
+    setSnapshotError(undefined);
+    void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number])
+      .then((frame) => {
+        setShotFramePreview(shot.id, frame.dataUrl);
+        useContinuityStore.getState().attachViewportRenderToShot(shot.id, {
+          name: `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}_viewport.png`,
+          dataUrl: frame.dataUrl,
+          width: frame.width,
+          height: frame.height,
+        });
+      })
+      .catch(() => {
+        setSnapshotError('Could not save the shot preview. Try Capture again.');
+      });
+  }, [setShotFramePreview]);
 
   /**
    * Still capture = iPhone shutter: commit pose to gallery, keep viewfinder live.
@@ -652,7 +699,7 @@ export function ShotsWorkspace() {
                         <ShotThumbnail
                           project={project}
                           shot={shot}
-                          overrideSrc={shot.id === selectedShot?.id ? framePreviewUrl : undefined}
+                          overrideSrc={framePreviewByShotId[shot.id]}
                           className="h-20 w-28 object-cover"
                         />
                         <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
@@ -667,7 +714,7 @@ export function ShotsWorkspace() {
                           removeShot(shot.id);
                         }}
                         disabled={!canDelete}
-                        className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                        className="absolute right-1 top-1 inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
                         aria-label={canDelete ? `Delete shot ${shot.shotNumber}` : 'Cannot delete the only shot'}
                         title={canDelete ? 'Delete shot' : 'Keep at least one shot'}
                         data-shots-library-delete
@@ -741,7 +788,7 @@ export function ShotsWorkspace() {
                       key={seconds}
                       type="button"
                       onClick={() => changeCameraMoveDuration(seconds)}
-                      className={`min-w-[2.5rem] rounded-full px-2.5 py-1 text-xs font-bold tabular-nums transition ${
+                      className={`min-h-11 min-w-[2.75rem] rounded-full px-3 py-2 text-xs font-bold tabular-nums transition ${
                         active
                           ? 'bg-white text-zinc-900 shadow-sm'
                           : 'text-white/80 hover:bg-white/10 hover:text-white'
@@ -754,6 +801,26 @@ export function ShotsWorkspace() {
                 })}
               </div>
             </div>
+          )}
+
+          {captureMode === 'video' && (!supportedMp4MimeType || cameraMoveError) && (
+            <p
+              role="alert"
+              data-shots-camera-move-status
+              className="pointer-events-auto max-w-md rounded-lg border border-amber-200/70 bg-black/65 px-3 py-2 text-center text-xs text-amber-100 shadow-soft backdrop-blur-sm"
+            >
+              {cameraMoveError ?? 'MP4 export is not supported in this browser. Try Chrome or Edge.'}
+            </p>
+          )}
+
+          {captureMode === 'still' && snapshotError && (
+            <p
+              role="alert"
+              data-shots-snapshot-status
+              className="pointer-events-auto max-w-md rounded-lg border border-red-300/70 bg-black/65 px-3 py-2 text-center text-xs text-red-100 shadow-soft backdrop-blur-sm"
+            >
+              {snapshotError}
+            </p>
           )}
 
           {/* Shutter row */}
@@ -771,9 +838,7 @@ export function ShotsWorkspace() {
                 <ShotThumbnail
                   project={project}
                   shot={libraryThumbShot}
-                  overrideSrc={
-                    libraryThumbShot.id === selectedShot?.id ? framePreviewUrl : undefined
-                  }
+                  overrideSrc={framePreviewByShotId[libraryThumbShot.id]}
                   className="h-full w-full object-cover"
                   compact
                 />
@@ -865,7 +930,9 @@ export function ShotsWorkspace() {
             </Field>
             <Field label="Status">
               <Select value={selectedShot.status} onChange={(event) => updateShot(selectedShot.id, { status: event.target.value as ShotStatus })}>
-                {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                {statuses.map((status) => (
+                  <option key={status} value={status}>{STATUS_LABELS[status]}</option>
+                ))}
               </Select>
             </Field>
             <Field label="Description">
@@ -1050,7 +1117,7 @@ function ModePill({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition ${
+      className={`min-h-11 rounded-full px-5 py-2.5 text-xs font-bold uppercase tracking-wider transition ${
         active
           ? 'bg-white text-zinc-900 shadow-sm'
           : 'text-white/70 hover:text-white'

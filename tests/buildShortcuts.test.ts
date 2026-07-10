@@ -51,13 +51,34 @@ describe('Build keyboard shortcuts', () => {
     expect(resolveBuildShortcut({ key: 'Backspace' })).toEqual({ kind: 'delete' });
   });
 
-  it('suppresses shortcuts from editable fields and browser modifier chords', () => {
+  it('suppresses shortcuts from editable fields and unsupported browser modifier chords', () => {
     expect(resolveBuildShortcut({ key: '3', target: { tagName: 'INPUT' } as unknown as EventTarget })).toBeUndefined();
     expect(resolveBuildShortcut({ key: 'Backspace', target: { tagName: 'TEXTAREA' } as unknown as EventTarget })).toBeUndefined();
     expect(resolveBuildShortcut({ key: 'd', target: { tagName: 'SELECT' } as unknown as EventTarget })).toBeUndefined();
     expect(resolveBuildShortcut({ key: 'v', target: { isContentEditable: true } as unknown as EventTarget })).toBeUndefined();
-    expect(resolveBuildShortcut({ key: 'd', ctrlKey: true })).toBeUndefined();
-    expect(resolveBuildShortcut({ key: 'd', metaKey: true })).toBeUndefined();
+    expect(resolveBuildShortcut({ key: 'b', ctrlKey: true })).toBeUndefined();
+    expect(resolveBuildShortcut({ key: 'b', metaKey: true })).toBeUndefined();
+  });
+
+  it('resolves conventional editor clipboard and selection chords on Ctrl or Cmd', () => {
+    expect(resolveBuildShortcut({ key: 'c', ctrlKey: true })).toEqual({ kind: 'copy' });
+    expect(resolveBuildShortcut({ key: 'x', metaKey: true })).toEqual({ kind: 'cut' });
+    expect(resolveBuildShortcut({ key: 'v', ctrlKey: true })).toEqual({ kind: 'paste', inPlace: false });
+    expect(resolveBuildShortcut({ key: 'v', metaKey: true, shiftKey: true })).toEqual({ kind: 'paste', inPlace: true });
+    expect(resolveBuildShortcut({ key: 'd', ctrlKey: true })).toEqual({ kind: 'duplicate' });
+    expect(resolveBuildShortcut({ key: 'a', metaKey: true })).toEqual({ kind: 'select-all' });
+    expect(resolveBuildShortcut({ key: 'a', ctrlKey: true, shiftKey: true })).toEqual({ kind: 'clear-selection' });
+  });
+
+  it('resolves nudge, framing, visibility, rename, and help shortcuts', () => {
+    expect(resolveBuildShortcut({ key: 'ArrowLeft' })).toEqual({ kind: 'nudge', axis: 'x', direction: -1, multiplier: 1 });
+    expect(resolveBuildShortcut({ key: 'ArrowUp', shiftKey: true })).toEqual({ kind: 'nudge', axis: 'z', direction: -1, multiplier: 10 });
+    expect(resolveBuildShortcut({ key: 'PageDown', altKey: true })).toEqual({ kind: 'nudge', axis: 'y', direction: -1, multiplier: 0.1 });
+    expect(resolveBuildShortcut({ key: 'f' })).toEqual({ kind: 'frame-selection' });
+    expect(resolveBuildShortcut({ key: 'Home' })).toEqual({ kind: 'frame-all' });
+    expect(resolveBuildShortcut({ key: 'h', altKey: true })).toEqual({ kind: 'show-all' });
+    expect(resolveBuildShortcut({ key: 'F2' })).toEqual({ kind: 'rename' });
+    expect(resolveBuildShortcut({ key: '?'})).toEqual({ kind: 'toggle-help' });
   });
 
   it('resolves undo/redo history chords', () => {

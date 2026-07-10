@@ -610,4 +610,30 @@ describe('project workflow logic', () => {
     expect(state.project.shots[0]?.linkedPanoId).toBe(graybox.id);
     expect(state.seenAlignmentIntroForPanoId).toBeUndefined();
   });
+
+  it('replaces a shot viewport preview without retaining its superseded asset', () => {
+    const project = createDefaultProject();
+    useContinuityStore.setState({
+      project,
+      selectedShotId: project.shots[0]?.id,
+    });
+
+    const first = useContinuityStore.getState().attachViewportRenderToShot(project.shots[0].id, {
+      name: 'first_viewport.png',
+      dataUrl: 'data:image/png;base64,first',
+      width: 1920,
+      height: 1080,
+    });
+    const second = useContinuityStore.getState().attachViewportRenderToShot(project.shots[0].id, {
+      name: 'second_viewport.png',
+      dataUrl: 'data:image/png;base64,second',
+      width: 1920,
+      height: 1080,
+    });
+    const state = useContinuityStore.getState();
+
+    expect(state.project.shots[0].assets.viewportRenderAssetId).toBe(second.id);
+    expect(state.project.assets.assets[first.id]).toBeUndefined();
+    expect(state.project.assets.assets[second.id]).toBeTruthy();
+  });
 });

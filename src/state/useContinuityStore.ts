@@ -49,6 +49,19 @@ import {
 import { useThemeStore } from './useThemeStore';
 import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition, snapBuildPoint } from '../engine/sandbox';
 import { normalizeWorkspace } from '../engine/workflow';
+import {
+  BuildClipboardPayload,
+  pasteBuildClipboardObjects,
+} from '../engine/buildClipboard';
+import {
+  normalizeSelectedIds,
+  rotateSelectedObjects,
+  scaleSelectedObjects,
+  selectionPivot,
+  SelectionMode,
+  toggleSelectedId,
+  translateSelectedObjects,
+} from '../engine/buildSelection';
 
 export type BuildMode = 'select' | 'place' | 'pano_origin';
 export type { BuildHistoryMode };
@@ -67,7 +80,9 @@ function clearBuildHistoryCoalesceTimer() {
 interface ContinuityStore {
   project: LocationProject;
   workspace: Workspace;
-  selectedObjectId?: string;
+  selectedObjectIds: string[];
+  buildClipboard?: BuildClipboardPayload;
+  buildClipboardPasteCount: number;
   selectedShotId?: string;
   selectedLandmarkId?: string;
   activePanoId?: string;
@@ -83,6 +98,7 @@ interface ContinuityStore {
   buildHistoryBatchDepth: number;
   buildHistoryBatchCaptured: boolean;
   buildHistoryCoalesceActive: boolean;
+  buildTransformPivot?: Vec3;
   setWorkspace: (workspace: Workspace) => void;
   setProject: (project: LocationProject) => void;
   updateProjectInfo: (updates: Pick<LocationProject, 'name'> | Partial<Pick<LocationProject, 'name' | 'description'>>) => void;
@@ -98,11 +114,25 @@ interface ContinuityStore {
   canRedoBuild: () => boolean;
   addObject: (type: SceneObjectType) => void;
   placeObject: (type: SceneObjectType, point: Vec3) => SceneObject;
-  selectObject: (id?: string) => void;
+  selectObject: (id?: string, mode?: SelectionMode) => void;
+  selectObjectRange: (id: string) => void;
+  selectAllObjects: () => void;
+  clearObjectSelection: () => void;
+  setBuildClipboard: (payload?: BuildClipboardPayload) => void;
   updateObject: (id: string, updates: Partial<SceneObject>, options?: { history?: BuildHistoryMode }) => void;
   moveObjectToGroundPoint: (id: string, point: Vec3) => void;
   moveObjectPosition: (id: string, point: Vec3) => void;
   duplicateObject: (id: string) => SceneObject | undefined;
+  duplicateSelectedObjects: () => SceneObject[];
+  pasteBuildObjects: (payload: BuildClipboardPayload, options?: { inPlace?: boolean }) => SceneObject[];
+  removeSelectedObjects: () => boolean;
+  nudgeSelectedObjects: (delta: Vec3) => boolean;
+  translateSelectedObjectsBy: (delta: Vec3, options?: { history?: BuildHistoryMode }) => boolean;
+  rotateSelectedObjectsBy: (axis: 'x' | 'y' | 'z', degrees: number, options?: { history?: BuildHistoryMode }) => boolean;
+  scaleSelectedObjectsBy: (factors: Vec3, options?: { history?: BuildHistoryMode }) => boolean;
+  toggleSelectedVisibility: () => boolean;
+  toggleSelectedLocked: () => boolean;
+  showAllObjects: () => boolean;
   toggleObjectVisibility: (id: string) => void;
   toggleObjectLocked: (id: string) => void;
   removeObject: (id: string) => void;
@@ -123,6 +153,7 @@ interface ContinuityStore {
   updateShot: (id: string, updates: Partial<Shot>) => void;
   removeShot: (id: string) => void;
   attachCameraMoveVideoToShot: (shotId: string, params: { name: string; dataUrl: string; mimeType: string; width: number; height: number; durationSeconds: number; frameRate: number }) => ProjectAsset;
+  attachViewportRenderToShot: (shotId: string, params: { name: string; dataUrl: string; width: number; height: number }) => ProjectAsset;
   attachAiResultFrameToShot: (shotId: string, params: { name: string; dataUrl: string; width?: number; height?: number }) => ProjectAsset;
   addLandmark: () => Landmark;
   updateLandmark: (id: string, updates: Partial<Landmark>) => void;
@@ -153,7 +184,9 @@ const initialProject = createDefaultProject();
 export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   project: initialProject,
   workspace: 'build',
-  selectedObjectId: undefined,
+  selectedObjectIds: [],
+  buildClipboard: undefined,
+  buildClipboardPasteCount: 0,
   selectedShotId: initialProject.shots[0]?.id,
   selectedLandmarkId: undefined,
   activePanoId: undefined,
@@ -173,6 +206,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   buildHistoryBatchDepth: 0,
   buildHistoryBatchCaptured: false,
   buildHistoryCoalesceActive: false,
+  buildTransformPivot: undefined,
   dismissedWorkflowAdvanceKeys: [],
   seenObjectiveWorkspaces: [],
   objectiveModalRequest: 0,
@@ -188,6 +222,9 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         buildHistoryBatchDepth: nextDepth,
         buildHistoryBatchCaptured: false,
         buildHistoryCoalesceActive: false,
+        buildTransformPivot: selectionPivot(
+          state.project.scene.objects.filter((object) => state.selectedObjectIds.includes(object.id)),
+        ),
       };
     }
     return { buildHistoryBatchDepth: nextDepth };
@@ -197,6 +234,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     return {
       buildHistoryBatchDepth: nextDepth,
       buildHistoryBatchCaptured: nextDepth === 0 ? false : state.buildHistoryBatchCaptured,
+      buildTransformPivot: nextDepth === 0 ? undefined : state.buildTransformPivot,
     };
   }),
   canUndoBuild: () => get().buildHistoryPast.length > 0,
@@ -249,7 +287,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     set({
       project: linkedProject,
       activePanoId: canonical?.id,
-      selectedObjectId: project.scene.objects[0]?.id,
+      selectedObjectIds: project.scene.objects[0] ? [project.scene.objects[0].id] : [],
       selectedShotId: firstShot?.id,
       selectedLandmarkId: linkedProject.landmarks[0]?.id,
       buildMode: 'select',
@@ -264,6 +302,8 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       buildHistoryBatchDepth: 0,
       buildHistoryBatchCaptured: false,
       buildHistoryCoalesceActive: false,
+      buildTransformPivot: undefined,
+      buildClipboardPasteCount: 0,
       panoView: firstShot
         ? panoViewFromCamera(firstShot.camera)
         : { yawDegrees: 0, pitchDegrees: 0, fovDegrees: 65 },
@@ -288,7 +328,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   setActivePrimitive: (activePrimitive) => set({
     activePrimitive,
     buildMode: 'place',
-    selectedObjectId: undefined,
+    selectedObjectIds: [],
   }),
   setGridSnap: (gridSnap) => set({ gridSnap }),
   addObject: (type) => set((state) => {
@@ -297,7 +337,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const objects = [...state.project.scene.objects, object];
     return applyBuildSceneChange(state, {
       objects,
-      selectedObjectId: object.id,
+      selectedObjectIds: [object.id],
       history: 'step',
     });
   }),
@@ -317,7 +357,35 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     }));
     return object;
   },
-  selectObject: (id) => set({ selectedObjectId: id }),
+  selectObject: (id, mode = 'replace') => set((state) => {
+    if (!id) return { selectedObjectIds: [] };
+    if (!state.project.scene.objects.some((object) => object.id === id)) return state;
+    if (mode === 'toggle') return { selectedObjectIds: toggleSelectedId(state.selectedObjectIds, id) };
+    return { selectedObjectIds: [id] };
+  }),
+  selectObjectRange: (id) => set((state) => {
+    const objects = state.project.scene.objects;
+    const targetIndex = objects.findIndex((object) => object.id === id);
+    if (targetIndex < 0) return state;
+    const anchorId = state.selectedObjectIds.at(-1);
+    const anchorIndex = anchorId ? objects.findIndex((object) => object.id === anchorId) : targetIndex;
+    const start = Math.min(anchorIndex < 0 ? targetIndex : anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex < 0 ? targetIndex : anchorIndex, targetIndex);
+    const range = objects.slice(start, end + 1).map((object) => object.id);
+    return { selectedObjectIds: [...new Set([...state.selectedObjectIds, ...range])] };
+  }),
+  selectAllObjects: () => set((state) => ({
+    selectedObjectIds: state.project.scene.objects
+      .filter((object) => object.visible && !object.locked)
+      .map((object) => object.id),
+  })),
+  clearObjectSelection: () => set({ selectedObjectIds: [] }),
+  setBuildClipboard: (buildClipboard) => set((state) => ({
+    buildClipboard,
+    buildClipboardPasteCount: state.buildClipboard?.copiedAt === buildClipboard?.copiedAt
+      ? state.buildClipboardPasteCount
+      : 0,
+  })),
   updateObject: (id, updates, options) => set((state) => {
     const existing = state.project.scene.objects.find((object) => object.id === id);
     if (!existing) return state;
@@ -361,11 +429,148 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const duplicate = duplicateSceneObject(object, count, state.gridSnap);
     set((current) => applyBuildSceneChange(current, {
       objects: [...current.project.scene.objects, duplicate],
-      selectedObjectId: duplicate.id,
+      selectedObjectIds: [duplicate.id],
       history: 'step',
       extra: { buildMode: 'select' },
     }));
     return duplicate;
+  },
+  duplicateSelectedObjects: () => {
+    const state = get();
+    const selected = state.project.scene.objects.filter((object) => state.selectedObjectIds.includes(object.id));
+    if (selected.length === 0) return [];
+    const payload: BuildClipboardPayload = {
+      kind: 'panoref/build-objects',
+      version: 1,
+      sourceProjectId: state.project.id,
+      copiedAt: new Date().toISOString(),
+      anchor: [0, 0, 0],
+      objects: selected,
+    };
+    const duplicates = pasteBuildClipboardObjects({
+      payload,
+      existingObjects: state.project.scene.objects,
+      pasteIndex: 1,
+      snapToGrid: state.gridSnap,
+    });
+    set((current) => applyBuildSceneChange(current, {
+      objects: [...current.project.scene.objects, ...duplicates],
+      selectedObjectIds: duplicates.map((object) => object.id),
+      history: 'step',
+      extra: { buildMode: 'select' },
+    }));
+    return duplicates;
+  },
+  pasteBuildObjects: (payload, options) => {
+    const state = get();
+    const samePayload = state.buildClipboard?.copiedAt === payload.copiedAt;
+    const pasteIndex = options?.inPlace ? 0 : (samePayload ? state.buildClipboardPasteCount + 1 : 1);
+    const pasted = pasteBuildClipboardObjects({
+      payload,
+      existingObjects: state.project.scene.objects,
+      pasteIndex,
+      snapToGrid: state.gridSnap,
+      inPlace: options?.inPlace,
+    });
+    set((current) => applyBuildSceneChange(current, {
+      objects: [...current.project.scene.objects, ...pasted],
+      selectedObjectIds: pasted.map((object) => object.id),
+      history: 'step',
+      extra: {
+        buildMode: 'select',
+        buildClipboard: payload,
+        buildClipboardPasteCount: options?.inPlace
+          ? (samePayload ? current.buildClipboardPasteCount : 0)
+          : pasteIndex,
+      },
+    }));
+    return pasted;
+  },
+  removeSelectedObjects: () => {
+    const state = get();
+    const selected = state.project.scene.objects.filter((object) => state.selectedObjectIds.includes(object.id));
+    if (selected.length === 0 || selected.some((object) => object.locked)) return false;
+    const ids = new Set(state.selectedObjectIds);
+    set((current) => applyBuildSceneChange(current, {
+      objects: current.project.scene.objects.filter((object) => !ids.has(object.id)),
+      selectedObjectIds: [],
+      history: 'step',
+    }));
+    return true;
+  },
+  nudgeSelectedObjects: (delta) => get().translateSelectedObjectsBy(delta),
+  translateSelectedObjectsBy: (delta, options) => {
+    const state = get();
+    const selected = state.project.scene.objects.filter((object) => state.selectedObjectIds.includes(object.id));
+    if (selected.length === 0 || selected.some((object) => object.locked)) return false;
+    set((current) => applyBuildSceneChange(current, {
+      objects: translateSelectedObjects(current.project.scene.objects, current.selectedObjectIds, delta, current.gridSnap),
+      history: options?.history ?? 'step',
+    }));
+    return true;
+  },
+  rotateSelectedObjectsBy: (axis, degrees, options) => {
+    const state = get();
+    const selected = state.project.scene.objects.filter((object) => state.selectedObjectIds.includes(object.id));
+    if (selected.length === 0 || selected.some((object) => object.locked)) return false;
+    set((current) => applyBuildSceneChange(current, {
+      objects: rotateSelectedObjects(
+        current.project.scene.objects,
+        current.selectedObjectIds,
+        axis,
+        degrees,
+        current.buildTransformPivot,
+      ),
+      history: options?.history ?? 'step',
+    }));
+    return true;
+  },
+  scaleSelectedObjectsBy: (factors, options) => {
+    const state = get();
+    const selected = state.project.scene.objects.filter((object) => state.selectedObjectIds.includes(object.id));
+    if (selected.length === 0 || selected.some((object) => object.locked)) return false;
+    set((current) => applyBuildSceneChange(current, {
+      objects: scaleSelectedObjects(
+        current.project.scene.objects,
+        current.selectedObjectIds,
+        factors,
+        current.buildTransformPivot,
+      ),
+      history: options?.history ?? 'step',
+    }));
+    return true;
+  },
+  toggleSelectedVisibility: () => {
+    const state = get();
+    if (state.selectedObjectIds.length === 0) return false;
+    const ids = new Set(state.selectedObjectIds);
+    const shouldShow = state.project.scene.objects.some((object) => ids.has(object.id) && !object.visible);
+    set((current) => applyBuildSceneChange(current, {
+      objects: current.project.scene.objects.map((object) => ids.has(object.id) ? { ...object, visible: shouldShow } : object),
+      selectedObjectIds: shouldShow ? current.selectedObjectIds : [],
+      history: 'step',
+    }));
+    return true;
+  },
+  toggleSelectedLocked: () => {
+    const state = get();
+    if (state.selectedObjectIds.length === 0) return false;
+    const ids = new Set(state.selectedObjectIds);
+    const shouldLock = state.project.scene.objects.some((object) => ids.has(object.id) && !object.locked);
+    set((current) => applyBuildSceneChange(current, {
+      objects: current.project.scene.objects.map((object) => ids.has(object.id) ? { ...object, locked: shouldLock } : object),
+      history: 'step',
+    }));
+    return true;
+  },
+  showAllObjects: () => {
+    const state = get();
+    if (!state.project.scene.objects.some((object) => !object.visible)) return false;
+    set((current) => applyBuildSceneChange(current, {
+      objects: current.project.scene.objects.map((object) => ({ ...object, visible: true })),
+      history: 'step',
+    }));
+    return true;
   },
   toggleObjectVisibility: (id) => set((state) => {
     const object = state.project.scene.objects.find((item) => item.id === id);
@@ -388,7 +593,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const objects = state.project.scene.objects.filter((object) => object.id !== id);
     return applyBuildSceneChange(state, {
       objects,
-      selectedObjectId: state.selectedObjectId === id ? undefined : state.selectedObjectId,
+      selectedObjectIds: state.selectedObjectIds.filter((selectedId) => selectedId !== id),
       history: 'step',
     });
   }),
@@ -728,6 +933,55 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     }));
     return asset;
   },
+  attachViewportRenderToShot: (shotId, params) => {
+    const state = get();
+    const shot = state.project.shots.find((item) => item.id === shotId);
+    if (!shot) throw new Error('Select a shot before attaching a viewport render.');
+    const asset = createPanoAsset({
+      name: params.name || `shot_${shot.shotNumber}_viewport.png`,
+      uri: params.dataUrl,
+      width: params.width,
+      height: params.height,
+      metadata: {
+        source: 'viewport_render',
+        shotId: shot.id,
+      },
+    });
+    set((current) => {
+      const currentShot = current.project.shots.find((item) => item.id === shot.id);
+      const previousAssetId = currentShot?.assets.viewportRenderAssetId;
+      const shots = current.project.shots.map((item) => item.id === shot.id
+        ? {
+            ...item,
+            assets: {
+              ...item.assets,
+              viewportRenderAssetId: asset.id,
+            },
+            updatedAt: new Date().toISOString(),
+          }
+        : item);
+      const assets = {
+        ...current.project.assets.assets,
+        [asset.id]: asset,
+      };
+      const previousAssetStillReferenced = previousAssetId && (
+        current.project.panoRefs.some((pano) => pano.imageAssetId === previousAssetId)
+        || shots.some((item) => Object.values(item.assets).some((assetId) => assetId === previousAssetId))
+      );
+      if (previousAssetId && previousAssetId !== asset.id && !previousAssetStillReferenced) {
+        delete assets[previousAssetId];
+      }
+
+      return {
+        project: touchProject({
+          ...current.project,
+          assets: { assets },
+          shots,
+        }),
+      };
+    });
+    return asset;
+  },
   attachAiResultFrameToShot: (shotId, params) => {
     const state = get();
     const shot = state.project.shots.find((item) => item.id === shotId);
@@ -898,7 +1152,7 @@ function touchProject(project: LocationProject): LocationProject {
 
 type BuildHistoryStateSlice = {
   project: LocationProject;
-  selectedObjectId?: string;
+  selectedObjectIds: string[];
   buildHistoryPast: BuildHistorySnapshot[];
   buildHistoryFuture: BuildHistorySnapshot[];
   buildHistoryBatchDepth: number;
@@ -908,13 +1162,13 @@ type BuildHistoryStateSlice = {
 
 function captureCurrentBuildSnapshot(state: {
   project: LocationProject;
-  selectedObjectId?: string;
+  selectedObjectIds: string[];
 }): BuildHistorySnapshot {
   return captureBuildSnapshot({
     objects: state.project.scene.objects,
     panoOrigin: state.project.scene.panoOrigin,
     panoRotation: state.project.scene.panoRotation,
-    selectedObjectId: state.selectedObjectId,
+    selectedObjectIds: state.selectedObjectIds,
   });
 }
 
@@ -992,7 +1246,7 @@ function applyBuildSceneChange(
     objects?: SceneObject[];
     panoOrigin?: Vec3;
     panoRotation?: [number, number, number];
-    selectedObjectId?: string | undefined;
+    selectedObjectIds?: string[];
     history?: BuildHistoryMode;
     extra?: Record<string, unknown>;
   },
@@ -1000,16 +1254,15 @@ function applyBuildSceneChange(
   const objects = change.objects ?? state.project.scene.objects;
   const panoOrigin = change.panoOrigin ?? state.project.scene.panoOrigin;
   const panoRotation = change.panoRotation ?? state.project.scene.panoRotation;
-  // Use hasOwnProperty so removeObject can intentionally clear selection with `undefined`.
-  const selectedObjectId = Object.prototype.hasOwnProperty.call(change, 'selectedObjectId')
-    ? change.selectedObjectId
-    : state.selectedObjectId;
+  const selectedObjectIds = Object.prototype.hasOwnProperty.call(change, 'selectedObjectIds')
+    ? normalizeSelectedIds(change.selectedObjectIds ?? [], objects)
+    : normalizeSelectedIds(state.selectedObjectIds, objects);
 
   const nextSnap = captureBuildSnapshot({
     objects,
     panoOrigin,
     panoRotation,
-    selectedObjectId,
+    selectedObjectIds,
   });
   const currentSnap = captureCurrentBuildSnapshot(state);
   if (buildSnapshotsEqual(currentSnap, nextSnap)) {
@@ -1020,7 +1273,7 @@ function applyBuildSceneChange(
   return {
     ...history,
     ...change.extra,
-    selectedObjectId,
+    selectedObjectIds,
     project: touchProject({
       ...state.project,
       scene: {
@@ -1045,7 +1298,7 @@ function applyBuildSnapshot(
       buildHistoryPast: past,
       buildHistoryFuture: future,
       buildHistoryCoalesceActive: false,
-      selectedObjectId: snapshot.selectedObjectId,
+      selectedObjectIds: normalizeSelectedIds(snapshot.selectedObjectIds, snapshot.objects),
       project: touchProject({
         ...state.project,
         scene: {

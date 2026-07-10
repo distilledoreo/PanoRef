@@ -80,7 +80,7 @@ export function IconButton({
   return (
     <button
       {...props}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45 ${tone} ${props.className ?? ''}`}
+      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45 ${tone} ${props.className ?? ''}`}
     >
       {children}
     </button>

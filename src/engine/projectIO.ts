@@ -6,24 +6,53 @@ export function serializeProject(project: LocationProject): string {
 }
 
 export function parseProject(json: string): LocationProject {
-  const parsed = JSON.parse(json) as LocationProject;
+  let parsed: LocationProject;
+  try {
+    parsed = JSON.parse(json) as LocationProject;
+  } catch {
+    throw new Error('Invalid project file: not valid JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Invalid project file.');
+  }
   if (parsed.schemaVersion !== '0.1') {
     throw new Error('Unsupported project schema version.');
   }
-  if (!parsed.scene || !parsed.assets || !Array.isArray(parsed.shots)) {
-    throw new Error('Invalid Continuity Stage project file.');
+  if (!parsed.scene || typeof parsed.scene !== 'object') {
+    throw new Error('Invalid project file: missing scene.');
   }
-  return {
-    ...parsed,
-    scene: {
-      ...parsed.scene,
-      objects: parsed.scene.objects.map(normalizeSceneObject),
-    },
-    panoRefs: parsed.panoRefs.map(normalizePanoReference),
-    shots: parsed.shots.map(normalizeShot),
-    settings: normalizeProjectSettings(parsed.settings),
-    workflow: normalizeProjectWorkflow(parsed.workflow),
-  };
+  if (!Array.isArray(parsed.scene.objects)) {
+    throw new Error('Invalid project file: scene.objects must be an array.');
+  }
+  if (!parsed.assets || typeof parsed.assets !== 'object' || !parsed.assets.assets) {
+    throw new Error('Invalid project file: missing assets.');
+  }
+  if (!Array.isArray(parsed.shots)) {
+    throw new Error('Invalid project file: shots must be an array.');
+  }
+  if (!Array.isArray(parsed.panoRefs)) {
+    throw new Error('Invalid project file: panoRefs must be an array.');
+  }
+  try {
+    return {
+      ...parsed,
+      scene: {
+        ...parsed.scene,
+        objects: parsed.scene.objects.map(normalizeSceneObject),
+      },
+      panoRefs: parsed.panoRefs.map(normalizePanoReference),
+      shots: parsed.shots.map(normalizeShot),
+      landmarks: Array.isArray(parsed.landmarks) ? parsed.landmarks : [],
+      settings: normalizeProjectSettings(parsed.settings),
+      workflow: normalizeProjectWorkflow(parsed.workflow),
+    };
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `Invalid project file: ${error.message}`
+        : 'Invalid project file.',
+    );
+  }
 }
 
 function normalizeSceneObject(object: SceneObject & { projectionStamp?: unknown }): SceneObject {

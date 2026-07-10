@@ -66,6 +66,8 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('data-shots-mode-switcher');
     expect(shots).toContain('data-shots-library-thumb');
     expect(shots).toContain('data-shots-library-delete');
+    expect(shots).toContain('data-shots-camera-move-status');
+    expect(shots).toContain('MP4 export is not supported in this browser. Try Chrome or Edge.');
     expect(shots).toContain('data-shots-settings-trigger');
     expect(shots).toContain('data-shots-video-duration');
     expect(shots).toContain('VIDEO_DURATION_PRESETS_SECONDS');
@@ -117,7 +119,9 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain('letterboxEnabled: false');
     expect(guidance).toContain('showReferencePromptBuilder');
     expect(guidance).toContain('seenObjectiveWorkspaces.includes(\'reference\')');
-    expect(guidance).toMatch(/advanceOpen && Boolean\(advancePrompt\)[\s\S]*onClose=\{handleAdvanceDismiss\}/);
+    expect(guidance).toMatch(/activeDialog === 'advance' && Boolean\(advancePrompt\)[\s\S]*onClose=\{handleAdvanceDismiss\}/);
+    expect(guidance).toContain("type GuidanceDialog = 'none' | 'objective' | 'advance' | 'alignmentIntro' | 'alignmentRetry'");
+    expect(guidance).toContain('lastHandledObjectiveRequest');
     expect(referenceGuide).toContain('Your graybox 360 is ready');
     expect(referenceGuide).toContain('Download the graybox image.');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
@@ -191,7 +195,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('shotFraming={shotFraming}');
     expect(shots).not.toContain('selectedObjectId');
     expect(shots).not.toContain('onSelectObject');
-    expect(viewport).toContain('selectedObjectId: shotFraming ? undefined : selectedObjectId');
+    expect(viewport).toContain('selectedObjectIds: shotFraming ? [] : selectedObjectIds');
     expect(viewport).toContain('showSceneGuides: shotFraming ? false : showSceneGuides');
     expect(viewport).toContain('if (framing) return;');
   });
@@ -401,6 +405,21 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain('Drag handles to scale');
     expect(build).toContain('buildMode === \'select\'');
     expect(build).toContain('showTransformGizmo');
+  });
+
+  it('keeps Build floating controls below the mobile-safe header', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+
+    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(4);
+    expect(build).not.toContain('top-20');
+  });
+
+  it('sizes the Build tray to its tools while constraining the mobile scroller', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+
+    expect(build).toContain('w-fit max-w-[calc(100vw-1.5rem)]');
+    expect(build).not.toContain('w-[min(100%-1.5rem,calc(100%-1.5rem))]');
+    expect(build).toContain('overflow-x-auto');
   });
 
   it('renders polished theme-aware shot thumbnail fallbacks for missing media', () => {

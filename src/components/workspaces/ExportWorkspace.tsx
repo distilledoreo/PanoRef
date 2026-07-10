@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, Check, Download, FileJson, FolderArchive, Settings } from 'lucide-react';
 import { createShotPackageManifest, selectExportPathPreview } from '../../engine/exportManifest';
 import { reconcileExportSelectedShotIds } from '../../engine/exportSelection';
-import { buildShotPackage, downloadBlob } from '../../engine/packageExport';
+import { buildMultiShotPackage, buildShotPackage, downloadBlob } from '../../engine/packageExport';
 import { getProjectWarnings, getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, TextInput } from '../common/Field';
@@ -28,6 +28,7 @@ export function ExportWorkspace() {
   const [selectedShotIds, setSelectedShotIds] = useState<Set<string>>(() => new Set(project.shots.map((shot) => shot.id)));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportingShotId, setExportingShotId] = useState<string | undefined>();
+  const [exportError, setExportError] = useState<string | undefined>();
   const projectIdRef = useRef(project.id);
   const prevShotIdsRef = useRef(project.shots.map((shot) => shot.id));
   const shotIdsKey = project.shots.map((shot) => shot.id).join('\0');
@@ -72,15 +73,19 @@ export function ExportWorkspace() {
     const shotsToExport = project.shots.filter((shot) => selectedShotIds.has(shot.id));
     if (shotsToExport.length === 0) return;
     setExportingPackage(true);
+    setExportError(undefined);
+    setExportingShotId(shotsToExport[0]?.id);
     try {
+      // One download for N shots — avoids browser multi-download blocking.
+      const result = await buildMultiShotPackage(project, shotsToExport);
+      downloadBlob(result.blob, result.fileName);
+      setLastExport(result.manifestPaths);
       for (const shot of shotsToExport) {
-        setExportingShotId(shot.id);
-        const result = await buildShotPackage(project, shot);
-        downloadBlob(result.blob, result.fileName);
-        setLastExport(result.manifestPaths);
         updateShot(shot.id, { status: 'exported' });
         markFinalPackageExported(shot.id);
       }
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'Export failed.');
     } finally {
       setExportingPackage(false);
       setExportingShotId(undefined);
@@ -90,12 +95,15 @@ export function ExportWorkspace() {
   const exportShot = async () => {
     if (!selectedShot) return;
     setExportingPackage(true);
+    setExportError(undefined);
     try {
       const result = await buildShotPackage(project, selectedShot);
       downloadBlob(result.blob, result.fileName);
       setLastExport(result.manifestPaths);
       updateShot(selectedShot.id, { status: 'exported' });
       markFinalPackageExported(selectedShot.id);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'Export failed.');
     } finally {
       setExportingPackage(false);
     }
@@ -215,7 +223,7 @@ export function ExportWorkspace() {
                   <div
                     key={shot.id}
                     data-export-shot-row={checked ? 'selected' : 'default'}
-                    className={`flex items-center gap-2 rounded-lg border px-2 py-1 transition ${
+                    className={`flex min-h-11 items-center gap-2 rounded-lg border px-2 py-1.5 transition ${
                       checked
                         ? 'border-[var(--accent)] bg-surface-raised shadow-[inset_3px_0_0_var(--accent)]'
                         : 'border-subtle bg-surface-raised hover:border-strong'
@@ -225,13 +233,13 @@ export function ExportWorkspace() {
                       type="checkbox"
                       checked={checked}
                       onChange={() => toggleShotSelection(shot.id)}
-                      className="accent-[var(--accent)]"
+                      className="h-5 w-5 accent-[var(--accent)]"
                       aria-label={`Export Shot ${shot.shotNumber}`}
                     />
                     <button
                       type="button"
                       onClick={() => selectShot(shot.id)}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left"
                     >
                       <ShotThumbnail project={project} shot={shot} compact className="h-9 w-16 shrink-0" />
                       <span className="min-w-0 flex-1 leading-tight">
@@ -259,11 +267,26 @@ export function ExportWorkspace() {
                 <p className="text-sm text-secondary">No shots yet.</p>
               )}
             </div>
-            <div className="shrink-0 border-t border-subtle px-2 py-2">
+            <div className="shrink-0 border-t border-subtle space-y-2 px-2 py-2">
+              {exportError && (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-2 text-xs text-primary"
+                  data-export-error
+                >
+                  {exportError}
+                </p>
+              )}
               <PrimaryCTA
                 icon={<Download className="h-4 w-4" />}
-                label={isExportingPackage ? 'Building Package...' : 'Export Selected Shots'}
-                hint="Download continuity ZIPs for each selected shot. No need to import results back."
+                label={isExportingPackage
+                  ? 'Building Package...'
+                  : selectedShotIds.size > 1
+                    ? `Export ${selectedShotIds.size} Shots (1 ZIP)`
+                    : 'Export Selected Shots'}
+                hint={selectedShotIds.size > 1
+                  ? 'One ZIP with a folder per shot — no multi-download blocking.'
+                  : 'Download a continuity ZIP handoff package. No need to import results back.'}
                 onClick={() => void exportSelectedShots()}
                 disabled={isExportingPackage || selectedShotIds.size === 0}
                 highlighted={primaryAction?.id === 'export-final-zip'}

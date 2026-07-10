@@ -31,6 +31,56 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
   }
 
   const zip = new JSZip();
+  const manifestPaths = await appendShotPackageToZip(zip, project, shot);
+  const rootFolder = createShotPackageManifest(project, shot).rootFolder;
+  const blob = await zip.generateAsync({ type: 'blob' });
+  return {
+    blob,
+    fileName: `${rootFolder}_package.zip`,
+    manifestPaths,
+  };
+}
+
+/**
+ * Single download for multiple shots — one outer ZIP with each shot folder inside.
+ * Avoids browser multi-download blocking that hits sequential per-shot downloads.
+ */
+export async function buildMultiShotPackage(
+  project: LocationProject,
+  shots: Shot[],
+): Promise<ShotPackageResult> {
+  if (shots.length === 0) {
+    throw new ShotPackageError('Select at least one shot before exporting.');
+  }
+  if (shots.length === 1) {
+    return buildShotPackage(project, shots[0]);
+  }
+
+  const zip = new JSZip();
+  const manifestPaths: string[] = [];
+  for (const shot of shots) {
+    const paths = await appendShotPackageToZip(zip, project, shot);
+    manifestPaths.push(...paths);
+  }
+
+  const safeName = (project.name || 'continuity')
+    .replace(/[^\w\-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    || 'continuity';
+  const blob = await zip.generateAsync({ type: 'blob' });
+  return {
+    blob,
+    fileName: `${safeName}_${shots.length}_shots_package.zip`,
+    manifestPaths,
+  };
+}
+
+async function appendShotPackageToZip(
+  zip: JSZip,
+  project: LocationProject,
+  shot: Shot,
+): Promise<string[]> {
   const manifestPreview = createShotPackageManifest(project, shot);
   const rootFolder = manifestPreview.rootFolder;
   const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);
@@ -63,17 +113,18 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
   const cameraMoveReferenceFrames = shot.exportSettings.includeCameraMoveReferenceFrames
     ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
     : [];
-  for (const frame of cameraMoveReferenceFrames) {
-    const clay = await renderViewportClay(
-      project,
-      frame.camera,
-      shot.exportSettings.width,
-      shot.exportSettings.height,
-    );
-    addDataUrl(zip, `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, clay.dataUrl);
+  if (cameraMoveReferenceFrames.length > 0) {
+    await ensureHumanMannequinModel();
+    for (const frame of cameraMoveReferenceFrames) {
+      const clay = await renderViewportClay(
+        project,
+        frame.camera,
+        shot.exportSettings.width,
+        shot.exportSettings.height,
+      );
+      addDataUrl(zip, `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, clay.dataUrl);
+    }
   }
-
-  await ensureHumanMannequinModel();
 
   // Full cubemap ships with full-pano exports (canonical preferred, else linked).
   const cubemapSourcePano = (shot.exportSettings.includeFullPano && canonicalPano && canonicalAsset)
@@ -150,12 +201,7 @@ export async function buildShotPackage(project: LocationProject, shot?: Shot): P
 
   const manifest = createShotPackageManifest(project, shot);
   zip.file(`${rootFolder}/manifest.json`, JSON.stringify(manifest, null, 2));
-  const blob = await zip.generateAsync({ type: 'blob' });
-  return {
-    blob,
-    fileName: `${rootFolder}_package.zip`,
-    manifestPaths: manifest.files.map((file) => file.path),
-  };
+  return manifest.files.map((file) => file.path);
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {
