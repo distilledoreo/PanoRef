@@ -338,7 +338,10 @@ export function BuildWorkspace() {
         )}
 
         {selectedObject && (
-          <div className="pointer-events-none absolute right-5 top-20 z-10">
+          <div
+            className="pointer-events-none absolute right-5 z-10"
+            style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+          >
             <ContextualPanel>
               <div className="flex items-center gap-2">
                 <TextInput
@@ -477,7 +480,10 @@ export function BuildWorkspace() {
         </div>
 
         {buildMode === 'pano_origin' && (
-          <div className="pointer-events-none absolute left-5 top-20 z-10">
+          <div
+            className="pointer-events-none absolute left-5 z-10"
+            style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+          >
             <ContextualPanel className="text-sm text-secondary">
               <Move3D className="mr-1.5 inline h-4 w-4 text-amber-500" />
               Drag the origin marker (O to exit)
@@ -486,7 +492,10 @@ export function BuildWorkspace() {
         )}
 
         {buildMode === 'place' && (
-          <div className="pointer-events-none absolute left-5 top-20 z-10">
+          <div
+            className="pointer-events-none absolute left-5 z-10"
+            style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+          >
             <ContextualPanel className="text-sm text-secondary">
               Click the floor to place {primitiveLabel(activePrimitive)}
             </ContextualPanel>

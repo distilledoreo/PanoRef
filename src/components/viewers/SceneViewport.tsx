@@ -47,6 +47,8 @@ interface DragState {
   x: number;
   y: number;
   moved: boolean;
+  /** Scene object being manipulated by a gizmo gesture. */
+  objectId?: string;
   forceOrbit?: boolean;
   gizmoAxis?: GizmoAxis;
   gizmoScaleAxis?: GizmoAxis | 'uniform';

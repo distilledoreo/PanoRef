@@ -48,11 +48,8 @@ try {
   await client.send('Page.navigate', { url: appUrl });
   await waitFor(client, 'document.title === "Continuity Stage"', 'app shell');
 
-  // Dismiss splash / mode chooser if present.
-  await clickOptionalButton(client, 'Enter Continuity Stage', 4000);
-  await clickOptionalButton(client, 'Continuity Stage', 2000);
-  await clickOptionalButton(client, 'Get started', 2000);
-  await clickOptionalButton(client, 'Start', 2000);
+  // Select the visible production mode explicitly; do not click a Build control behind the chooser.
+  await clickOptionalButton(client, 'Build continuity packages', 4000, { exact: true });
 
   await waitFor(
     client,
@@ -253,7 +250,7 @@ async function isButtonEnabled(client, text, { exact = false } = {}) {
     (() => {
       const match = ${buttonMatchExpression(text, { exact })};
       const button = [...document.querySelectorAll('button')].find(match);
-      return Boolean(button && !button.disabled);
+      return Boolean(button && !button.disabled && button.offsetParent !== null);
     })()
   `);
 }
@@ -265,7 +262,7 @@ async function clickButton(client, text, timeout = 20000, { exact = false } = {}
     const clicked = await evaluate(client, `
       (() => {
         const button = [...document.querySelectorAll('button')].find(${match});
-        if (!button || button.disabled) return false;
+        if (!button || button.disabled || button.offsetParent === null) return false;
         button.click();
         return true;
       })()
@@ -329,9 +326,9 @@ async function clickWorkspaceTab(client, label, timeout = 20000) {
   throw new Error(`Could not find workspace tab: ${label}`);
 }
 
-async function clickOptionalButton(client, text, timeout = 3000) {
+async function clickOptionalButton(client, text, timeout = 3000, options = {}) {
   try {
-    await clickButton(client, text, timeout);
+    await clickButton(client, text, timeout, options);
     return true;
   } catch {
     return false;

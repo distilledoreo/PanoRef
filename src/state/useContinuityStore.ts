@@ -743,27 +743,39 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         shotId: shot.id,
       },
     });
-    set((current) => ({
-      project: touchProject({
-        ...current.project,
-        assets: {
-          assets: {
-            ...current.project.assets.assets,
-            [asset.id]: asset,
-          },
-        },
-        shots: current.project.shots.map((item) => item.id === shot.id
-          ? {
-              ...item,
-              assets: {
-                ...item.assets,
-                viewportRenderAssetId: asset.id,
-              },
-              updatedAt: new Date().toISOString(),
-            }
-          : item),
-      }),
-    }));
+    set((current) => {
+      const currentShot = current.project.shots.find((item) => item.id === shot.id);
+      const previousAssetId = currentShot?.assets.viewportRenderAssetId;
+      const shots = current.project.shots.map((item) => item.id === shot.id
+        ? {
+            ...item,
+            assets: {
+              ...item.assets,
+              viewportRenderAssetId: asset.id,
+            },
+            updatedAt: new Date().toISOString(),
+          }
+        : item);
+      const assets = {
+        ...current.project.assets.assets,
+        [asset.id]: asset,
+      };
+      const previousAssetStillReferenced = previousAssetId && (
+        current.project.panoRefs.some((pano) => pano.imageAssetId === previousAssetId)
+        || shots.some((item) => Object.values(item.assets).some((assetId) => assetId === previousAssetId))
+      );
+      if (previousAssetId && previousAssetId !== asset.id && !previousAssetStillReferenced) {
+        delete assets[previousAssetId];
+      }
+
+      return {
+        project: touchProject({
+          ...current.project,
+          assets: { assets },
+          shots,
+        }),
+      };
+    });
     return asset;
   },
   attachAiResultFrameToShot: (shotId, params) => {

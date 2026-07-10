@@ -95,6 +95,7 @@ export function ShotsWorkspace() {
   const [isExportingCameraMove, setIsExportingCameraMove] = useState(false);
   const [cameraMoveProgress, setCameraMoveProgress] = useState(0);
   const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
+  const [snapshotError, setSnapshotError] = useState<string | undefined>();
   const cameraMoveAbortRef = useRef<{ cancelled: boolean; abort?: () => void }>({ cancelled: false });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
@@ -351,15 +352,20 @@ export function ShotsWorkspace() {
         target: [...camera.target] as CameraData['target'],
       },
     };
-    void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number]).then((frame) => {
-      setShotFramePreview(shot.id, frame.dataUrl);
-      useContinuityStore.getState().attachViewportRenderToShot(shot.id, {
-        name: `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}_viewport.png`,
-        dataUrl: frame.dataUrl,
-        width: frame.width,
-        height: frame.height,
+    setSnapshotError(undefined);
+    void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number])
+      .then((frame) => {
+        setShotFramePreview(shot.id, frame.dataUrl);
+        useContinuityStore.getState().attachViewportRenderToShot(shot.id, {
+          name: `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}_viewport.png`,
+          dataUrl: frame.dataUrl,
+          width: frame.width,
+          height: frame.height,
+        });
+      })
+      .catch(() => {
+        setSnapshotError('Could not save the shot preview. Try Capture again.');
       });
-    });
   }, [setShotFramePreview]);
 
   /**
@@ -795,6 +801,26 @@ export function ShotsWorkspace() {
                 })}
               </div>
             </div>
+          )}
+
+          {captureMode === 'video' && (!supportedMp4MimeType || cameraMoveError) && (
+            <p
+              role="alert"
+              data-shots-camera-move-status
+              className="pointer-events-auto max-w-md rounded-lg border border-amber-200/70 bg-black/65 px-3 py-2 text-center text-xs text-amber-100 shadow-soft backdrop-blur-sm"
+            >
+              {cameraMoveError ?? 'MP4 export is not supported in this browser. Try Chrome or Edge.'}
+            </p>
+          )}
+
+          {captureMode === 'still' && snapshotError && (
+            <p
+              role="alert"
+              data-shots-snapshot-status
+              className="pointer-events-auto max-w-md rounded-lg border border-red-300/70 bg-black/65 px-3 py-2 text-center text-xs text-red-100 shadow-soft backdrop-blur-sm"
+            >
+              {snapshotError}
+            </p>
           )}
 
           {/* Shutter row */}

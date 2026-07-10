@@ -181,11 +181,10 @@ test.describe('workflow path smoke', () => {
     const approve = page.getByRole('button', { name: /Approve as Reference/i });
     await expect(approve).toBeVisible({ timeout: 30_000 });
     await approve.click({ force: true });
-    await dismissOverlays(page);
 
     const dialogs = page.locator('[role="dialog"][aria-modal="true"]');
-    const count = await dialogs.count();
-    expect(count).toBeLessThanOrEqual(1);
+    await expect.poll(() => dialogs.count()).toBeLessThanOrEqual(1);
+    await dismissOverlays(page);
 
     const continueShots = page.getByRole('button', { name: /Continue to Shots/i });
     if (await continueShots.isVisible().catch(() => false)) {
@@ -201,5 +200,34 @@ test.describe('workflow path smoke', () => {
     await workspaceTab(page, 'Export').click();
     await dismissOverlays(page);
     await expect(page.getByRole('button', { name: /Export Selected Shots|Export \d+ Shots/i })).toBeVisible();
+  });
+
+  test('repeated still captures create distinct persisted shot thumbnails', async ({ page }) => {
+    test.setTimeout(120_000);
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await workspaceTab(page, 'Shots').click();
+    await dismissOverlays(page);
+
+    const shutter = page.locator('[data-shots-shutter]');
+    await expect(shutter).toBeVisible({ timeout: 20_000 });
+    await shutter.click();
+    await expect(page.locator('[data-shots-capture-flash]')).toBeVisible({ timeout: 20_000 });
+    await dismissOverlays(page);
+    await page.keyboard.down('d');
+    await page.waitForTimeout(500);
+    await page.keyboard.up('d');
+    await shutter.click();
+
+    await page.locator('[data-shots-library-thumb]').click();
+    const cards = page.locator('[data-shots-library-card]');
+    await expect(cards).toHaveCount(2, { timeout: 30_000 });
+    await expect(cards.locator('img')).toHaveCount(2, { timeout: 30_000 });
+    const thumbnailSources = await cards.locator('img').evaluateAll((images) => images.map((image) => image.getAttribute('src')));
+
+    expect(thumbnailSources).toHaveLength(2);
+    expect(thumbnailSources[0]).toMatch(/^data:image\//);
+    expect(thumbnailSources[1]).toMatch(/^data:image\//);
+    expect(thumbnailSources[0]).not.toBe(thumbnailSources[1]);
   });
 });

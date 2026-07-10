@@ -66,6 +66,8 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('data-shots-mode-switcher');
     expect(shots).toContain('data-shots-library-thumb');
     expect(shots).toContain('data-shots-library-delete');
+    expect(shots).toContain('data-shots-camera-move-status');
+    expect(shots).toContain('MP4 export is not supported in this browser. Try Chrome or Edge.');
     expect(shots).toContain('data-shots-settings-trigger');
     expect(shots).toContain('data-shots-video-duration');
     expect(shots).toContain('VIDEO_DURATION_PRESETS_SECONDS');
@@ -403,6 +405,13 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain('Drag handles to scale');
     expect(build).toContain('buildMode === \'select\'');
     expect(build).toContain('showTransformGizmo');
+  });
+
+  it('keeps Build floating controls below the mobile-safe header', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+
+    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(4);
+    expect(build).not.toContain('top-20');
   });
 
   it('renders polished theme-aware shot thumbnail fallbacks for missing media', () => {
