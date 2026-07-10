@@ -25,6 +25,17 @@ export type BuildShortcutCommand =
   | { kind: 'mode'; mode: 'select' | 'pano_origin' }
   | { kind: 'toggle-snap' }
   | { kind: 'duplicate' }
+  | { kind: 'copy' }
+  | { kind: 'cut' }
+  | { kind: 'paste'; inPlace: boolean }
+  | { kind: 'select-all' }
+  | { kind: 'clear-selection' }
+  | { kind: 'nudge'; axis: 'x' | 'y' | 'z'; direction: -1 | 1; multiplier: number }
+  | { kind: 'frame-selection' }
+  | { kind: 'frame-all' }
+  | { kind: 'show-all' }
+  | { kind: 'rename' }
+  | { kind: 'toggle-help' }
   | { kind: 'rotate-left' }
   | { kind: 'rotate-right' }
   | { kind: 'scale-down' }
@@ -69,11 +80,32 @@ export function resolveBuildShortcut(input: BuildShortcutInput): BuildShortcutCo
   const history = resolveBuildHistoryShortcut(input);
   if (history) return history;
 
+  const modifier = Boolean(input.ctrlKey || input.metaKey);
+  const key = input.key.toLowerCase();
+  if (modifier && !input.altKey) {
+    if (key === 'c' && !input.shiftKey) return { kind: 'copy' };
+    if (key === 'x' && !input.shiftKey) return { kind: 'cut' };
+    if (key === 'v') return { kind: 'paste', inPlace: Boolean(input.shiftKey) };
+    if (key === 'd' && !input.shiftKey) return { kind: 'duplicate' };
+    if (key === 'a') return input.shiftKey ? { kind: 'clear-selection' } : { kind: 'select-all' };
+  }
+
+  if (input.altKey && !modifier && key === 'h') return { kind: 'show-all' };
+
+  const multiplier = (input.shiftKey ? 10 : 1) * (input.altKey ? 0.1 : 1);
+  if (!modifier) {
+    if (key === 'arrowleft') return { kind: 'nudge', axis: 'x', direction: -1, multiplier };
+    if (key === 'arrowright') return { kind: 'nudge', axis: 'x', direction: 1, multiplier };
+    if (key === 'arrowup') return { kind: 'nudge', axis: 'z', direction: -1, multiplier };
+    if (key === 'arrowdown') return { kind: 'nudge', axis: 'z', direction: 1, multiplier };
+    if (key === 'pageup') return { kind: 'nudge', axis: 'y', direction: 1, multiplier };
+    if (key === 'pagedown') return { kind: 'nudge', axis: 'y', direction: -1, multiplier };
+  }
+
   if (input.ctrlKey || input.metaKey || input.altKey) {
     return undefined;
   }
 
-  const key = input.key.toLowerCase();
   if (!input.shiftKey) {
     const primitive = primitiveShortcutByKey.get(key);
     if (primitive) return { kind: 'primitive', type: primitive };
@@ -83,6 +115,10 @@ export function resolveBuildShortcut(input: BuildShortcutInput): BuildShortcutCo
   if (!input.shiftKey && key === 'o') return { kind: 'mode', mode: 'pano_origin' };
   if (!input.shiftKey && key === 'g') return { kind: 'toggle-snap' };
   if (!input.shiftKey && key === 'd') return { kind: 'duplicate' };
+  if (!input.shiftKey && key === 'f') return { kind: 'frame-selection' };
+  if (!input.shiftKey && key === 'home') return { kind: 'frame-all' };
+  if (!input.shiftKey && key === 'f2') return { kind: 'rename' };
+  if (key === '?' || (input.shiftKey && key === '/')) return { kind: 'toggle-help' };
   if (key === 'r') return input.shiftKey ? { kind: 'rotate-left' } : { kind: 'rotate-right' };
   if (!input.shiftKey && key === '[') return { kind: 'scale-down' };
   if (!input.shiftKey && key === ']') return { kind: 'scale-up' };

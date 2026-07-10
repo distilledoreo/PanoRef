@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Circle,
+  ClipboardPaste,
   Columns3,
   Copy,
   DoorOpen,
@@ -12,6 +13,7 @@ import {
   Grid3X3,
   Layers,
   Lock,
+  Scissors,
   Mountain,
   Move3D,
   Redo2,
@@ -40,6 +42,12 @@ import {
   getPrimitiveShortcutLabel,
   resolveBuildShortcut,
 } from '../../engine/buildShortcuts';
+import {
+  createBuildClipboardPayload,
+  parseBuildClipboard,
+  serializeBuildClipboard,
+} from '../../engine/buildClipboard';
+import { BUILD_GRID_SIZE } from '../../engine/sandbox';
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
 import {
@@ -88,9 +96,15 @@ export function BuildWorkspace() {
   const [showSceneGuides, setShowSceneGuides] = useState(false);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('translate');
   const [grayboxRenderError, setGrayboxRenderError] = useState<string | undefined>();
+  const [clipboardStatus, setClipboardStatus] = useState<string | undefined>();
+  const [systemClipboardSyncedAt, setSystemClipboardSyncedAt] = useState<string | undefined>();
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [frameRequest, setFrameRequest] = useState(0);
+  const [frameObjectIds, setFrameObjectIds] = useState<string[]>([]);
   const {
     project,
-    selectedObjectId,
+    selectedObjectIds,
+    buildClipboard,
     buildMode,
     activePrimitive,
     gridSnap,
@@ -99,13 +113,22 @@ export function BuildWorkspace() {
     setGridSnap,
     placeObject,
     selectObject,
+    selectObjectRange,
+    selectAllObjects,
+    clearObjectSelection,
+    setBuildClipboard,
     updateObject,
     moveObjectToGroundPoint,
-    moveObjectPosition,
-    duplicateObject,
-    toggleObjectLocked,
-    toggleObjectVisibility,
-    removeObject,
+    duplicateSelectedObjects,
+    pasteBuildObjects,
+    removeSelectedObjects,
+    nudgeSelectedObjects,
+    translateSelectedObjectsBy,
+    rotateSelectedObjectsBy,
+    scaleSelectedObjectsBy,
+    toggleSelectedVisibility,
+    toggleSelectedLocked,
+    showAllObjects,
     setPanoOrigin,
     renderGrayboxPano,
     isRenderingGraybox,
@@ -128,7 +151,11 @@ export function BuildWorkspace() {
       );
     });
   }, [isRenderingGraybox, renderGrayboxPano]);
-  const selectedObject = project.scene.objects.find((object) => object.id === selectedObjectId);
+  const selectedObjects = project.scene.objects.filter((object) => selectedObjectIds.includes(object.id));
+  const selectedObject = project.scene.objects.find((object) => object.id === selectedObjectIds.at(-1));
+  const selectionHasLocked = selectedObjects.some((object) => object.locked);
+  const selectionAllLocked = selectedObjects.length > 0 && selectedObjects.every((object) => object.locked);
+  const selectionAllHidden = selectedObjects.length > 0 && selectedObjects.every((object) => !object.visible);
   const grayboxPano = getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
   const primaryAction = useMemo(
@@ -137,25 +164,72 @@ export function BuildWorkspace() {
   );
 
   const rotateSelected = useCallback((degrees: number) => {
-    if (!selectedObject) return;
-    updateObject(selectedObject.id, {
-      transform: {
-        ...selectedObject.transform,
-        rotation: [
-          selectedObject.transform.rotation[0],
-          normalizeDegrees(selectedObject.transform.rotation[1] + degrees),
-          selectedObject.transform.rotation[2],
-        ],
-      },
-    });
-  }, [selectedObject, updateObject]);
+    rotateSelectedObjectsBy('y', degrees);
+  }, [rotateSelectedObjectsBy]);
 
   const scaleSelected = useCallback((factor: number) => {
-    if (!selectedObject) return;
-    updateObject(selectedObject.id, {
-      dimensions: selectedObject.dimensions.map((value) => Math.max(0.05, Number((value * factor).toFixed(2)))) as Vec3,
-    });
-  }, [selectedObject, updateObject]);
+    scaleSelectedObjectsBy([factor, factor, factor]);
+  }, [scaleSelectedObjectsBy]);
+
+  const copySelection = useCallback(async () => {
+    if (selectedObjects.length === 0) return undefined;
+    const payload = createBuildClipboardPayload(project.id, selectedObjects);
+    setBuildClipboard(payload);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(serializeBuildClipboard(payload));
+      setSystemClipboardSyncedAt(payload.copiedAt);
+      setClipboardStatus(`Copied ${selectedObjects.length} object${selectedObjects.length === 1 ? '' : 's'}.`);
+    } catch {
+      setSystemClipboardSyncedAt(undefined);
+      setClipboardStatus(`Copied ${selectedObjects.length} object${selectedObjects.length === 1 ? '' : 's'} in this app.`);
+    }
+    return payload;
+  }, [project.id, selectedObjects, setBuildClipboard]);
+
+  const cutSelection = useCallback(async () => {
+    if (selectedObjects.length === 0) return;
+    if (selectionHasLocked) {
+      setClipboardStatus('Unlock the selected objects before cutting them.');
+      return;
+    }
+    await copySelection();
+    if (removeSelectedObjects()) setClipboardStatus(`Cut ${selectedObjects.length} object${selectedObjects.length === 1 ? '' : 's'}.`);
+  }, [copySelection, removeSelectedObjects, selectedObjects.length, selectionHasLocked]);
+
+  const pasteSelection = useCallback(async (inPlace = false) => {
+    let payload = buildClipboard;
+    try {
+      const text = await navigator.clipboard?.readText?.();
+      const externalPayload = text ? parseBuildClipboard(text) : undefined;
+      if (externalPayload) {
+        payload = externalPayload;
+      } else if (systemClipboardSyncedAt && systemClipboardSyncedAt === buildClipboard?.copiedAt) {
+        setClipboardStatus('The system clipboard does not contain Continuity Stage objects.');
+        return;
+      }
+    } catch {
+      // Permission denial is expected in non-secure or restricted contexts; use the app clipboard.
+    }
+    if (!payload) {
+      setClipboardStatus('No Continuity Stage objects are available to paste.');
+      return;
+    }
+    const pasted = pasteBuildObjects(payload, { inPlace });
+    setClipboardStatus(`Pasted ${pasted.length} object${pasted.length === 1 ? '' : 's'}${inPlace ? ' in place' : ''}.`);
+  }, [buildClipboard, pasteBuildObjects, systemClipboardSyncedAt]);
+
+  const requestFrame = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    setFrameObjectIds(ids);
+    setFrameRequest((request) => request + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!clipboardStatus) return;
+    const timeout = window.setTimeout(() => setClipboardStatus(undefined), 2600);
+    return () => window.clearTimeout(timeout);
+  }, [clipboardStatus]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -177,7 +251,60 @@ export function BuildWorkspace() {
         return;
       }
       if (command.kind === 'mode') {
-        setBuildMode(command.mode === 'pano_origin' && buildMode !== 'pano_origin' ? 'pano_origin' : 'select');
+        if (event.key === 'Escape' && buildMode === 'select') clearObjectSelection();
+        else setBuildMode(command.mode === 'pano_origin' && buildMode !== 'pano_origin' ? 'pano_origin' : 'select');
+        return;
+      }
+      if (command.kind === 'copy') {
+        void copySelection();
+        return;
+      }
+      if (command.kind === 'cut') {
+        void cutSelection();
+        return;
+      }
+      if (command.kind === 'paste') {
+        void pasteSelection(command.inPlace);
+        return;
+      }
+      if (command.kind === 'select-all') {
+        selectAllObjects();
+        setBuildMode('select');
+        return;
+      }
+      if (command.kind === 'clear-selection') {
+        clearObjectSelection();
+        return;
+      }
+      if (command.kind === 'nudge') {
+        const amount = (gridSnap ? BUILD_GRID_SIZE : 0.1) * command.direction * command.multiplier;
+        const delta: Vec3 = command.axis === 'x' ? [amount, 0, 0]
+          : command.axis === 'y' ? [0, amount, 0] : [0, 0, amount];
+        if (!nudgeSelectedObjects(delta) && selectionHasLocked) {
+          setClipboardStatus('Unlock the selection before moving it.');
+        }
+        return;
+      }
+      if (command.kind === 'frame-selection') {
+        requestFrame(selectedObjectIds);
+        return;
+      }
+      if (command.kind === 'frame-all') {
+        requestFrame(project.scene.objects.filter((object) => object.visible).map((object) => object.id));
+        return;
+      }
+      if (command.kind === 'show-all') {
+        showAllObjects();
+        return;
+      }
+      if (command.kind === 'rename') {
+        if (selectedObjectIds.length === 1) {
+          document.querySelector<HTMLInputElement>('[aria-label="Selected object name"]')?.focus();
+        }
+        return;
+      }
+      if (command.kind === 'toggle-help') {
+        setShortcutsOpen((open) => !open);
         return;
       }
       if (command.kind === 'toggle-snap') {
@@ -198,69 +325,98 @@ export function BuildWorkspace() {
       }
 
       if (!selectedObject) return;
-      if (command.kind === 'duplicate') duplicateObject(selectedObject.id);
+      if (command.kind === 'duplicate') duplicateSelectedObjects();
       if (command.kind === 'rotate-left') rotateSelected(-15);
       if (command.kind === 'rotate-right') rotateSelected(15);
       if (command.kind === 'scale-down') scaleSelected(0.9);
       if (command.kind === 'scale-up') scaleSelected(1.1);
-      if (command.kind === 'toggle-lock') toggleObjectLocked(selectedObject.id);
-      if (command.kind === 'toggle-visibility') toggleObjectVisibility(selectedObject.id);
+      if (command.kind === 'toggle-lock') toggleSelectedLocked();
+      if (command.kind === 'toggle-visibility') toggleSelectedVisibility();
       if (command.kind === 'toggle-precision') setPrecisionOpen((open) => !open);
-      if (command.kind === 'delete') removeObject(selectedObject.id);
+      if (command.kind === 'delete' && !removeSelectedObjects() && selectionHasLocked) {
+        setClipboardStatus('Unlock the selection before deleting it.');
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     buildMode,
-    duplicateObject,
+    clearObjectSelection,
+    copySelection,
+    cutSelection,
+    duplicateSelectedObjects,
     gridSnap,
+    nudgeSelectedObjects,
+    pasteSelection,
+    project.scene.objects,
     redoBuild,
-    removeObject,
+    removeSelectedObjects,
+    requestFrame,
     rotateSelected,
     scaleSelected,
+    selectAllObjects,
     selectedObject,
+    selectedObjectIds,
+    selectionHasLocked,
     setActivePrimitive,
     setBuildMode,
     setGridSnap,
-    toggleObjectLocked,
-    toggleObjectVisibility,
+    showAllObjects,
+    toggleSelectedLocked,
+    toggleSelectedVisibility,
     undoBuild,
   ]);
 
   useEffect(() => {
-    if (!selectedObject) {
-      setPrecisionOpen(false);
-      setLayersOpen(false);
-    }
-  }, [selectedObject]);
+    if (selectedObjects.length !== 1) setPrecisionOpen(false);
+    if (selectedObjects.length === 0) setLayersOpen(false);
+  }, [selectedObjects.length]);
 
   return (
     <FullBleedLayout>
       <div className="relative h-full min-h-0">
         <SceneViewport
           project={project}
-          selectedObjectId={selectedObjectId}
+          selectedObjectIds={selectedObjectIds}
           placementType={buildMode === 'place' ? activePrimitive : undefined}
           placementLabel={primitiveLabel(activePrimitive)}
           originPlacementActive={buildMode === 'pano_origin'}
           showSceneGuides={showSceneGuides}
-          showTransformGizmo={Boolean(selectedObject && buildMode === 'select')}
+          showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked)}
           gizmoMode={gizmoMode}
           snapToGrid={gridSnap}
           onSelectObject={selectObject}
           onPlaceObject={placeObject}
           onMoveObject={moveObjectToGroundPoint}
-          onMoveObjectInSpace={moveObjectPosition}
+          onMoveObjectInSpace={(_id, position) => {
+            if (!selectedObject) return;
+            translateSelectedObjectsBy([
+              position[0] - selectedObject.transform.position[0],
+              position[1] - selectedObject.transform.position[1],
+              position[2] - selectedObject.transform.position[2],
+            ], { history: 'batch' });
+          }}
           onRotateObject={(id, rotation) => {
             const object = project.scene.objects.find((item) => item.id === id);
             if (!object) return;
-            updateObject(id, { transform: { ...object.transform, rotation } });
+            const deltas = rotation.map((value, index) => signedDegreeDelta(object.transform.rotation[index], value)) as Vec3;
+            const axisIndex = deltas.reduce((best, value, index) => Math.abs(value) > Math.abs(deltas[best]) ? index : best, 0);
+            const axis = axisIndex === 0 ? 'x' : axisIndex === 1 ? 'y' : 'z';
+            rotateSelectedObjectsBy(axis, deltas[axisIndex], { history: 'batch' });
           }}
-          onScaleObject={(id, dimensions) => updateObject(id, { dimensions })}
+          onScaleObject={(id, dimensions) => {
+            const object = project.scene.objects.find((item) => item.id === id);
+            if (!object) return;
+            scaleSelectedObjectsBy(dimensions.map((value, index) => (
+              value / Math.max(object.dimensions[index], 0.0001)
+            )) as Vec3, { history: 'batch' });
+          }}
           onMovePanoOrigin={setPanoOrigin}
           onEditBatchStart={beginBuildHistoryBatch}
           onEditBatchEnd={endBuildHistoryBatch}
+          frameRequest={frameRequest}
+          frameObjectIds={frameObjectIds}
         />
 
         {/* Sit below the global header action cluster so undo/redo isn't stacked under theme. */}
@@ -292,6 +448,17 @@ export function BuildWorkspace() {
               className="inline-flex h-11 w-11 items-center justify-center border-0 bg-transparent text-secondary transition hover:bg-surface-muted/80 hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
             >
               <Redo2 className="h-4 w-4" />
+            </button>
+            <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
+            <button
+              type="button"
+              title="Paste Build objects (Ctrl/Cmd+V)"
+              aria-label="Paste Build objects"
+              data-build-paste
+              onClick={() => void pasteSelection()}
+              className="inline-flex h-11 w-11 items-center justify-center border-0 bg-transparent text-secondary transition hover:bg-surface-muted/80 hover:text-primary"
+            >
+              <ClipboardPaste className="h-4 w-4" />
             </button>
             <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
             <button
@@ -337,24 +504,31 @@ export function BuildWorkspace() {
           </div>
         )}
 
-        {selectedObject && (
+        {selectedObjects.length > 0 && (
           <div
             className="pointer-events-none absolute right-5 z-10"
             style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
           >
             <ContextualPanel>
               <div className="flex items-center gap-2">
-                <TextInput
-                  value={selectedObject.name}
-                  onChange={(event) => updateObject(selectedObject.id, { name: event.target.value }, { history: 'coalesce' })}
-                  aria-label="Selected object name"
-                  className="h-8 min-w-36 border-subtle bg-surface-muted"
-                />
+                {selectedObjects.length === 1 && selectedObject ? (
+                  <TextInput
+                    value={selectedObject.name}
+                    onChange={(event) => updateObject(selectedObject.id, { name: event.target.value }, { history: 'coalesce' })}
+                    aria-label="Selected object name"
+                    className="h-8 min-w-36 border-subtle bg-surface-muted"
+                  />
+                ) : (
+                  <div className="min-w-36 text-sm font-semibold text-primary" data-build-selection-count>
+                    {selectedObjects.length} objects selected
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => setPrecisionOpen(true)}
+                  disabled={selectedObjects.length !== 1}
                   title="Precision drawer (I)"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-subtle text-secondary transition hover:border-accent hover:text-accent"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-subtle text-secondary transition hover:border-accent hover:text-accent disabled:opacity-35"
                 >
                   <Ruler className="h-4 w-4" />
                 </button>
@@ -383,14 +557,19 @@ export function BuildWorkspace() {
                 <QuickAction title="Rotate right (R)" onClick={() => rotateSelected(15)}><RotateCw className="h-3.5 w-3.5" /></QuickAction>
                 <QuickAction title="Scale down ([)" onClick={() => scaleSelected(0.9)}><ZoomOut className="h-3.5 w-3.5" /></QuickAction>
                 <QuickAction title="Scale up (])" onClick={() => scaleSelected(1.1)}><ZoomIn className="h-3.5 w-3.5" /></QuickAction>
-                <QuickAction title="Duplicate (D)" onClick={() => duplicateObject(selectedObject.id)}><Copy className="h-3.5 w-3.5" /></QuickAction>
-                <QuickAction title={selectedObject.locked ? 'Unlock (L)' : 'Lock (L)'} onClick={() => toggleObjectLocked(selectedObject.id)}>
-                  {selectedObject.locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+                <QuickAction title="Cut (Ctrl/Cmd+X)" onClick={() => void cutSelection()}><Scissors className="h-3.5 w-3.5" /></QuickAction>
+                <QuickAction title="Copy (Ctrl/Cmd+C)" onClick={() => void copySelection()}><Copy className="h-3.5 w-3.5" /></QuickAction>
+                <QuickAction title="Paste (Ctrl/Cmd+V)" onClick={() => void pasteSelection()}><ClipboardPaste className="h-3.5 w-3.5" /></QuickAction>
+                <QuickAction title="Duplicate (D or Ctrl/Cmd+D)" onClick={() => duplicateSelectedObjects()}><SquareStack className="h-3.5 w-3.5" /></QuickAction>
+                <QuickAction title={selectionAllLocked ? 'Unlock (L)' : 'Lock (L)'} onClick={() => toggleSelectedLocked()}>
+                  {selectionAllLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
                 </QuickAction>
-                <QuickAction title={selectedObject.visible ? 'Hide (H)' : 'Show (H)'} onClick={() => toggleObjectVisibility(selectedObject.id)}>
-                  {selectedObject.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                <QuickAction title={selectionAllHidden ? 'Show (H)' : 'Hide (H)'} onClick={() => toggleSelectedVisibility()}>
+                  {selectionAllHidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </QuickAction>
-                <QuickAction title="Delete" danger onClick={() => removeObject(selectedObject.id)}><Trash2 className="h-3.5 w-3.5" /></QuickAction>
+                <QuickAction title="Delete" danger onClick={() => {
+                  if (!removeSelectedObjects()) setClipboardStatus('Unlock the selection before deleting it.');
+                }}><Trash2 className="h-3.5 w-3.5" /></QuickAction>
               </div>
               {layersOpen && (
                 <div className="mt-3 max-h-40 space-y-1 overflow-y-auto border-t border-subtle pt-3">
@@ -398,9 +577,12 @@ export function BuildWorkspace() {
                     <button
                       key={object.id}
                       type="button"
-                      onClick={() => selectObject(object.id)}
+                      onClick={(event) => {
+                        if (event.shiftKey) selectObjectRange(object.id);
+                        else selectObject(object.id, event.ctrlKey || event.metaKey ? 'toggle' : 'replace');
+                      }}
                       className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition ${
-                        selectedObjectId === object.id ? 'bg-accent-soft text-accent' : 'text-secondary hover:bg-surface-muted'
+                        selectedObjectIds.includes(object.id) ? 'bg-accent-soft text-accent' : 'text-secondary hover:bg-surface-muted'
                       }`}
                     >
                       <Box className="h-3 w-3 shrink-0" />
@@ -409,6 +591,39 @@ export function BuildWorkspace() {
                   ))}
                 </div>
               )}
+            </ContextualPanel>
+          </div>
+        )}
+
+        {clipboardStatus && (
+          <div
+            role="status"
+            data-build-command-status
+            className="pointer-events-none absolute left-1/2 top-[calc(var(--stage-header-safe)+0.5rem)] z-30 -translate-x-1/2 rounded-full border border-subtle bg-surface-overlay px-4 py-2 text-xs font-medium text-primary shadow-card backdrop-blur"
+          >
+            {clipboardStatus}
+          </div>
+        )}
+
+        {shortcutsOpen && (
+          <div className="pointer-events-auto absolute left-5 top-[calc(var(--stage-header-safe)+0.5rem)] z-30 w-[min(24rem,calc(100%-2.5rem))]">
+            <ContextualPanel>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <strong className="text-sm text-primary">Build shortcuts</strong>
+                <button type="button" className="text-xs text-muted hover:text-primary" onClick={() => setShortcutsOpen(false)}>Close</button>
+              </div>
+              <div className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs text-secondary" data-build-shortcut-reference>
+                <kbd>Ctrl/Cmd+C · X · V</kbd><span>Copy · cut · paste</span>
+                <kbd>Ctrl/Cmd+Shift+V</kbd><span>Paste in place</span>
+                <kbd>Ctrl/Cmd+A · Shift+A</kbd><span>Select all · deselect</span>
+                <kbd>D · Ctrl/Cmd+D</kbd><span>Duplicate selection</span>
+                <kbd>Arrows · PgUp/PgDn</kbd><span>Nudge on world axes</span>
+                <kbd>F · Home</kbd><span>Frame selection · frame all</span>
+                <kbd>T · E · S</kbd><span>Move · rotate · scale gizmo</span>
+                <kbd>H · Alt+H · L</kbd><span>Hide · show all · lock</span>
+                <kbd>F2 · I · ?</kbd><span>Rename · precision · help</span>
+                <kbd>Ctrl/Cmd+Z · Shift+Z</kbd><span>Undo · redo</span>
+              </div>
             </ContextualPanel>
           </div>
         )}
@@ -504,7 +719,7 @@ export function BuildWorkspace() {
       </div>
 
       <PrecisionDrawer
-        open={precisionOpen && Boolean(selectedObject)}
+        open={precisionOpen && selectedObjects.length === 1 && Boolean(selectedObject)}
         title="Precision"
         onClose={() => setPrecisionOpen(false)}
       >
@@ -621,7 +836,7 @@ function BuildObjectTray({
         </div>
         {toolsOpen && (
           <p className="mt-2 hidden border-t border-subtle pt-2 text-[10px] leading-relaxed text-muted sm:block" data-build-shortcuts-hint>
-            Keys: 1–9/0 stamp · V/Esc select · O origin · G snap · D dup · R rotate · [ ] scale · T/E/S gizmo · I precision · Del delete · Ctrl+Z build undo · Ctrl+Shift+Z build redo
+            Keys: 1–9/0 stamp · V/Esc select · Ctrl/Cmd+C/X/V clipboard · Ctrl/Cmd+A select all · D duplicate · Arrows nudge · F/Home frame · T/E/S gizmo · H/Alt+H visibility · L lock · ? help
           </p>
         )}
       </div>
@@ -829,8 +1044,8 @@ function PrecisionControls({
   );
 }
 
-function normalizeDegrees(value: number) {
-  return ((value % 360) + 360) % 360;
+function signedDegreeDelta(from: number, to: number) {
+  return ((to - from + 540) % 360) - 180;
 }
 
 function blurActiveElement() {

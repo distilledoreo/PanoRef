@@ -37,7 +37,11 @@ Persisted workflow checkpoints are saved in project JSON under `workflow`:
 
 Primitive stamps use game-inventory style number slots: `1` Floor, `2` Wall, `3` Box, `4` Arch, `5` Doorway, `6` Column, `7` Stairs, `8` Tree, `9` Terrain, and `0` Person. Backdrop, Sun, Arch, Terrain, and Person are also reachable from the tray's **More** tool when they are not part of the primary visible strip.
 
-Build action shortcuts are `V` or `Esc` for Select, `O` for Origin, `G` for Snap, `D` for Duplicate, `R` / `Shift+R` for rotate right/left, `[` / `]` for scale down/up, `L` for lock, `H` for hide/show, `I` for the precision drawer, and `Delete` / `Backspace` for delete. Shortcuts are ignored while typing in editable fields.
+Build supports ordered multi-selection: click replaces the selection, `Shift`-click or `Ctrl`/`Cmd`-click toggles objects, and the Layers list supports `Shift` range selection. `Ctrl`/`Cmd+A` selects all visible unlocked objects, `Ctrl`/`Cmd+Shift+A` or `Esc` clears selection, and group move/rotate/scale uses the shared selection bounds.
+
+Clipboard actions are `Ctrl`/`Cmd+C`, `X`, and `V`; `Ctrl`/`Cmd+Shift+V` pastes in place and ordinary paste cascades copies visibly. `D` or `Ctrl`/`Cmd+D` duplicates. Arrow keys nudge on world X/Z, `Page Up` / `Page Down` nudge vertically, `Shift` makes nudges coarse, and `Alt` makes them fine. `F` frames the selection, `Home` frames the scene, `F2` renames one object, `Alt+H` shows all, and `?` opens the full reference.
+
+Existing Build actions remain: `V` or `Esc` for Select, `O` for Origin, `G` for Snap, `R` / `Shift+R` for rotate right/left, `[` / `]` for scale down/up, `T` / `E` / `S` for gizmo mode, `L` for lock, `H` for hide/show, `I` for Precision, and `Delete` / `Backspace` for delete. Shortcuts are ignored while typing in editable fields so native text cut/copy/paste remains available.
 
 ## Project Format
 

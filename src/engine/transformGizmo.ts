@@ -213,6 +213,21 @@ export function updateTransformGizmo(
   outline.update();
 }
 
+export function updateGroupTransformGizmo(
+  gizmo: THREE.Group,
+  outlines: THREE.BoxHelper[],
+  objectMeshes: THREE.Object3D[],
+) {
+  const box = new THREE.Box3();
+  objectMeshes.forEach((mesh) => box.union(new THREE.Box3().setFromObject(mesh)));
+  if (box.isEmpty()) return;
+  const size = box.getSize(new THREE.Vector3());
+  gizmo.position.copy(box.getCenter(new THREE.Vector3()));
+  gizmo.scale.setScalar(computeGizmoScale(size));
+  gizmo.rotation.set(0, 0, 0);
+  outlines.forEach((outline) => outline.update());
+}
+
 export function findGizmoHit(
   raycaster: THREE.Raycaster,
   gizmo: THREE.Object3D | null,

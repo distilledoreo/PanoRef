@@ -195,7 +195,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('shotFraming={shotFraming}');
     expect(shots).not.toContain('selectedObjectId');
     expect(shots).not.toContain('onSelectObject');
-    expect(viewport).toContain('selectedObjectId: shotFraming ? undefined : selectedObjectId');
+    expect(viewport).toContain('selectedObjectIds: shotFraming ? [] : selectedObjectIds');
     expect(viewport).toContain('showSceneGuides: shotFraming ? false : showSceneGuides');
     expect(viewport).toContain('if (framing) return;');
   });

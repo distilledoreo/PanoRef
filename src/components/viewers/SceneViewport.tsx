@@ -18,6 +18,7 @@ import {
   findGizmoHit,
   findSceneObjectMesh,
   intersectAxisDragPlane,
+  updateGroupTransformGizmo,
   updateTransformGizmo,
   vec3FromVector3,
   type GizmoAxis,
@@ -61,11 +62,12 @@ interface DragState {
   gizmoScreenStartX?: number;
   gizmoScreenStartY?: number;
   pendingSelectId?: string;
+  pendingSelectionMode?: 'replace' | 'toggle';
 }
 
 export function SceneViewport({
   project,
-  selectedObjectId,
+  selectedObjectIds = [],
   selectedShotId,
   placementType,
   placementLabel,
@@ -84,10 +86,12 @@ export function SceneViewport({
   onMovePanoOrigin,
   onEditBatchStart,
   onEditBatchEnd,
+  frameRequest = 0,
+  frameObjectIds = [],
   minHeightClassName = 'min-h-[420px]',
 }: {
   project: LocationProject;
-  selectedObjectId?: string;
+  selectedObjectIds?: string[];
   selectedShotId?: string;
   placementType?: SceneObjectType;
   placementLabel?: string;
@@ -104,7 +108,7 @@ export function SceneViewport({
     onCameraChange: (camera: CameraData) => void;
     onLockCamera?: () => void;
   };
-  onSelectObject?: (id?: string) => void;
+  onSelectObject?: (id?: string, mode?: 'replace' | 'toggle') => void;
   onPlaceObject?: (type: SceneObjectType, point: Vec3) => void;
   onMoveObject?: (id: string, point: Vec3) => void;
   onMoveObjectInSpace?: (id: string, point: Vec3) => void;
@@ -114,6 +118,8 @@ export function SceneViewport({
   /** Wrap continuous gizmo / origin drags so undo records one step per gesture. */
   onEditBatchStart?: () => void;
   onEditBatchEnd?: () => void;
+  frameRequest?: number;
+  frameObjectIds?: string[];
   minHeightClassName?: string;
 }) {
   const theme = useThemeStore((state) => state.theme);
@@ -126,7 +132,7 @@ export function SceneViewport({
   const orbitRef = useRef({ yaw: -34, pitch: 28, distance: 15.5, target: new THREE.Vector3(0, 1.15, 1.25) });
   const dragRef = useRef<DragState>({ kind: 'idle', x: 0, y: 0, moved: false });
   const lastFloorPointRef = useRef<Vec3 | undefined>();
-  const selectedObjectIdRef = useRef(selectedObjectId);
+  const selectedObjectIdsRef = useRef(selectedObjectIds);
   const projectRef = useRef(project);
   const snapToGridRef = useRef(snapToGrid);
   const callbacksRef = useRef({
@@ -158,13 +164,13 @@ export function SceneViewport({
   const lastFrameTimeRef = useRef(performance.now());
   const flyDirtyRef = useRef(false);
   const gizmoRef = useRef<THREE.Group | null>(null);
-  const selectionOutlineRef = useRef<THREE.BoxHelper | null>(null);
+  const selectionOutlineRefs = useRef<THREE.BoxHelper[]>([]);
   const showSceneGuidesRef = useRef(showSceneGuides);
   const showTransformGizmoRef = useRef(showTransformGizmo);
   const gizmoModeRef = useRef(gizmoMode);
   const originPlacementActiveRef = useRef(originPlacementActive);
 
-  selectedObjectIdRef.current = selectedObjectId;
+  selectedObjectIdsRef.current = selectedObjectIds;
   projectRef.current = project;
   flyBoundsRef.current = computeSceneFlyBounds(project.scene);
   snapToGridRef.current = snapToGrid;
@@ -188,25 +194,27 @@ export function SceneViewport({
 
   const clearTransformGizmo = useCallback(() => {
     const scene = sceneRef.current;
-    const nodes = [gizmoRef.current, selectionOutlineRef.current].filter(Boolean) as THREE.Object3D[];
+    const nodes = [gizmoRef.current, ...selectionOutlineRefs.current].filter(Boolean) as THREE.Object3D[];
     if (scene) {
       nodes.forEach((node) => scene.remove(node));
     }
     if (nodes.length > 0) disposeGizmoNodes(nodes);
     gizmoRef.current = null;
-    selectionOutlineRef.current = null;
+    selectionOutlineRefs.current = [];
   }, []);
 
   const syncTransformGizmo = useCallback(() => {
     const scene = sceneRef.current;
-    if (!scene || shotFramingRef.current || !showTransformGizmoRef.current || !selectedObjectIdRef.current) {
+    const selectedIds = selectedObjectIdsRef.current;
+    if (!scene || shotFramingRef.current || !showTransformGizmoRef.current || selectedIds.length === 0) {
       clearTransformGizmo();
       return;
     }
 
-    const object = projectRef.current.scene.objects.find((item) => item.id === selectedObjectIdRef.current);
-    const mesh = findSceneObjectMesh(scene, selectedObjectIdRef.current);
-    if (!object || !mesh) {
+    const objectMeshes = selectedIds
+      .map((id) => findSceneObjectMesh(scene, id))
+      .filter((mesh): mesh is THREE.Object3D => Boolean(mesh));
+    if (objectMeshes.length !== selectedIds.length) {
       clearTransformGizmo();
       return;
     }
@@ -221,12 +229,30 @@ export function SceneViewport({
       scene.add(gizmoRef.current);
     }
 
-    if (!selectionOutlineRef.current) {
-      selectionOutlineRef.current = createSelectionOutline(mesh);
-      scene.add(selectionOutlineRef.current);
+    const outlinesMatch = selectionOutlineRefs.current.length === selectedIds.length
+      && selectionOutlineRefs.current.every((outline, index) => outline.userData.selectionId === selectedIds[index]);
+    if (!outlinesMatch) {
+      selectionOutlineRefs.current.forEach((outline) => {
+        scene.remove(outline);
+        disposeGizmoNodes([outline]);
+      });
+      selectionOutlineRefs.current = objectMeshes.map((mesh, index) => {
+        const outline = createSelectionOutline(mesh);
+        outline.userData.selectionId = selectedIds[index];
+        const material = outline.material as THREE.LineBasicMaterial;
+        material.color.set(index === selectedIds.length - 1 ? 0x14b8a6 : 0x60a5fa);
+        material.opacity = index === selectedIds.length - 1 ? 1 : 0.65;
+        scene.add(outline);
+        return outline;
+      });
     }
 
-    updateTransformGizmo(gizmoRef.current, selectionOutlineRef.current!, mesh, object);
+    if (selectedIds.length === 1) {
+      const object = projectRef.current.scene.objects.find((item) => item.id === selectedIds[0]);
+      if (object) updateTransformGizmo(gizmoRef.current, selectionOutlineRefs.current[0], objectMeshes[0], object);
+    } else {
+      updateGroupTransformGizmo(gizmoRef.current, selectionOutlineRefs.current, objectMeshes);
+    }
   }, [clearTransformGizmo]);
 
   const emitFramingCamera = useCallback(() => {
@@ -423,13 +449,10 @@ export function SceneViewport({
         onMoveObjectInSpace,
         onRotateObject,
         onScaleObject,
-        onSelectObject,
       } = callbacksRef.current;
       const gizmo = gizmoRef.current;
       const camera = cameraRef.current;
       if (!gizmo || !camera || !pointer) return false;
-
-      onSelectObject?.(object.id);
 
       if (gizmoHit.kind === 'translate' && onMoveObjectInSpace) {
         const axisOrigin = getGizmoWorldPosition(gizmo);
@@ -527,7 +550,7 @@ export function SceneViewport({
 
       if (framing) return;
 
-      if (event.button === 1 || event.button === 2 || (event.button === 0 && event.shiftKey)) {
+      if (event.button === 1 || event.button === 2) {
         event.preventDefault();
         beginOrbitDrag(event, true);
         return;
@@ -592,21 +615,19 @@ export function SceneViewport({
       if (
         inSelectMode
         && gizmoHit
-        && selectedObjectIdRef.current
+        && selectedObjectIdsRef.current.length > 0
         && gizmoRef.current
         && cameraRef.current
       ) {
-        const object = activeProject.scene.objects.find((item) => item.id === selectedObjectIdRef.current);
+        const activeId = selectedObjectIdsRef.current.at(-1);
+        const object = activeProject.scene.objects.find((item) => item.id === activeId);
         if (object && !object.locked && beginGizmoDrag(gizmoHit, object, pointer, event)) {
           return;
         }
       }
-      if (inSelectMode && hitObject && !hitObject.locked) {
-        onSelectObject?.(hitObject.id);
-      }
-
       beginOrbitDrag(event);
       dragRef.current.pendingSelectId = hitObject?.id;
+      dragRef.current.pendingSelectionMode = event.shiftKey || event.ctrlKey || event.metaKey ? 'toggle' : 'replace';
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -797,7 +818,7 @@ export function SceneViewport({
           updatePreviewMesh(lastFloorPointRef.current);
         }
       } else if (drag.kind === 'orbit' && !drag.moved) {
-        onSelectObject?.(drag.pendingSelectId);
+        onSelectObject?.(drag.pendingSelectId, drag.pendingSelectionMode);
       }
       const wasEditDrag = drag.kind === 'gizmo_translate'
         || drag.kind === 'gizmo_rotate'
@@ -925,7 +946,7 @@ export function SceneViewport({
     if (sceneRef.current) disposeScene(sceneRef.current);
     clearTransformGizmo();
     sceneRef.current = buildScene(project, {
-      selectedObjectId: shotFraming ? undefined : selectedObjectId,
+      selectedObjectIds: shotFraming ? [] : selectedObjectIds,
       selectedShotId,
       hideShotFrustums: Boolean(shotFraming) || !showSceneGuides,
       showSceneGuides: shotFraming ? false : showSceneGuides,
@@ -941,7 +962,7 @@ export function SceneViewport({
     clearTransformGizmo,
     originPlacementActive,
     project,
-    selectedObjectId,
+    selectedObjectIds,
     selectedShotId,
     shotFraming,
     showSceneGuides,
@@ -953,7 +974,24 @@ export function SceneViewport({
 
   useEffect(() => {
     syncTransformGizmo();
-  }, [gizmoMode, selectedObjectId, showTransformGizmo, syncTransformGizmo]);
+  }, [gizmoMode, selectedObjectIds, showTransformGizmo, syncTransformGizmo]);
+
+  useEffect(() => {
+    if (!frameRequest || shotFraming || !cameraRef.current) return;
+    const objects = project.scene.objects.filter((object) => frameObjectIds.includes(object.id) && object.visible);
+    const scene = sceneRef.current;
+    if (!scene || objects.length === 0) return;
+    const box = new THREE.Box3();
+    objects.forEach((object) => {
+      const mesh = findSceneObjectMesh(scene, object.id);
+      if (mesh) box.union(new THREE.Box3().setFromObject(mesh));
+    });
+    if (box.isEmpty()) return;
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    orbitRef.current.target.copy(center);
+    orbitRef.current.distance = THREE.MathUtils.clamp(Math.max(size.x, size.y, size.z) * 2.2, 3, 28);
+  }, [frameObjectIds, frameRequest, project.scene.objects, shotFraming]);
 
   useEffect(() => {
     if (previewPointRef.current) updatePreviewMesh(previewPointRef.current);
