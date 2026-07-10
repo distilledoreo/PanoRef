@@ -25,12 +25,16 @@ export interface ImportedModelInfo {
   sourceKind: 'model' | 'scene';
   sourceApplication?: ImportedModelSourceApplication;
   sourceSceneName?: string;
+  /** Optional original Maya/Blender parent transform name for preserved hierarchy. */
+  parentImportName?: string;
+  /** Ordered parent chain from root to immediate parent when hierarchy is preserved. */
+  parentChain?: string[];
   vertexCount: number;
   triangleCount: number;
   meshCount: number;
   /** Imported triangles are preserved exactly; only hierarchy/material data is flattened. */
   geometrySimplified: false;
-  hierarchyFlattened: true;
+  hierarchyFlattened: boolean;
   warnings?: string[];
 }
 

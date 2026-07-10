@@ -114,6 +114,7 @@ interface ContinuityStore {
   canRedoBuild: () => boolean;
   addObject: (type: SceneObjectType) => void;
   addImportedModel: (result: { asset: ProjectAsset; object: SceneObject }) => SceneObject;
+  addImportedModels: (results: { asset: ProjectAsset; object: SceneObject }[]) => SceneObject[];
   placeObject: (type: SceneObjectType, point: Vec3) => SceneObject;
   selectObject: (id?: string, mode?: SelectionMode) => void;
   selectObjectRange: (id: string) => void;
@@ -356,6 +357,24 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       extra: { buildMode: 'select' },
     }));
     return object;
+  },
+  addImportedModels: (results) => {
+    if (results.length === 0) return [];
+    const objects = results.map((r) => r.object);
+    const assetMap = Object.fromEntries(results.map((r) => [r.asset.id, r.asset]));
+    set((state) => applyBuildSceneChange(state, {
+      objects: [...state.project.scene.objects, ...objects],
+      assets: {
+        assets: {
+          ...state.project.assets.assets,
+          ...assetMap,
+        },
+      },
+      selectedObjectIds: objects.map((o) => o.id),
+      history: 'step',
+      extra: { buildMode: 'select' },
+    }));
+    return objects;
   },
   placeObject: (type, point) => {
     const state = get();

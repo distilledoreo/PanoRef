@@ -34,6 +34,7 @@ export function ModelImportDialog({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const addImportedModel = useContinuityStore((state) => state.addImportedModel);
+  const addImportedModels = useContinuityStore((state) => state.addImportedModels);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string>();
   const [report, setReport] = useState<ImportReportItem[]>([]);
@@ -60,24 +61,29 @@ export function ModelImportDialog({
       setProgress(`Converting ${job.file.name} (${index + 1} of ${plan.jobs.length})…`);
       try {
         // Sequential conversion keeps peak memory predictable on low-power devices.
-        const result = await importModelJob(job);
-        addImportedModel(result);
-        imported.push(result.object);
-        const details = result.object.importedModel;
-        nextReport.push({
-          id: result.object.id,
-          tone: 'success',
-          title: result.object.name,
-          message: details
-            ? `${details.triangleCount.toLocaleString()} triangles · ${details.vertexCount.toLocaleString()} vertices · imported unchanged`
-            : 'Imported as graybox geometry.',
-        });
-        details?.warnings?.forEach((warning, warningIndex) => nextReport.push({
-          id: `${result.object.id}-warning-${warningIndex}`,
-          tone: 'warning',
-          title: result.object.name,
-          message: warning,
-        }));
+        const results = await importModelJob(job);
+        const list = results.length > 1 ? addImportedModels(results) : [addImportedModel(results[0])];
+        // results may have been re-ordered for reporting purposes? Keep original order for UX.
+        for (const result of results) {
+          imported.push(result.object);
+          const details = result.object.importedModel;
+          nextReport.push({
+            id: result.object.id,
+            tone: 'success',
+            title: result.object.name,
+            message: details
+              ? `${details.triangleCount.toLocaleString()} triangles · ${details.vertexCount.toLocaleString()} vertices · imported unchanged`
+              : 'Imported as graybox geometry.',
+          });
+          details?.warnings?.forEach((warning, warningIndex) => nextReport.push({
+            id: `${result.object.id}-warning-${warningIndex}`,
+            tone: 'warning',
+            title: result.object.name,
+            message: warning,
+          }));
+        }
+        // Ensure store selection matches imported list already handled by addImported* batch
+        void list;
       } catch (error) {
         nextReport.push({
           id: `error-${index}-${job.file.name}`,
@@ -142,16 +148,17 @@ export function ModelImportDialog({
             <div>
               <p className="text-sm font-semibold text-primary">Geometry-only, local, and exact</p>
               <p className="mt-1 text-sm leading-relaxed text-secondary">
-                GLB/glTF, OBJ, STL, PLY, and FBX are converted locally into one texture-free graybox object.
+                GLB/glTF, OBJ, STL, PLY, FBX, and now Maya <code className="text-primary">.ma</code> are converted locally into texture-free graybox objects.
                 Triangles are not reduced. Materials, textures, cameras, lights, rigs, and animation are omitted.
+                Maya hierarchy is preserved as separate selectable objects.
               </p>
             </div>
           </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
-          <BridgeCard title="Blender" native=".blend" bridge="Select it with a same-name geometry-only .glb." />
-          <BridgeCard title="Maya" native=".ma / .mb" bridge="Select it with a same-name .fbx or .glb." />
+          <BridgeCard title="Blender" native=".blend" bridge="Select it with a same-name geometry-only .glb (direct .blend next)." />
+          <BridgeCard title="Maya" native=".ma .mb" bridge=".ma parses directly with hierarchy; .mb needs .fbx/.glb bridge." />
           <BridgeCard title="Unreal" native=".umap / .uasset" bridge="Select it with an exported level/actor .glb or .fbx." />
         </div>
 

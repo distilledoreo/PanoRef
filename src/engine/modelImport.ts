@@ -9,10 +9,10 @@ import { createTransform } from '../domain/defaults';
 import { createId } from '../utils/ids';
 import { encodePackedGrayboxMesh } from './importedMesh';
 
-export const DIRECT_MODEL_EXTENSIONS = ['glb', 'gltf', 'obj', 'stl', 'ply', 'fbx'] as const;
+export const DIRECT_MODEL_EXTENSIONS = ['glb', 'gltf', 'obj', 'stl', 'ply', 'fbx', 'ma'] as const;
 export type DirectModelFormat = typeof DIRECT_MODEL_EXTENSIONS[number];
 
-export const NATIVE_SCENE_EXTENSIONS = ['blend', 'ma', 'mb', 'uproject', 'umap', 'uasset'] as const;
+export const NATIVE_SCENE_EXTENSIONS = ['blend', 'mb', 'uproject', 'umap', 'uasset'] as const;
 export const MODEL_IMPORT_ACCEPT = [
   ...DIRECT_MODEL_EXTENSIONS.map((extension) => `.${extension}`),
   ...NATIVE_SCENE_EXTENSIONS.map((extension) => `.${extension}`),
@@ -69,6 +69,8 @@ export interface ModelImportResult {
   object: SceneObject;
 }
 
+export type ModelImportResults = ModelImportResult[];
+
 interface LoadedModel {
   root: THREE.Object3D;
   materialCount: number;
@@ -102,8 +104,13 @@ interface SceneBundleManifestData {
 
 export function createModelImportPlan(files: readonly File[]): ModelImportPlan {
   const directFiles = files.filter((file) => directFormatForFile(file));
-  const nativeFiles = files.filter((file) => nativeApplicationForFile(file));
   const bundleFiles = files.filter(isSceneBundleFile);
+  // .ma is directly importable, so exclude it from native bridge-only handling
+  const nativeFiles = files.filter((file) => {
+    const ext = fileExtension(file.name);
+    if (ext === 'ma') return false;
+    return Boolean(nativeApplicationForFile(file));
+  });
   const recognized = new Set([...directFiles, ...nativeFiles, ...bundleFiles]);
   const usedDirect = new Set<File>();
   const jobs: ModelImportJob[] = bundleFiles.map((file) => ({ kind: 'bundle', file }));
@@ -163,10 +170,10 @@ export function createModelImportPlan(files: readonly File[]): ModelImportPlan {
   return { jobs, issues };
 }
 
-export async function importModelJob(job: ModelImportJob): Promise<ModelImportResult> {
+export async function importModelJob(job: ModelImportJob): Promise<ModelImportResults> {
   if (job.kind === 'bundle') {
     const bundled = await readSceneBundle(job.file);
-    return importDirectModel(
+    const single = await importDirectModel(
       bundled.file,
       bundled.manifest.source?.application,
       bundled.manifest.source?.file,
@@ -174,6 +181,7 @@ export async function importModelJob(job: ModelImportJob): Promise<ModelImportRe
         ? ['The bundle was not marked geometry-only; all materials and textures were stripped during import.']
         : [],
     );
+    return single;
   }
   return importDirectModel(job.file, job.sourceApplication, job.sourceSceneName);
 }
@@ -183,7 +191,7 @@ export function nativeBridgeMessage(application: ImportedModelSourceApplication)
     return 'Blender .blend files need a companion geometry-only .glb with the same name, or a PanoRef scene bundle.';
   }
   if (application === 'maya') {
-    return 'Maya .ma/.mb files need a companion geometry-only .fbx or .glb with the same name, or a PanoRef scene bundle.';
+    return 'Maya binary .mb files need a companion geometry-only .fbx or .glb with the same name, or a PanoRef scene bundle. Note: Maya ASCII .ma is now directly importable.';
   }
   return 'Unreal scenes/assets need a companion geometry-only level/actor .glb or .fbx, or a PanoRef scene bundle.';
 }
@@ -193,10 +201,15 @@ async function importDirectModel(
   sourceApplication?: ImportedModelSourceApplication,
   sourceSceneName?: string,
   initialWarnings: string[] = [],
-): Promise<ModelImportResult> {
+): Promise<ModelImportResults> {
   assertSourceFileSize(file);
   const format = directFormatForFile(file);
   if (!format) throw new Error(`Unsupported model format: ${file.name}`);
+
+  // Direct .ma parsing preserves hierarchy via custom parser
+  if (format === 'ma') {
+    return importMaFile(file, sourceApplication, sourceSceneName, initialWarnings);
+  }
 
   const loaded = await loadModel(file, format);
   try {
@@ -275,10 +288,110 @@ async function importDirectModel(
         warnings: warnings.length > 0 ? warnings : undefined,
       },
     };
-    return { asset, object };
+    return [{ asset, object }];
   } finally {
     disposeLoadedRoot(loaded.root);
   }
+}
+
+async function importMaFile(
+  file: File,
+  sourceApplication: ImportedModelSourceApplication | undefined,
+  sourceSceneName: string | undefined,
+  initialWarnings: string[],
+): Promise<ModelImportResults> {
+  const { parseMaText } = await import('./parsers/maParser');
+  const { extractMaGeometry } = await import('./parsers/maToThree');
+  const text = await file.text();
+  if (text.length === 0) throw new Error(`${file.name} is empty.`);
+  // Quick header check
+  if (!text.includes('createNode') || !text.includes('Maya ASCII')) {
+    // Still attempt parse but warn if not MA header-ish
+  }
+  const maScene = parseMaText(text);
+  const extractions = extractMaGeometry(maScene);
+  const now = new Date().toISOString();
+  const sourceName = sourceSceneName ?? file.name;
+  const results: ModelImportResults = [];
+  let overallHeavy = false;
+
+  for (const ext of extractions) {
+    const packed = encodePackedGrayboxMesh(ext.positions, ext.indices);
+    const warnings = uniqueWarnings([
+      ...initialWarnings,
+      ...ext.warnings,
+      ...(ext.triangleCount >= IMPORT_WARNING_TRIANGLES
+        ? [`Heavy geometry (${ext.triangleCount.toLocaleString()} triangles) was imported unchanged.`]
+        : []),
+      ...(file.size >= IMPORT_WARNING_BYTES
+        ? [`Large source file (${formatBytes(file.size)}); initial conversion may take longer on low-power devices.`]
+        : []),
+      'Materials, textures, UVs, and animation were omitted for graybox import.',
+    ]);
+    if (ext.triangleCount >= IMPORT_WARNING_TRIANGLES) overallHeavy = true;
+    const assetId = createId('model');
+    const asset: ProjectAsset = {
+      id: assetId,
+      type: 'model',
+      name: `${ext.name}.panoref-mesh`,
+      uri: packed.uri,
+      mimeType: 'application/vnd.panoref.graybox-mesh',
+      createdAt: now,
+      metadata: {
+        sourceName,
+        bridgeFileName: undefined,
+        sourceFormat: 'ma' as DirectModelFormat,
+        sourceApplication: sourceApplication ?? 'maya',
+        vertexCount: ext.vertexCount,
+        triangleCount: ext.triangleCount,
+        meshCount: 1,
+        packedBytes: packed.byteLength,
+        sourceBounds: ext.sourceBounds,
+        geometrySimplified: false,
+        hierarchyFlattened: false,
+        parentImportName: ext.parentTransformName,
+        parentChain: ext.parentChain,
+        unit: maScene.unit,
+        unitScale: maScene.unitScale,
+      },
+    };
+    const object: SceneObject = {
+      id: createId('obj'),
+      name: ext.name,
+      type: 'imported_model',
+      transform: createTransform(ext.center),
+      dimensions: ext.dimensions,
+      category: 'architecture',
+      locked: false,
+      visible: true,
+      modelAssetId: assetId,
+      importedModel: {
+        sourceName: file.name,
+        sourceFormat: 'ma',
+        sourceKind: extractions.length > 1 ? 'scene' : 'model',
+        sourceApplication: sourceApplication ?? 'maya',
+        sourceSceneName: undefined,
+        parentImportName: ext.parentTransformName,
+        parentChain: ext.parentChain,
+        vertexCount: ext.vertexCount,
+        triangleCount: ext.triangleCount,
+        meshCount: extractions.length,
+        geometrySimplified: false,
+        hierarchyFlattened: false,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      },
+    };
+    results.push({ asset, object });
+  }
+
+  // Add cross-mesh summary warning on first if many meshes
+  if (results.length > 1 && !overallHeavy) {
+    const firstWarn = results[0].object.importedModel?.warnings ?? [];
+    firstWarn.unshift(`Preserved ${results.length} mesh nodes as separate selectable objects.`);
+    results[0].object.importedModel!.warnings = uniqueWarnings(firstWarn);
+  }
+
+  return results;
 }
 
 async function loadModel(file: File, format: DirectModelFormat): Promise<LoadedModel> {
@@ -732,7 +845,8 @@ function directFormatForFile(file: Pick<File, 'name'>): DirectModelFormat | unde
 function nativeApplicationForFile(file: Pick<File, 'name'>): ImportedModelSourceApplication | undefined {
   const extension = fileExtension(file.name);
   if (extension === 'blend') return 'blender';
-  if (extension === 'ma' || extension === 'mb') return 'maya';
+  if (extension === 'mb') return 'maya';
+  if (extension === 'ma') return 'maya';
   if (extension === 'uproject' || extension === 'umap' || extension === 'uasset') return 'unreal';
   return undefined;
 }

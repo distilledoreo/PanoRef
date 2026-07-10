@@ -46,16 +46,17 @@ Direct import formats are:
 - STL
 - PLY
 - FBX (best-effort interchange support)
+- Maya ASCII `.ma` (direct client-side parsing, geometry-only, hierarchy preserved)
 
-Loaders are fetched from the existing Three.js dependency only after a user chooses that format. Each source file is converted once to a compact PanoRef graybox mesh stored with the project, so ordinary startup and projects without imported geometry do not pay the parser cost. OBJ, STL, and PLY do not contain dependable unit metadata; the importer treats one source unit as one meter. External `.gltf` `.bin` sidecars and compressed Draco/Meshopt glTF are not part of this first slice; export an uncompressed, geometry-only GLB instead.
+Loaders are fetched from the existing Three.js dependency only after a user chooses that format. The `.ma` parser is pure TypeScript and lazy-loaded only when a `.ma` file is selected. Each source file is converted once to a compact PanoRef graybox mesh stored with the project, so ordinary startup and projects without imported geometry do not pay the parser cost. OBJ, STL, and PLY do not contain dependable unit metadata; the importer treats one source unit as one meter. Maya `.ma` `currentUnit` (e.g., `cm`) is converted to meters automatically. External `.gltf` `.bin` sidecars and compressed Draco/Meshopt glTF are not part of this slice; export an uncompressed, geometry-only GLB instead.
 
-Native DCC/project files are recognized but are not executed or reverse-engineered in the browser. Select the native source and its same-name bridge file together:
+Remaining native DCC/project files are recognized but are not executed or reverse-engineered in the browser. Select the native source and its same-name bridge file together:
 
-- Blender `.blend` + geometry-only `.glb`
-- Maya `.ma` / `.mb` + geometry-only `.fbx` or `.glb`
+- Blender `.blend` + geometry-only `.glb` (direct .blend with WASM is next)
+- Maya binary `.mb` + geometry-only `.fbx` or `.glb` (`.ma` now parses directly)
 - Unreal `.umap` / `.uasset` / `.uproject` + exported level/actor `.glb` or `.fbx`
 
-This exchange-first path keeps the app usable on devices that cannot run Blender, Maya, or Unreal and avoids shipping large, version-specific native runtimes. The native file is provenance only; PanoRef reads the bridge geometry.
+The `.ma` direct path keeps all parsing client-side: text parsing of `createNode transform/mesh`, `setAttr .vt/.fc` polyFaces, TRS hierarchy, n-gon fan triangulation, and unit conversion — no eval, materials/textures omitted. For binary formats, this exchange-first path keeps the app usable on devices that cannot run Blender, Maya, or Unreal and avoids shipping large, version-specific native runtimes. The native file is provenance only when a bridge is used; direct `.ma` results preserve parent chain as `parentChain`.
 
 Pipeline handoffs can instead provide a `.panoscene` ZIP with this shape:
 
@@ -188,7 +189,7 @@ For Fly Camera specifically, verify sustained movement can travel beyond walls a
 
 - MVP is local-first; there is no backend, account system, or AI API integration.
 - Geometry editing is primitive-level only. There is no vertex editing, UV editing, shader graph, rigging, or timeline.
-- Native `.blend`, `.ma`, `.mb`, and Unreal asset bytes require a GLB/FBX bridge or `.panoscene` handoff; the browser does not parse those proprietary formats directly.
+- Native `.blend`, Maya `.mb`, and Unreal asset bytes require a GLB/FBX bridge or `.panoscene` handoff; the browser does not parse those proprietary binary formats directly. Maya ASCII `.ma` is now directly parsed client-side with hierarchy preserved.
 - Imported mesh assets are embedded in saved project JSON as base64 data URLs, so large geometry can make project files substantially larger.
 - Shot packages rely on `viewport_clay.png` for camera-locked layout control rather than projected pano textures on proxy geometry.
 - Projection quality depends on pano alignment. If the canonical pano is yaw-shifted relative to the graybox pano, use the opacity compare view and set the reference yaw offset before exporting shot packages.
