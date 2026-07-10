@@ -104,6 +104,9 @@ test.describe('layout and core chrome', () => {
         expect(navBox.y).toBeGreaterThanOrEqual(brandBox.y + brandBox.height - 4);
         expect(navBox.x + navBox.width).toBeLessThanOrEqual(viewport.width + 2);
       }
+    } else {
+      expect(actionsBox.x).toBeGreaterThan(viewport.width / 2);
+      expect(viewport.width - (actionsBox.x + actionsBox.width)).toBeLessThanOrEqual(32);
     }
   });
 
@@ -157,6 +160,28 @@ test.describe('layout and core chrome', () => {
     await expect(page.locator('[data-build-shortcut-reference]')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-build-selection-count]')).toHaveCount(0);
+  });
+
+  test('Help documentation is searchable and returns to the active workspace', async ({ page }) => {
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+
+    await page.getByRole('button', { name: 'Open app menu' }).click();
+    await page.getByRole('menuitem', { name: 'Help & Documentation' }).click();
+    await expect(page.locator('[data-help-workspace]')).toBeVisible();
+    await expect(page.locator('img[src="/docs/build-workspace.png"]')).toHaveCount(1);
+    await expect(page.locator('img[src="/docs/workflow-overview.png"]')).toHaveCount(1);
+
+    const search = page.getByRole('searchbox', { name: 'Search documentation' });
+    await search.fill('clipboard');
+    await expect(page.locator('[data-help-section="shortcuts"]')).toBeVisible();
+    await expect(page.locator('[data-help-section="welcome"]')).toHaveCount(0);
+    await search.fill('');
+
+    await page.getByRole('button', { name: 'Back to the app' }).click();
+    await expect(page.locator('[data-build-object-tray]')).toBeVisible();
   });
 });
 

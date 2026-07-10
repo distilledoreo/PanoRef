@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import {
   Boxes,
+  BookOpen,
   Camera,
   ChevronDown,
   Clapperboard,
@@ -29,6 +30,7 @@ const ReferenceWorkspace = lazy(() => import('./components/workspaces/ReferenceW
 const ShotsWorkspace = lazy(() => import('./components/workspaces/ShotsWorkspace').then((m) => ({ default: m.ShotsWorkspace })));
 const ExportWorkspace = lazy(() => import('./components/workspaces/ExportWorkspace').then((m) => ({ default: m.ExportWorkspace })));
 const PanoViewerWorkspace = lazy(() => import('./components/workspaces/PanoViewerWorkspace').then((m) => ({ default: m.PanoViewerWorkspace })));
+const HelpWorkspace = lazy(() => import('./components/workspaces/HelpWorkspace').then((m) => ({ default: m.HelpWorkspace })));
 
 const workspaceItems: Array<{ id: Workspace; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'build', label: 'Build', icon: Boxes },
@@ -53,6 +55,7 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [splashDone, setSplashDone] = useState(() => hasSeenSplash());
   const [projectImportStatus, setProjectImportStatus] = useState<{
     tone: 'success' | 'error';
@@ -70,7 +73,7 @@ export default function App() {
   } = useContinuityStore();
 
   const isPanoViewer = appMode === 'panoViewer';
-  const showModeChooser = splashDone && appMode === null;
+  const showModeChooser = splashDone && appMode === null && !helpOpen;
 
   const openProjectPicker = () => {
     setProjectImportStatus(undefined);
@@ -127,6 +130,15 @@ export default function App() {
     };
   }, [projectMenuOpen]);
 
+  useEffect(() => {
+    if (!helpOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setHelpOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [helpOpen]);
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-surface-base text-primary">
       <main className="absolute inset-0">
@@ -137,7 +149,9 @@ export default function App() {
             </div>
           )}
         >
-          {isPanoViewer ? (
+          {helpOpen ? (
+            <HelpWorkspace onClose={() => setHelpOpen(false)} />
+          ) : isPanoViewer ? (
             <PanoViewerWorkspace />
           ) : (
             <>
@@ -168,7 +182,7 @@ export default function App() {
                   <Boxes className="h-7 w-7 md:h-9 md:w-9" strokeWidth={2.2} />
                 </span>
                 <span className="min-w-0 truncate text-base font-semibold tracking-normal text-primary md:text-xl">
-                  {isPanoViewer ? '360 Viewer' : 'Continuity Stage'}
+                  {helpOpen ? 'Help Center' : isPanoViewer ? '360 Viewer' : 'Continuity Stage'}
                 </span>
                 <ChevronDown
                   className={`h-4 w-4 shrink-0 text-secondary transition ${projectMenuOpen ? 'rotate-180 text-accent' : ''}`}
@@ -202,6 +216,7 @@ export default function App() {
                       label="Open Continuity Stage"
                       onClick={() => {
                         setAppMode('continuity');
+                        setHelpOpen(false);
                         setProjectMenuOpen(false);
                       }}
                     />
@@ -212,6 +227,7 @@ export default function App() {
                         label="Current Objective"
                         onClick={() => {
                           requestObjectiveModal();
+                          setHelpOpen(false);
                           setProjectMenuOpen(false);
                         }}
                       />
@@ -220,6 +236,7 @@ export default function App() {
                         label="Simple 360 Viewer"
                         onClick={() => {
                           setAppMode('panoViewer');
+                          setHelpOpen(false);
                           setProjectMenuOpen(false);
                         }}
                       />
@@ -244,11 +261,21 @@ export default function App() {
                         label="Package Export"
                         onClick={() => {
                           setWorkspace('export');
+                          setHelpOpen(false);
                           setProjectMenuOpen(false);
                         }}
                       />
                     </>
                   )}
+                  <div className="my-1 border-t border-subtle" />
+                  <ProjectMenuButton
+                    icon={<BookOpen className="h-4 w-4" />}
+                    label="Help & Documentation"
+                    onClick={() => {
+                      setHelpOpen(true);
+                      setProjectMenuOpen(false);
+                    }}
+                  />
                 </div>
               )}
             </div>
@@ -263,10 +290,10 @@ export default function App() {
               onChange={(event) => void importProject(event.target.files?.[0])}
             />
             <div
-              className="pointer-events-auto flex shrink-0 items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm"
+              className="pointer-events-auto flex shrink-0 items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm md:absolute md:right-7 md:top-3"
               data-header-actions
             >
-              {!isPanoViewer && (
+              {!isPanoViewer && !helpOpen && (
                 <>
                   <HeaderToolbarButton onClick={openProjectPicker} title="Open project">
                     <FolderOpen className="h-4 w-4" />
@@ -291,7 +318,7 @@ export default function App() {
             </div>
           </div>
 
-          {!isPanoViewer && (
+          {!isPanoViewer && !helpOpen && (
             <>
               <nav className="pointer-events-auto absolute left-1/2 top-5 hidden w-[min(700px,56vw)] -translate-x-1/2 items-start justify-between md:flex">
                 <span className="absolute left-8 right-8 top-[22px] h-px bg-border-subtle/80" aria-hidden />
@@ -363,7 +390,7 @@ export default function App() {
         </div>
       )}
 
-      {!isPanoViewer && <WorkflowGuidance />}
+      {!isPanoViewer && !helpOpen && <WorkflowGuidance />}
 
       <ModeChooser visible={showModeChooser} />
       <SplashScreen onDismissed={() => setSplashDone(true)} />
