@@ -113,6 +113,7 @@ interface ContinuityStore {
   canUndoBuild: () => boolean;
   canRedoBuild: () => boolean;
   addObject: (type: SceneObjectType) => void;
+  addImportedModel: (result: { asset: ProjectAsset; object: SceneObject }) => SceneObject;
   placeObject: (type: SceneObjectType, point: Vec3) => SceneObject;
   selectObject: (id?: string, mode?: SelectionMode) => void;
   selectObjectRange: (id: string) => void;
@@ -341,6 +342,21 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       history: 'step',
     });
   }),
+  addImportedModel: ({ asset, object }) => {
+    set((state) => applyBuildSceneChange(state, {
+      objects: [...state.project.scene.objects, object],
+      assets: {
+        assets: {
+          ...state.project.assets.assets,
+          [asset.id]: asset,
+        },
+      },
+      selectedObjectIds: [object.id],
+      history: 'step',
+      extra: { buildMode: 'select' },
+    }));
+    return object;
+  },
   placeObject: (type, point) => {
     const state = get();
     const count = state.project.scene.objects.filter((object) => object.type === type).length + 1;
@@ -1244,6 +1260,7 @@ function applyBuildSceneChange(
   state: BuildHistoryStateSlice,
   change: {
     objects?: SceneObject[];
+    assets?: LocationProject['assets'];
     panoOrigin?: Vec3;
     panoRotation?: [number, number, number];
     selectedObjectIds?: string[];
@@ -1252,6 +1269,7 @@ function applyBuildSceneChange(
   },
 ) {
   const objects = change.objects ?? state.project.scene.objects;
+  const assets = change.assets ?? state.project.assets;
   const panoOrigin = change.panoOrigin ?? state.project.scene.panoOrigin;
   const panoRotation = change.panoRotation ?? state.project.scene.panoRotation;
   const selectedObjectIds = Object.prototype.hasOwnProperty.call(change, 'selectedObjectIds')
@@ -1276,6 +1294,7 @@ function applyBuildSceneChange(
     selectedObjectIds,
     project: touchProject({
       ...state.project,
+      assets,
       scene: {
         ...state.project.scene,
         objects,

@@ -9,7 +9,7 @@ export const BUILD_PASTE_OFFSET = 0.75;
 
 const SCENE_OBJECT_TYPES = new Set<SceneObjectType>([
   'floor', 'wall', 'box', 'arch', 'doorway', 'column', 'stairs', 'tree_blob',
-  'terrain_mass', 'background_card', 'human_dummy', 'sun_marker',
+  'terrain_mass', 'background_card', 'human_dummy', 'sun_marker', 'imported_model',
 ]);
 const CATEGORIES = new Set<SceneObject['category']>(['architecture', 'environment', 'helper', 'landmark']);
 

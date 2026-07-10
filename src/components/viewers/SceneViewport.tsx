@@ -42,6 +42,7 @@ type DragKind = 'idle' | 'orbit' | 'gizmo_translate' | 'gizmo_rotate' | 'gizmo_s
 const FLY_SPEED = 6;
 const FLY_SPRINT_MULTIPLIER = 2.4;
 const LOOK_SENSITIVITY = 0.12;
+const MAX_INTERACTIVE_PIXEL_RATIO = 1.5;
 
 interface DragState {
   kind: DragKind;
@@ -310,7 +311,7 @@ export function SceneViewport({
     if (!container) return;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_INTERACTIVE_PIXEL_RATIO));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.className = 'absolute inset-0 block h-full w-full touch-none';
     container.appendChild(renderer.domElement);
@@ -631,19 +632,29 @@ export function SceneViewport({
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      const pointer = getPointerState(
-        event,
-        canvas,
-        cameraRef.current,
-        orbitRef.current,
-        sceneRef.current,
-        snapToGridRef.current,
-      );
+      const drag = dragRef.current;
+      const placementPreviewActive = Boolean(placementTypeRef.current);
+      if (drag.kind === 'idle' && !placementPreviewActive) return;
+
+      const needsFloorPoint = placementPreviewActive || drag.kind === 'pano_origin';
+      const needsRaycaster = needsFloorPoint
+        || drag.kind === 'gizmo_translate'
+        || drag.kind === 'gizmo_rotate';
+      const pointer = needsRaycaster
+        ? getPointerState(
+            event,
+            canvas,
+            cameraRef.current,
+            orbitRef.current,
+            sceneRef.current,
+            snapToGridRef.current,
+            needsFloorPoint,
+          )
+        : undefined;
       if (placementTypeRef.current && pointer?.floorPoint) {
         lastFloorPointRef.current = pointer.floorPoint;
         updatePreviewMesh(pointer.floorPoint);
       }
-      const drag = dragRef.current;
       if (drag.kind === 'idle') return;
 
       const dx = event.clientX - drag.x;
@@ -946,7 +957,6 @@ export function SceneViewport({
     if (sceneRef.current) disposeScene(sceneRef.current);
     clearTransformGizmo();
     sceneRef.current = buildScene(project, {
-      selectedObjectIds: shotFraming ? [] : selectedObjectIds,
       selectedShotId,
       hideShotFrustums: Boolean(shotFraming) || !showSceneGuides,
       showSceneGuides: shotFraming ? false : showSceneGuides,
@@ -962,7 +972,6 @@ export function SceneViewport({
     clearTransformGizmo,
     originPlacementActive,
     project,
-    selectedObjectIds,
     selectedShotId,
     shotFraming,
     showSceneGuides,
@@ -1169,6 +1178,7 @@ function getPointerState(
   orbit: { yaw: number; pitch: number; distance: number; target: THREE.Vector3 },
   scene: THREE.Scene | null,
   snapToGrid: boolean,
+  resolveFloorPoint = true,
 ) {
   if (!camera) return undefined;
   updateCamera(camera, orbit);
@@ -1183,10 +1193,12 @@ function getPointerState(
   );
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(pointer, camera);
-  const floorPoint = resolveStampPoint(raycaster, {
-    snapToGrid,
-    scene,
-  });
+  const floorPoint = resolveFloorPoint
+    ? resolveStampPoint(raycaster, {
+        snapToGrid,
+        scene,
+      })
+    : undefined;
   return {
     raycaster,
     floorPoint,

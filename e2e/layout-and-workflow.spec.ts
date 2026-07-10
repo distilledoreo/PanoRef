@@ -162,6 +162,33 @@ test.describe('layout and core chrome', () => {
     await expect(page.locator('[data-build-selection-count]')).toHaveCount(0);
   });
 
+  test('imports a texture-free OBJ through the Build tray', async ({ page }) => {
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+
+    await page.locator('[data-build-object-tray]').getByRole('button', { name: 'More' }).click();
+    await page.locator('[data-build-import-model]').click();
+    const dialog = page.getByRole('dialog', { name: 'Import 3D model or scene' });
+    await expect(dialog).toBeVisible();
+    await dialog.locator('[data-model-import-input]').setInputFiles({
+      name: 'triangle.obj',
+      mimeType: 'text/plain',
+      buffer: Buffer.from([
+        'v 0 0 0',
+        'v 1 0 0',
+        'v 0 1 0',
+        'f 1 2 3',
+      ].join('\n')),
+    });
+
+    await expect(dialog.getByText(/1 triangles .* imported unchanged/)).toBeVisible();
+    await dialog.getByText('Close', { exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole('textbox', { name: 'Selected object name' })).toHaveValue('triangle');
+  });
+
   test('Help documentation is searchable and returns to the active workspace', async ({ page }) => {
     await enterContinuityStage(page);
     await dismissOverlays(page);
