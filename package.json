@@ -10,7 +10,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "goal:smoke": "node scripts/goal-workflow-smoke.mjs"
+    "goal:smoke": "node scripts/goal-workflow-smoke.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -27,6 +29,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@playwright/test": "^1.53.1",
     "@types/node": "^22.14.0",
     "@types/three": "^0.184.1",
     "autoprefixer": "^10.4.21",

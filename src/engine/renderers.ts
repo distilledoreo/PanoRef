@@ -43,6 +43,10 @@ export interface CameraMoveVideoOptions {
   mimeType?: string;
   videoBitsPerSecond?: number;
   onProgress?: (progress: number) => void;
+  /** Optional abort; stops the recorder and rejects. */
+  signal?: AbortSignal;
+  /** Wall-clock timeout in ms (default 90s). */
+  timeoutMs?: number;
 }
 
 const MP4_MIME_CANDIDATES = [
@@ -175,49 +179,90 @@ export async function renderShotCameraMoveMp4(
 
   const stream = captureStream(frameRate);
   const chunks: Blob[] = [];
+  const timeoutMs = options.timeoutMs ?? 90_000;
+  const externalSignal = options.signal;
 
   try {
+    if (externalSignal?.aborted) {
+      throw new Error('MP4 export was cancelled.');
+    }
+
     const recorder = new MediaRecorder(stream, {
       mimeType,
-      videoBitsPerSecond: options.videoBitsPerSecond ?? width * height * 3,
+      videoBitsPerSecond: options.videoBitsPerSecond ?? Math.max(1_000_000, width * height * 2),
     });
 
     await new Promise<void>((resolve, reject) => {
       let animationFrame = 0;
       let startTime = 0;
       let stopping = false;
+      let settled = false;
+      let timeoutId = 0;
+
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) window.clearTimeout(timeoutId);
+        externalSignal?.removeEventListener('abort', onAbort);
+        fn();
+      };
 
       const stopRecorder = () => {
         if (stopping) return;
         stopping = true;
         cancelAnimationFrame(animationFrame);
-        if (recorder.state !== 'inactive') recorder.stop();
+        try {
+          if (recorder.state !== 'inactive') recorder.stop();
+        } catch {
+          // ignore stop races
+        }
+      };
+
+      const onAbort = () => {
+        stopRecorder();
+        settle(() => reject(new Error('MP4 export was cancelled.')));
       };
 
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data);
+        if (event.data && event.data.size > 0) chunks.push(event.data);
       };
-      recorder.onerror = (event) => {
+      recorder.onerror = () => {
         stopRecorder();
-        reject(event instanceof ErrorEvent ? event.error : new Error('MP4 recording failed.'));
+        settle(() => reject(new Error('MP4 recording failed in this browser.')));
       };
-      recorder.onstop = () => resolve();
+      recorder.onstop = () => settle(() => resolve());
 
       const renderFrame = (now: number) => {
+        if (settled) return;
         if (!startTime) startTime = now;
         const elapsedSeconds = Math.min((now - startTime) / 1000, durationSeconds);
         renderCameraMoveFrame(renderer, scene, camera, keyframes, elapsedSeconds, width, height);
         options.onProgress?.(durationSeconds === 0 ? 1 : elapsedSeconds / durationSeconds);
 
         if (elapsedSeconds >= durationSeconds) {
+          // Request a final chunk before stopping so empty-blob silent failures are rare.
+          try {
+            if (recorder.state === 'recording') recorder.requestData();
+          } catch {
+            // requestData is best-effort
+          }
           stopRecorder();
           return;
         }
         animationFrame = requestAnimationFrame(renderFrame);
       };
 
+      externalSignal?.addEventListener('abort', onAbort);
+      timeoutId = window.setTimeout(() => {
+        stopRecorder();
+        settle(() => reject(new Error(
+          `MP4 export timed out after ${Math.round(timeoutMs / 1000)} seconds. Try a shorter move or smaller resolution.`,
+        )));
+      }, timeoutMs);
+
       renderCameraMoveFrame(renderer, scene, camera, keyframes, 0, width, height);
-      recorder.start();
+      // Timeslice keeps data flowing; some Chromium builds otherwise emit one empty blob.
+      recorder.start(250);
       animationFrame = requestAnimationFrame(renderFrame);
     });
   } finally {
@@ -227,6 +272,11 @@ export async function renderShotCameraMoveMp4(
   }
 
   const blob = new Blob(chunks, { type: mimeType });
+  if (blob.size === 0) {
+    throw new Error(
+      'MP4 recording produced an empty file. Try Chrome or Edge, or reduce resolution/duration.',
+    );
+  }
   return {
     blob,
     dataUrl: await blobToDataUrl(blob),

@@ -95,7 +95,7 @@ export function ShotsWorkspace() {
   const [isExportingCameraMove, setIsExportingCameraMove] = useState(false);
   const [cameraMoveProgress, setCameraMoveProgress] = useState(0);
   const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
-  const cameraMoveAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
+  const cameraMoveAbortRef = useRef<{ cancelled: boolean; abort?: () => void }>({ cancelled: false });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -227,29 +227,23 @@ export function ShotsWorkspace() {
       return;
     }
 
-    const exportToken = { cancelled: false };
-    cameraMoveAbortRef.current = exportToken;
+    const abortController = new AbortController();
+    cameraMoveAbortRef.current = { cancelled: false, abort: () => abortController.abort() };
     setIsExportingCameraMove(true);
     setCameraMoveProgress(0);
     setCameraMoveError(undefined);
 
-    const MP4_EXPORT_TIMEOUT_MS = 90_000;
     try {
-      const video = await Promise.race([
-        renderShotCameraMoveMp4(project, selectedShot, {
-          mimeType,
-          frameRate: 30,
-          onProgress: (progress) => {
-            if (!exportToken.cancelled) setCameraMoveProgress(progress);
-          },
-        }),
-        new Promise<never>((_, reject) => {
-          window.setTimeout(() => {
-            reject(new Error('MP4 export timed out after 90 seconds. Try a shorter move or smaller resolution.'));
-          }, MP4_EXPORT_TIMEOUT_MS);
-        }),
-      ]);
-      if (exportToken.cancelled) return;
+      const video = await renderShotCameraMoveMp4(project, selectedShot, {
+        mimeType,
+        frameRate: 30,
+        timeoutMs: 90_000,
+        signal: abortController.signal,
+        onProgress: (progress) => {
+          if (!cameraMoveAbortRef.current.cancelled) setCameraMoveProgress(progress);
+        },
+      });
+      if (cameraMoveAbortRef.current.cancelled) return;
       const asset = attachCameraMoveVideoToShot(selectedShot.id, {
         name: cameraMoveFileName,
         dataUrl: video.dataUrl,
@@ -262,11 +256,11 @@ export function ShotsWorkspace() {
       setCameraMovePreviewUrl(asset.uri);
       downloadDataUrl(asset.uri, asset.name);
     } catch (error) {
-      if (!exportToken.cancelled) {
+      if (!cameraMoveAbortRef.current.cancelled) {
         setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
       }
     } finally {
-      if (!exportToken.cancelled) {
+      if (!cameraMoveAbortRef.current.cancelled) {
         setIsExportingCameraMove(false);
       }
     }
@@ -714,7 +708,7 @@ export function ShotsWorkspace() {
                           removeShot(shot.id);
                         }}
                         disabled={!canDelete}
-                        className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                        className="absolute right-1 top-1 inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
                         aria-label={canDelete ? `Delete shot ${shot.shotNumber}` : 'Cannot delete the only shot'}
                         title={canDelete ? 'Delete shot' : 'Keep at least one shot'}
                         data-shots-library-delete
@@ -788,7 +782,7 @@ export function ShotsWorkspace() {
                       key={seconds}
                       type="button"
                       onClick={() => changeCameraMoveDuration(seconds)}
-                      className={`min-w-[2.5rem] rounded-full px-2.5 py-1 text-xs font-bold tabular-nums transition ${
+                      className={`min-h-11 min-w-[2.75rem] rounded-full px-3 py-2 text-xs font-bold tabular-nums transition ${
                         active
                           ? 'bg-white text-zinc-900 shadow-sm'
                           : 'text-white/80 hover:bg-white/10 hover:text-white'
@@ -1097,7 +1091,7 @@ function ModePill({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition ${
+      className={`min-h-11 rounded-full px-5 py-2.5 text-xs font-bold uppercase tracking-wider transition ${
         active
           ? 'bg-white text-zinc-900 shadow-sm'
           : 'text-white/70 hover:text-white'

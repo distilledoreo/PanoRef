@@ -277,7 +277,7 @@ export function BuildWorkspace() {
               data-build-undo
               disabled={!canUndo}
               onClick={() => undoBuild()}
-              className="inline-flex h-9 w-9 items-center justify-center border-0 bg-transparent text-secondary transition hover:bg-surface-muted/80 hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-11 w-11 items-center justify-center border-0 bg-transparent text-secondary transition hover:bg-surface-muted/80 hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
             >
               <Undo2 className="h-4 w-4" />
             </button>
@@ -289,7 +289,7 @@ export function BuildWorkspace() {
               data-build-redo
               disabled={!canRedo}
               onClick={() => redoBuild()}
-              className="inline-flex h-9 w-9 items-center justify-center border-0 bg-transparent text-secondary transition hover:bg-surface-muted/80 hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-11 w-11 items-center justify-center border-0 bg-transparent text-secondary transition hover:bg-surface-muted/80 hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
             >
               <Redo2 className="h-4 w-4" />
             </button>
@@ -298,7 +298,7 @@ export function BuildWorkspace() {
               type="button"
               title={showSceneGuides ? 'Hide scene guides' : 'Show camera guides'}
               onClick={() => setShowSceneGuides((visible) => !visible)}
-              className={`inline-flex h-9 w-9 items-center justify-center border-0 transition ${
+              className={`inline-flex h-11 w-11 items-center justify-center border-0 transition ${
                 showSceneGuides
                   ? 'bg-accent-soft text-accent'
                   : 'bg-transparent text-secondary hover:bg-surface-muted/80 hover:text-primary'
@@ -584,7 +584,10 @@ function BuildObjectTray({
           </div>
         </div>
       )}
-      <div className="pointer-events-auto max-w-full rounded-[22px] border border-subtle bg-surface-overlay px-2 py-2 shadow-[var(--tray-glow)] backdrop-blur dark:border-[var(--accent)]/25 sm:px-3 sm:py-2.5">
+      <div
+        data-build-object-tray
+        className="pointer-events-auto max-w-full rounded-[22px] border border-subtle bg-surface-overlay px-2 py-2 shadow-[var(--tray-glow)] backdrop-blur dark:border-[var(--accent)]/25 sm:px-3 sm:py-2.5"
+      >
         <div className="flex max-w-full items-stretch gap-1 overflow-x-auto overscroll-x-contain pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {primaryTrayItems.map(({ type, label, icon: Icon }) => {
             const shortcut = getPrimitiveShortcutLabel(type);
@@ -670,7 +673,7 @@ function GizmoModeButton({
       type="button"
       title={label}
       onClick={onClick}
-      className={`inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-lg border px-2 text-xs font-medium transition ${
+      className={`inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-lg border px-2.5 text-xs font-medium transition ${
         active
           ? 'border-[var(--accent)] bg-accent-soft text-accent'
           : 'border-subtle text-secondary hover:border-accent hover:text-accent'
@@ -698,7 +701,7 @@ function QuickAction({
       type="button"
       title={title}
       onClick={onClick}
-      className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border transition ${
+      className={`inline-flex h-11 w-11 items-center justify-center rounded-lg border transition ${
         danger
           ? 'border-red-200 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400'
           : 'border-subtle text-secondary hover:border-accent hover:text-accent'
