@@ -10,3 +10,15 @@ artifacts/
 test-results/
 playwright-report/
 
+# Local Codex/preview session artifacts
+/.codex-remote-attachments/
+/terminals/
+/mcps/
+/mcp-server/
+/init.headers
+/init.out
+/init2.out
+/list.headers
+/tunnel-client.exe
+/ui-revamp/Continuity Stage.mp4
+

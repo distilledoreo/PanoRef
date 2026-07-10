@@ -135,6 +135,9 @@ test.describe('layout and core chrome', () => {
         expect(box.x).toBeGreaterThanOrEqual(-2);
         expect(box.y).toBeGreaterThanOrEqual(0);
       }
+    } else {
+      // Desktop should keep the tray content-sized instead of spanning the full viewport.
+      expect(trayBox.width).toBeLessThan(viewport.width * 0.8);
     }
   });
 });

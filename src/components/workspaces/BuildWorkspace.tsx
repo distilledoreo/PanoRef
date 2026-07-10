@@ -563,7 +563,7 @@ function BuildObjectTray({
   const [toolsOpen, setToolsOpen] = useState(false);
 
   return (
-    <div className="pointer-events-none absolute bottom-3 left-3 z-10 w-[min(100%-1.5rem,calc(100%-1.5rem))] max-w-[calc(100vw-1.5rem)] sm:bottom-6 sm:left-6 sm:max-w-[calc(100%-2rem)]">
+    <div className="pointer-events-none absolute bottom-3 left-3 z-10 w-fit max-w-[calc(100vw-1.5rem)] sm:bottom-6 sm:left-6 sm:max-w-[calc(100%-2rem)]">
       {toolsOpen && (
         <div className="pointer-events-auto mb-2 max-h-[40vh] w-full max-w-72 overflow-y-auto rounded-[var(--radius-card)] border border-subtle bg-surface-overlay p-3 shadow-soft backdrop-blur">
           <div className="mb-2 grid grid-cols-3 gap-2">

@@ -414,6 +414,14 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).not.toContain('top-20');
   });
 
+  it('sizes the Build tray to its tools while constraining the mobile scroller', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+
+    expect(build).toContain('w-fit max-w-[calc(100vw-1.5rem)]');
+    expect(build).not.toContain('w-[min(100%-1.5rem,calc(100%-1.5rem))]');
+    expect(build).toContain('overflow-x-auto');
+  });
+
   it('renders polished theme-aware shot thumbnail fallbacks for missing media', () => {
     const shotThumbnail = readFileSync(new URL('../src/components/common/ShotThumbnail.tsx', import.meta.url), 'utf8');
     const styles = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
