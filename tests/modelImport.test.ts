@@ -47,27 +47,10 @@ describe('model import planning', () => {
     });
   });
 
-  it('does not claim to directly parse binary DCC files', () => {
-    const plan = createModelImportPlan([file(['maya binary'], 'set.mb')]);
+  it('does not claim to directly parse proprietary scene files', () => {
+    const plan = createModelImportPlan([file(['maya'], 'set.mb')]);
     expect(plan.jobs).toHaveLength(0);
     expect(plan.issues[0].message).toContain('companion geometry-only');
-  });
-
-  it('directly imports Maya ASCII .ma files', () => {
-    const maContent = `
-      //Maya ASCII 2024 scene
-      requires maya "2024";
-      currentUnit -l cm;
-      createNode transform -n "pCube1";
-        setAttr ".t" -type "double3" 10 0 5;
-      createNode mesh -n "pCubeShape1" -p "pCube1";
-        setAttr -s 4 ".vt[0:3]" -type "float3" 0 0 0 1 0 0 0 1 0 1 1 0;
-        setAttr -s 1 ".fc[0]" -type "polyFaces" f 4 0 1 3 2;
-    `;
-    const plan = createModelImportPlan([file([maContent], 'cube.ma')]);
-    expect(plan.issues).toEqual([]);
-    expect(plan.jobs).toHaveLength(1);
-    expect(plan.jobs[0].file.name).toBe('cube.ma');
   });
 
   it('imports a portable native-scene handoff bundle', async () => {
@@ -87,8 +70,7 @@ describe('model import planning', () => {
     const bytes = await zip.generateAsync({ type: 'uint8array' });
     const bundle = file([bytes], 'set.panoscene');
 
-    const results = await importModelJob({ kind: 'bundle', file: bundle });
-    const result = results[0];
+    const result = await importModelJob({ kind: 'bundle', file: bundle });
     expect(result.object.importedModel).toMatchObject({
       sourceApplication: 'maya',
       sourceSceneName: 'set.mb',
@@ -113,8 +95,7 @@ describe('texture-free model conversion', () => {
       'f 1 3 4\n',
     ], 'wall.obj', 'text/plain');
 
-    const results = await importModelJob({ kind: 'file', file: obj });
-    const result = results[0];
+    const result = await importModelJob({ kind: 'file', file: obj });
 
     expect(result.object.type).toBe('imported_model');
     expect(result.object.importedModel).toMatchObject({
@@ -167,11 +148,10 @@ describe('texture-free model conversion', () => {
       scene: 0,
     };
 
-    const results = await importModelJob({
+    const result = await importModelJob({
       kind: 'file',
       file: file([JSON.stringify(gltf)], 'textured.gltf', 'model/gltf+json'),
     });
-    const result = results[0];
 
     expect(result.object.importedModel?.triangleCount).toBe(1);
     expect(result.object.importedModel?.warnings?.join(' ')).toContain('Removed');
@@ -221,112 +201,6 @@ describe('texture-free model conversion', () => {
     expect(saved.assets.assets[asset.id]).toBeTruthy();
     saved.scene.objects = saved.scene.objects.filter((candidate) => candidate.id !== object.id);
     expect(serializeProject(saved)).not.toContain(asset.id);
-  });
-});
-
-describe('Maya ASCII (.ma) direct import', () => {
-  beforeEach(() => resetImportedMeshCacheForTests());
-
-  it('parses a single-mesh .ma file and preserves world position via transform', async () => {
-    const ma = file([
-      '//Maya ASCII 2024 scene\n',
-      'requires maya "2024";\n',
-      'currentUnit -l cm -a deg -t film;\n',
-      'createNode transform -n "pCube1";\n',
-      '\tsetAttr ".t" -type "double3" 200 0 100;\n',
-      'createNode mesh -n "pCubeShape1" -p "pCube1";\n',
-      '\tsetAttr -s 4 ".vt[0:3]" -type "float3" 0 0 0 100 0 0 100 100 0 0 100 0;\n',
-      '\tsetAttr -s 1 ".fc[0]" -type "polyFaces" f 4 0 1 2 3;\n',
-    ], 'cube.ma', 'text/plain');
-
-    const results = await importModelJob({ kind: 'file', file: ma });
-    expect(results).toHaveLength(1);
-    const { object, asset } = results[0];
-    expect(object.type).toBe('imported_model');
-    expect(object.name).toBe('pCube1');
-    expect(object.importedModel).toMatchObject({
-      sourceFormat: 'ma',
-      sourceApplication: 'maya',
-      hierarchyFlattened: false,
-      vertexCount: 4,
-      triangleCount: 2, // quad -> 2 tris
-    });
-    // 200cm -> 2m + half of 1m quad = 2.5m, Z 100cm ->1m
-    expect(object.transform.position[0]).toBeCloseTo(2.5, 1);
-    expect(object.transform.position[1]).toBeCloseTo(0.5, 1);
-    expect(object.transform.position[2]).toBeCloseTo(1, 1);
-    expect(object.dimensions[0]).toBeCloseTo(1, 1);
-    expect(asset.type).toBe('model');
-    const project = createDefaultProject();
-    project.scene.objects = [object];
-    project.assets.assets[asset.id] = asset;
-    const scene = buildScene(project, { showHelpers: false });
-    const imported = scene.getObjectByName('pCube1') as THREE.Mesh;
-    expect(imported).toBeTruthy();
-    expect((imported.geometry.index?.count ?? 0) / 3).toBe(2);
-    disposeScene(scene);
-  });
-
-  it('preserves hierarchy with multiple meshes as separate objects', async () => {
-    const maMulti = file([
-      '//Maya ASCII 2024 scene\n',
-      'currentUnit -l cm;\n',
-      'createNode transform -n "group1";\n',
-      '\tsetAttr ".t" -type "double3" 100 0 0;\n',
-      'createNode transform -n "pCube1" -p "group1";\n',
-      '\tsetAttr ".t" -type "double3" 0 0 100;\n',
-      'createNode transform -n "pSphere1" -p "group1";\n',
-      '\tsetAttr ".t" -type "double3" 0 0 -100;\n',
-      'createNode mesh -n "pCubeShape1" -p "pCube1";\n',
-      '\tsetAttr -s 4 ".vt[0:3]" -type "float3" 0 0 0 100 0 0 100 100 0 0 100 0;\n',
-      '\tsetAttr -s 1 ".fc[0]" -type "polyFaces" f 4 0 1 2 3;\n',
-      'createNode mesh -n "pSphereShape1" -p "pSphere1";\n',
-      '\tsetAttr -s 3 ".vt[0:2]" -type "float3" 0 0 0 200 0 0 100 100 0;\n',
-      '\tsetAttr -s 1 ".fc[0]" -type "polyFaces" f 3 0 1 2;\n',
-    ], 'scene.ma');
-
-    const results = await importModelJob({ kind: 'file', file: maMulti });
-    expect(results.length).toBe(2);
-    const names = results.map((r) => r.object.name).sort();
-    expect(names).toEqual(['pCube1', 'pSphere1']);
-    // Check parent chains
-    const cube = results.find((r) => r.object.name === 'pCube1')!;
-    expect(cube.object.importedModel?.parentChain).toContain('group1');
-    expect(cube.object.importedModel?.hierarchyFlattened).toBe(false);
-    expect(cube.object.importedModel?.meshCount).toBe(2);
-    // Positions should differ because second transform offset differs via Z
-    const sphere = results.find((r) => r.object.name === 'pSphere1')!;
-    expect(Math.abs(cube.object.transform.position[2] - sphere.object.transform.position[2])).toBeGreaterThan(1.5);
-
-    // Verify batch add to store selects all
-    const project = createDefaultProject();
-    useContinuityStore.setState({
-      project,
-      selectedObjectIds: [],
-      buildHistoryPast: [],
-      buildHistoryFuture: [],
-    });
-    const add = useContinuityStore.getState().addImportedModels;
-    const added = add(results);
-    expect(added).toHaveLength(2);
-    expect(useContinuityStore.getState().selectedObjectIds).toHaveLength(2);
-  });
-
-  it('supports separate .tx/.ty/.tz attributes', async () => {
-    const ma = file([
-      '//Maya ASCII\n',
-      'currentUnit -l m;\n',
-      'createNode transform -n "box1";\n',
-      '\tsetAttr ".tx" 5;\n',
-      '\tsetAttr ".tz" -2;\n',
-      'createNode mesh -n "boxShape1" -p "box1";\n',
-      '\tsetAttr -s 3 ".vt[0:2]" -type "float3" 0 0 0 1 0 0 0 1 0;\n',
-      '\tsetAttr -s 1 ".fc[0]" -type "polyFaces" f 3 0 1 2;\n',
-    ], 'tx.ma');
-
-    const results = await importModelJob({ kind: 'file', file: ma });
-    expect(results[0].object.transform.position[0]).toBeCloseTo(5.5, 1);
-    expect(results[0].object.transform.position[2]).toBeCloseTo(-2, 1);
   });
 });
 
