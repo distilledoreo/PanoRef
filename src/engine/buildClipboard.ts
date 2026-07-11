@@ -87,15 +87,20 @@ export function parseBuildClipboard(text: string): BuildClipboardPayload | undef
   }
 
   // Version 2
+  let assets: Record<string, unknown> | undefined;
   if (value.assets !== undefined) {
     if (!isRecord(value.assets)) return undefined;
-    for (const [, asset] of Object.entries(value.assets as Record<string, unknown>)) {
+    assets = value.assets;
+    for (const [, asset] of Object.entries(assets)) {
       if (!isValidClipboardAsset(asset)) return undefined;
     }
   } else {
     // In v2, if any object has modelAssetId, assets map must be present (or else reject)
     const hasModelRef = (value.objects as SceneObject[]).some((obj) => Boolean(obj.modelAssetId));
     if (hasModelRef) return undefined;
+  }
+  for (const object of value.objects as SceneObject[]) {
+    if (object.modelAssetId && !assets?.[object.modelAssetId]) return undefined;
   }
 
   return structuredClone(value) as unknown as BuildClipboardPayload;

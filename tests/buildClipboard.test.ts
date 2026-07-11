@@ -185,4 +185,26 @@ describe('Build clipboard', () => {
     };
     expect(parseBuildClipboard(JSON.stringify(payload))).toBeUndefined();
   });
+
+  it('rejects v2 payloads with an imported object that references a missing asset', () => {
+    const object = createSceneObject('imported_model', 1);
+    const packed = encodePackedGrayboxMesh(
+      new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      new Uint32Array([0, 1, 2]),
+    );
+    const asset: ProjectAsset = {
+      id: 'model_1',
+      type: 'model',
+      name: 'triangle.panoref-mesh',
+      uri: packed.uri,
+      createdAt: new Date().toISOString(),
+    };
+    object.modelAssetId = asset.id;
+    const payload = createBuildClipboardPayload('project-a', [object], { assets: { [asset.id]: asset } });
+    const value = JSON.parse(serializeBuildClipboard(payload));
+    value.objects[0].modelAssetId = 'missing-model';
+    value.assets = {};
+
+    expect(parseBuildClipboard(JSON.stringify(value))).toBeUndefined();
+  });
 });

@@ -56,6 +56,8 @@ Import modes:
 - **Keep objects separate (default)**: One Mesh = one object, one InstancedMesh = one object containing all instances, no per-instance objects. Hierarchy is not recreated – world transforms are baked. Each object gets position = center of its world bounds, rotation [0,0,0], scale [1,1,1]. Move one chair without moving others.
 - **Combine into one object**: All nodes world-transformed into one asset and one object.
 
+The import report shows one summary card per source file; the individual imported nodes remain available in Layers. If a recognized mesh has malformed or non-triangle geometry, that source file is rejected with the mesh name instead of silently omitting the geometry.
+
 Preserved: world-space positions/rotations/scales baked, exact triangles, instance counts aggregated. Not preserved: editable parent-child hierarchy, pivot points, materials, textures, cameras, lights, animation, rigs, deformers, morphs.
 
 Native DCC files like `.blend`, `.ma`, `.mb`, `.uproject`, `.umap`, `.uasset` are not supported for direct import. If selected, PanoRef shows a useful error guiding you to export GLB/FBX. The importer never executes native scene logic.
@@ -93,7 +95,7 @@ Primitive stamps use game-inventory style number slots: `1` Floor, `2` Wall, `3`
 
 Build supports ordered multi-selection: click replaces the selection, `Shift`-click or `Ctrl`/`Cmd`-click toggles objects, and the Layers list supports `Shift` range selection. `Ctrl`/`Cmd+A` selects all visible unlocked objects, `Ctrl`/`Cmd+Shift+A` or `Esc` clears selection, and group move/rotate/scale uses the shared selection bounds.
 
-Clipboard actions are `Ctrl`/`Cmd+C`, `X`, and `V`; `Ctrl`/`Cmd+Shift+V` pastes in place and ordinary paste cascades copies visibly. `D` or `Ctrl`/`Cmd+D` duplicates. Arrow keys nudge on world X/Z, `Page Up` / `Page Down` nudge vertically, `Shift` makes nudges coarse, and `Alt` makes them fine. `F` frames the selection, `Home` frames the scene, `F2` renames one object, `Alt+H` shows all, and `?` opens the full reference.
+Clipboard actions are `Ctrl`/`Cmd+C`, `X`, and `V`; `Ctrl`/`Cmd+Shift+V` pastes in place and ordinary paste cascades copies visibly. Imported-model clipboard payloads include their packed mesh assets; incomplete or malformed asset references are rejected instead of creating missing-mesh placeholders. `D` or `Ctrl`/`Cmd+D` duplicates. Arrow keys nudge on world X/Z, `Page Up` / `Page Down` nudge vertically, `Shift` makes nudges coarse, and `Alt` makes them fine. `F` frames the selection, `Home` frames the scene, `F2` renames one object, `Alt+H` shows all, and `?` opens the full reference.
 
 Existing Build actions remain: `V` or `Esc` for Select, `O` for Origin, `G` for Snap, `R` / `Shift+R` for rotate right/left, `[` / `]` for scale down/up, `T` / `E` / `S` for gizmo mode, `L` for lock, `H` for hide/show, `I` for Precision, and `Delete` / `Backspace` for delete. Shortcuts are ignored while typing in editable fields so native text cut/copy/paste remains available.
 

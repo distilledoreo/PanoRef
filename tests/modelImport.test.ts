@@ -288,6 +288,87 @@ describe('multi-object scene import', () => {
     return JSON.stringify(gltf);
   }
 
+  function buildManyNodeGltf(count: number): string {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const indices = new Uint16Array([0, 1, 2]);
+    const binary = new ArrayBuffer(positions.byteLength + indices.byteLength);
+    new Float32Array(binary, 0, positions.length).set(positions);
+    new Uint16Array(binary, positions.byteLength, indices.length).set(indices);
+
+    return JSON.stringify({
+      asset: { version: '2.0' },
+      buffers: [{ byteLength: binary.byteLength, uri: `data:application/octet-stream;base64,${Buffer.from(binary).toString('base64')}` }],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: positions.byteLength },
+        { buffer: 0, byteOffset: positions.byteLength, byteLength: indices.byteLength },
+      ],
+      accessors: [
+        { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] },
+        { bufferView: 1, componentType: 5123, count: 3, type: 'SCALAR' },
+      ],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+      nodes: Array.from({ length: count }, (_, index) => ({ mesh: 0, name: `Panel-${index}`, translation: [index, 0, 0] })),
+      scenes: [{ nodes: Array.from({ length: count }, (_, index) => index) }],
+      scene: 0,
+    });
+  }
+
+  function buildInvalidTriangleGltf(): string {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const indices = new Uint16Array([0, 1, 2, 0]);
+    const binary = new ArrayBuffer(positions.byteLength + indices.byteLength);
+    new Float32Array(binary, 0, positions.length).set(positions);
+    new Uint16Array(binary, positions.byteLength, indices.length).set(indices);
+
+    return JSON.stringify({
+      asset: { version: '2.0' },
+      buffers: [{ byteLength: binary.byteLength, uri: `data:application/octet-stream;base64,${Buffer.from(binary).toString('base64')}` }],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: positions.byteLength },
+        { buffer: 0, byteOffset: positions.byteLength, byteLength: indices.byteLength },
+      ],
+      accessors: [
+        { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] },
+        { bufferView: 1, componentType: 5123, count: 4, type: 'SCALAR' },
+      ],
+      meshes: [{ name: 'BrokenPanel', primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+      nodes: [{ name: 'BrokenPanel', mesh: 0 }],
+      scenes: [{ nodes: [0] }],
+      scene: 0,
+    });
+  }
+
+  function buildInstancedMeshGltf(): string {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const indices = new Uint16Array([0, 1, 2]);
+    const translations = new Float32Array([0, 0, 0, 3, 0, 0]);
+    const translationOffset = positions.byteLength + indices.byteLength + 2;
+    const binary = new ArrayBuffer(translationOffset + translations.byteLength);
+    new Float32Array(binary, 0, positions.length).set(positions);
+    new Uint16Array(binary, positions.byteLength, indices.length).set(indices);
+    new Float32Array(binary, translationOffset, translations.length).set(translations);
+
+    return JSON.stringify({
+      asset: { version: '2.0' },
+      extensionsUsed: ['EXT_mesh_gpu_instancing'],
+      buffers: [{ byteLength: binary.byteLength, uri: `data:application/octet-stream;base64,${Buffer.from(binary).toString('base64')}` }],
+      bufferViews: [
+        { buffer: 0, byteOffset: 0, byteLength: positions.byteLength },
+        { buffer: 0, byteOffset: positions.byteLength, byteLength: indices.byteLength },
+        { buffer: 0, byteOffset: translationOffset, byteLength: translations.byteLength },
+      ],
+      accessors: [
+        { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] },
+        { bufferView: 1, componentType: 5123, count: 3, type: 'SCALAR' },
+        { bufferView: 2, componentType: 5126, count: 2, type: 'VEC3', min: [0, 0, 0], max: [3, 0, 0] },
+      ],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+      nodes: [{ name: 'RepeatedPanel', mesh: 0, extensions: { EXT_mesh_gpu_instancing: { attributes: { TRANSLATION: 2 } } } }],
+      scenes: [{ nodes: [0] }],
+      scene: 0,
+    });
+  }
+
   it('separate mode: produces one object per mesh node with preserved layout', async () => {
     const gltfJson = buildMultiNodeGltf();
     const result = await importModelJob({
@@ -412,27 +493,47 @@ describe('multi-object scene import', () => {
 
     expect(result.items).toHaveLength(1);
     expect(result.items[0].object.importedModel?.triangleCount).toBe(1);
-    // Winding flip is internal – ensure no error and dimensions still positive
+    // Negative world scale must reverse the packed triangle winding.
     expect(result.items[0].object.dimensions[0]).toBeGreaterThan(0);
+    const project = createDefaultProject();
+    project.scene.objects = [result.items[0].object];
+    project.assets.assets[result.items[0].asset.id] = result.items[0].asset;
+    const scene = buildScene(project, { showHelpers: false });
+    const imported = scene.getObjectByName(result.items[0].object.name) as THREE.Mesh;
+    expect(Array.from(imported.geometry.index?.array ?? [])).toEqual([0, 2, 1]);
+    disposeScene(scene);
   });
 
   it('enforces object-count safety limit', async () => {
-    // Build glTF with MAX+1 nodes – but limit is 2000, creating that many would be heavy.
-    // Instead test that the constant is defined and planning with object-limit error path via direct throw for > limit.
     const tooMany = MAX_SEPARATE_IMPORT_OBJECTS + 1;
-    expect(tooMany).toBeGreaterThan(2000);
-
-    // For a lightweight check, mock a scenario: the importer should throw if sourceUnits length > MAX
-    // We'll create just 3 units but manually verify error message construction path exists via constants
-    // The real limit enforcement is in importDirectModel – create a file that would exceed limit by having many meshes.
-    // To avoid huge JSON, we test via a small count but assert the constant value triggers error path in production.
-    // This test ensures file itself is importable in combined mode even if it had many objects.
-    const gltfJson = buildMultiNodeGltf();
-    const combined = await importModelJob({
+    await expect(importModelJob({
       kind: 'file',
-      file: file([gltfJson], 'two.gltf', 'model/gltf+json'),
-    }, { mode: 'combined' });
-    expect(combined.items).toHaveLength(1);
+      file: file([buildManyNodeGltf(tooMany)], 'many-panels.gltf', 'model/gltf+json'),
+    }, { mode: 'separate' })).rejects.toThrow(
+      `This file contains ${tooMany} separate objects, above the limit of ${MAX_SEPARATE_IMPORT_OBJECTS}`,
+    );
+  });
+
+  it('rejects malformed triangle geometry instead of silently omitting the mesh', async () => {
+    await expect(importModelJob({
+      kind: 'file',
+      file: file([buildInvalidTriangleGltf()], 'broken.gltf', 'model/gltf+json'),
+    }, { mode: 'separate' })).rejects.toThrow(/Mesh "BrokenPanel" is not triangle geometry/);
+  });
+
+  it('keeps an InstancedMesh grouped as one object and preserves expanded instance metadata', async () => {
+    const result = await importModelJob({
+      kind: 'file',
+      file: file([buildInstancedMeshGltf()], 'repeated.gltf', 'model/gltf+json'),
+    }, { mode: 'separate' });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].object.importedModel).toMatchObject({
+      sourceNodeName: 'RepeatedPanel',
+      instanceCount: 2,
+      vertexCount: 6,
+      triangleCount: 2,
+    });
   });
 });
 

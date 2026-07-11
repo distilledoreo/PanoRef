@@ -83,19 +83,6 @@ export function ModelImportDialog({
           });
         }
 
-        // Per-object breakdown (only in separate mode when >1 object, to avoid clutter)
-        if (!batch.summary.combined && batch.items.length > 1) {
-          batch.items.forEach((result) => {
-            const src = result.object.importedModel;
-            nextReport.push({
-              id: `${result.object.id}-detail`,
-              tone: 'success',
-              title: result.object.name,
-              message: `${src?.triangleCount.toLocaleString()} tri · ${src?.vertexCount.toLocaleString()} verts · center [${result.object.transform.position.map((v) => v.toFixed(2)).join(', ')}]`,
-            });
-          });
-        }
-
         batch.warnings.forEach((warning, warningIndex) => nextReport.push({
           id: `${batch.items[0]?.object.id ?? index}-warning-${warningIndex}`,
           tone: 'warning',
@@ -234,7 +221,7 @@ export function ModelImportDialog({
           <div className="space-y-2 border-t border-subtle pt-4" aria-live="polite">
             <h3 className="text-sm font-semibold text-primary">Import report</h3>
             {report.map((item) => (
-              <div key={item.id} className="flex gap-2 rounded-lg bg-surface-muted px-3 py-2 text-sm">
+              <div key={item.id} className="flex gap-2 rounded-lg bg-surface-muted px-3 py-2 text-sm" data-model-import-report-item={item.tone}>
                 {item.tone === 'success' ? (
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
                 ) : (

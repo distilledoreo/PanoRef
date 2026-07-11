@@ -118,11 +118,6 @@ interface SourceMeshUnit {
   worldMatrix: THREE.Matrix4;
 }
 
-interface PackedUnit {
-  packed: ReturnType<typeof encodePackedGrayboxMesh>;
-  source: SourceMeshUnit;
-}
-
 interface SceneBundleManifestData {
   schemaVersion: 1 | '1';
   entry: string;
@@ -251,8 +246,9 @@ async function importDirectModel(
       );
     }
 
-    // Pack each unit (bake world transform, center, flip winding)
-    const packedUnits: PackedUnit[] = [];
+    // Validate totals before encoding. Separate mode keeps one packed asset per
+    // source unit; combined mode intentionally waits to encode until after all
+    // units have been merged so it does not retain redundant base64 payloads.
     let totalVertices = 0;
     let totalTriangles = 0;
 
@@ -265,8 +261,6 @@ async function importDirectModel(
           `Geometry exceeds the safety limit of ${MAX_IMPORT_VERTICES.toLocaleString()} vertices or ${MAX_IMPORT_TRIANGLES.toLocaleString()} triangles. No geometry was simplified.`,
         );
       }
-      const packed = encodePackedGrayboxMesh(unit.positions, unit.indices);
-      packedUnits.push({ packed, source: unit });
     }
 
     // Build warnings summary
@@ -319,7 +313,7 @@ async function importDirectModel(
         sourceKind,
         baseName,
         sourceImportId,
-        packedUnits,
+        sourceUnits,
         totalVertices,
         totalTriangles,
         loaded,
@@ -336,7 +330,7 @@ async function importDirectModel(
       sourceKind,
       baseName,
       sourceImportId,
-      packedUnits,
+      sourceUnits,
       totalVertices,
       totalTriangles,
       loaded,
@@ -356,7 +350,7 @@ interface BuildArgs {
   sourceKind: 'model' | 'scene';
   baseName: string;
   sourceImportId: string;
-  packedUnits: PackedUnit[];
+  sourceUnits: SourceMeshUnit[];
   totalVertices: number;
   totalTriangles: number;
   loaded: LoadedModel;
@@ -366,7 +360,7 @@ interface BuildArgs {
 function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
   const {
     format, sourceApplication, sourceSceneName, sourceName, sourceKind,
-    baseName, sourceImportId, packedUnits, totalVertices, totalTriangles, warnings,
+    baseName, sourceImportId, sourceUnits, totalVertices, totalTriangles, warnings,
   } = args;
 
   // Unique naming within batch – dedup based on base key stripped of loader-added _N suffix
@@ -402,7 +396,8 @@ function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
     return candidate;
   }
 
-  const items: ModelImportResult[] = packedUnits.map(({ packed, source }) => {
+  const items: ModelImportResult[] = sourceUnits.map((source) => {
+    const packed = encodePackedGrayboxMesh(source.positions, source.indices);
     const rawName = source.sourceNodeName?.trim() || baseName;
     const unique = uniqueName(rawName);
     const now = new Date().toISOString();
@@ -424,7 +419,7 @@ function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
         sourceImportId,
         sourceNodeName: source.sourceNodeName,
         sourceNodePath: source.sourceNodePath,
-        sourceNodeCount: packedUnits.length,
+        sourceNodeCount: sourceUnits.length,
         importMode: 'separate',
         vertexCount: source.vertexCount,
         triangleCount: source.triangleCount,
@@ -478,7 +473,7 @@ function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
       totalObjects: items.length,
       totalVertices,
       totalTriangles,
-      sourceNodeCount: packedUnits.length,
+      sourceNodeCount: sourceUnits.length,
       combined: false,
     },
     warnings,
@@ -486,7 +481,7 @@ function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
 }
 
 function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
-  const { format, sourceApplication, sourceSceneName, sourceName, sourceKind, baseName, sourceImportId, packedUnits, totalVertices, totalTriangles, warnings } = args;
+  const { format, sourceApplication, sourceSceneName, sourceName, sourceKind, baseName, sourceImportId, sourceUnits, totalVertices, totalTriangles, warnings } = args;
 
   // Merge all units into one mesh set - world baked already per-unit (positions already centered per unit, but for combined
   // we need to re-center globally to preserve world-space layout relative to combined bounds center).
@@ -498,9 +493,9 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
   // First reconstruct world positions
   let globalMin = new THREE.Vector3(Infinity, Infinity, Infinity);
   let globalMax = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-  const worldPositionsPerUnit: Array<{ worldPositions: Float32Array; indices: Uint32Array; center: Vec3 }> = [];
+  const worldPositionsPerUnit: Array<{ worldPositions: Float32Array; indices: Uint32Array }> = [];
 
-  for (const { source } of packedUnits) {
+  for (const source of sourceUnits) {
     const wp = new Float32Array(source.positions.length);
     for (let i = 0; i < source.positions.length; i += 3) {
       const x = source.positions[i] + source.center[0];
@@ -516,7 +511,7 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
       if (y > globalMax.y) globalMax.y = y;
       if (z > globalMax.z) globalMax.z = z;
     }
-    worldPositionsPerUnit.push({ worldPositions: wp, indices: source.indices, center: source.center });
+    worldPositionsPerUnit.push({ worldPositions: wp, indices: source.indices });
   }
 
   const globalCenterVec = globalMin.clone().add(globalMax).multiplyScalar(0.5);
@@ -572,11 +567,11 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
       sourceFormat: format,
       sourceApplication,
       sourceImportId,
-      sourceNodeCount: packedUnits.length,
+      sourceNodeCount: sourceUnits.length,
       importMode: 'combined',
       vertexCount: totalVertexCount,
       triangleCount: totalIndexCount / 3,
-      meshCount: packedUnits.length,
+      meshCount: sourceUnits.length,
       packedBytes: packed.byteLength,
       geometrySimplified: false,
       hierarchyFlattened: true,
@@ -601,7 +596,7 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
       sourceSceneName,
       vertexCount: totalVertexCount,
       triangleCount: totalIndexCount / 3,
-      meshCount: packedUnits.length,
+      meshCount: sourceUnits.length,
       importMode: 'combined',
       sourceImportId,
       geometrySimplified: false,
@@ -619,7 +614,7 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
       totalObjects: 1,
       totalVertices: totalVertexCount,
       totalTriangles: totalIndexCount / 3,
-      sourceNodeCount: packedUnits.length,
+      sourceNodeCount: sourceUnits.length,
       combined: true,
     },
     warnings,
@@ -642,14 +637,18 @@ function collectSourceMeshUnits(root: THREE.Object3D): SourceMeshUnit[] {
   let traverseIndex = 0;
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
-    if (!(mesh as any).isMesh || !mesh.geometry) return;
+    if (!(mesh as any).isMesh) return;
+    const meshName = (mesh.name || '').trim() || 'unnamed';
+    if (!mesh.geometry) {
+      throw new Error(`Mesh "${meshName}" has no geometry.`);
+    }
     const pos = mesh.geometry.getAttribute('position');
-    if (!pos || pos.itemSize < 3 || pos.count === 0) return;
-    // Filter non-triangle or points – count %3
+    if (!pos || pos.itemSize < 3 || pos.count === 0) {
+      throw new Error(`Mesh "${meshName}" has no valid position geometry.`);
+    }
     const indexCount = mesh.geometry.index?.count ?? pos.count;
     if (indexCount === 0 || indexCount % 3 !== 0) {
-      // skip invalid
-      return;
+      throw new Error(`Mesh "${meshName}" is not triangle geometry.`);
     }
     candidates.push({ mesh, index: traverseIndex++ });
   });
