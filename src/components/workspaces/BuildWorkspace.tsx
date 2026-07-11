@@ -176,7 +176,7 @@ export function BuildWorkspace() {
 
   const copySelection = useCallback(async () => {
     if (selectedObjects.length === 0) return undefined;
-    const payload = createBuildClipboardPayload(project.id, selectedObjects);
+    const payload = createBuildClipboardPayload(project.id, selectedObjects, project.assets);
     setBuildClipboard(payload);
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
@@ -1011,9 +1011,19 @@ function PrecisionControls({
         <div className="rounded-lg border border-subtle bg-surface-muted px-3 py-2 text-xs leading-relaxed text-secondary">
           <div className="font-medium text-primary">{object.importedModel.sourceName}</div>
           <div className="mt-1">
-            {object.importedModel.triangleCount.toLocaleString()} triangles · {object.importedModel.vertexCount.toLocaleString()} vertices
+            {object.importedModel.triangleCount.toLocaleString()} tri · {object.importedModel.vertexCount.toLocaleString()} verts · {object.importedModel.meshCount} mesh{object.importedModel.meshCount === 1 ? '' : 'es'}
+            {object.importedModel.instanceCount ? ` · ${object.importedModel.instanceCount} instances` : ''}
           </div>
-          <div>Exact geometry · texture-free · hierarchy flattened</div>
+          {object.importedModel.sourceNodeName && (
+            <div>Node: {object.importedModel.sourceNodeName}</div>
+          )}
+          {object.importedModel.sourceNodePath && (
+            <div className="truncate">Path: {object.importedModel.sourceNodePath}</div>
+          )}
+          <div>Mode: {object.importedModel.importMode} · world-transform baked · hierarchy flattened · texture-free</div>
+          {object.importedModel.warnings && object.importedModel.warnings.length > 0 && (
+            <div className="mt-1 text-amber-600">{object.importedModel.warnings[0]}</div>
+          )}
         </div>
       )}
       <Field label="Surface">

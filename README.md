@@ -37,25 +37,30 @@ Open **Help & Documentation** from the Continuity Stage brand menu for the searc
 
 ## 3D Model and Scene Import
 
-Open **Build > More > Import 3D model or scene**. Import is local-only and geometry-only: source materials, textures, cameras, lights, rigs, and animation are omitted. Exact triangles are retained; the importer does not automatically decimate or otherwise simplify geometry. Multiple source mesh nodes are flattened into one selectable graybox object and one draw call while preserving their transformed triangles.
+Open **Build > More > Import 3D model or scene**. Import is local-only and geometry-only: source materials, textures, cameras, lights, rigs, animation, and morphs are omitted. Exact triangles are retained; the importer does not automatically decimate or otherwise simplify geometry. World-space placement is preserved with hierarchy flattened.
+
+Recommended exports:
+
+- Blender: File → Export → glTF 2.0 (.glb) – include the entire scene, apply transforms if you want final world space.
+- Maya: File → Export All → FBX – include all visible objects.
+- Unreal: File → Export All → export selected level/actors as GLB.
 
 Direct import formats are:
 
 - GLB and embedded glTF 2.0 (preferred)
-- OBJ
-- STL
-- PLY
-- FBX (best-effort interchange support)
+- FBX, OBJ, STL, PLY
+- .panoscene bundles (.panoscene, .panoscene.zip)
 
-Loaders are fetched from the existing Three.js dependency only after a user chooses that format. Each source file is converted once to a compact PanoRef graybox mesh stored with the project, so ordinary startup and projects without imported geometry do not pay the parser cost. OBJ, STL, and PLY do not contain dependable unit metadata; the importer treats one source unit as one meter. External `.gltf` `.bin` sidecars and compressed Draco/Meshopt glTF are not part of this first slice; export an uncompressed, geometry-only GLB instead.
+Import modes:
 
-Native DCC/project files are recognized but are not executed or reverse-engineered in the browser. Select the native source and its same-name bridge file together:
+- **Keep objects separate (default)**: One Mesh = one object, one InstancedMesh = one object containing all instances, no per-instance objects. Hierarchy is not recreated – world transforms are baked. Each object gets position = center of its world bounds, rotation [0,0,0], scale [1,1,1]. Move one chair without moving others.
+- **Combine into one object**: All nodes world-transformed into one asset and one object.
 
-- Blender `.blend` + geometry-only `.glb`
-- Maya `.ma` / `.mb` + geometry-only `.fbx` or `.glb`
-- Unreal `.umap` / `.uasset` / `.uproject` + exported level/actor `.glb` or `.fbx`
+Preserved: world-space positions/rotations/scales baked, exact triangles, instance counts aggregated. Not preserved: editable parent-child hierarchy, pivot points, materials, textures, cameras, lights, animation, rigs, deformers, morphs.
 
-This exchange-first path keeps the app usable on devices that cannot run Blender, Maya, or Unreal and avoids shipping large, version-specific native runtimes. The native file is provenance only; PanoRef reads the bridge geometry.
+Native DCC files like `.blend`, `.ma`, `.mb`, `.uproject`, `.umap`, `.uasset` are not supported for direct import. If selected, PanoRef shows a useful error guiding you to export GLB/FBX. The importer never executes native scene logic.
+
+Loaders are fetched from the existing Three.js dependency only after a user chooses that format. Each imported object is converted once to a compact PanoRef graybox mesh stored with the project. Large imports may increase project JSON size – external references are not supported in this slice. OBJ, STL, and PLY have no reliable unit metadata; 1 source unit is treated as 1 meter. External `.gltf` `.bin` sidecars and compressed Draco/Meshopt glTF are not supported; export uncompressed GLB.
 
 Pipeline handoffs can instead provide a `.panoscene` ZIP with this shape:
 

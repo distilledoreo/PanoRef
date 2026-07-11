@@ -170,7 +170,7 @@ test.describe('layout and core chrome', () => {
 
     await page.locator('[data-build-object-tray]').getByRole('button', { name: 'More' }).click();
     await page.locator('[data-build-import-model]').click();
-    const dialog = page.getByRole('dialog', { name: 'Import 3D model or scene' });
+    const dialog = page.getByRole('dialog', { name: /Import 3D/ });
     await expect(dialog).toBeVisible();
     await dialog.locator('[data-model-import-input]').setInputFiles({
       name: 'triangle.obj',
@@ -183,7 +183,7 @@ test.describe('layout and core chrome', () => {
       ].join('\n')),
     });
 
-    await expect(dialog.getByText(/1 triangles .* imported unchanged/)).toBeVisible();
+    await expect(dialog.getByText(/Imported 1 selectable object/)).toBeVisible();
     await dialog.getByText('Close', { exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(page.getByRole('textbox', { name: 'Selected object name' })).toHaveValue('triangle');

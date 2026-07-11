@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {
+  ImportedModelImportMode,
   ImportedModelSourceApplication,
   ProjectAsset,
   SceneObject,
@@ -13,11 +14,11 @@ export const DIRECT_MODEL_EXTENSIONS = ['glb', 'gltf', 'obj', 'stl', 'ply', 'fbx
 export type DirectModelFormat = typeof DIRECT_MODEL_EXTENSIONS[number];
 
 export const NATIVE_SCENE_EXTENSIONS = ['blend', 'ma', 'mb', 'uproject', 'umap', 'uasset'] as const;
+
 export const MODEL_IMPORT_ACCEPT = [
   ...DIRECT_MODEL_EXTENSIONS.map((extension) => `.${extension}`),
-  ...NATIVE_SCENE_EXTENSIONS.map((extension) => `.${extension}`),
   '.panoscene',
-  '.zip',
+  '.panoscene.zip',
 ].join(',');
 
 export const MAX_SOURCE_MODEL_BYTES = 200 * 1024 * 1024;
@@ -25,6 +26,8 @@ export const MAX_IMPORT_VERTICES = 3_000_000;
 export const MAX_IMPORT_TRIANGLES = 3_000_000;
 export const IMPORT_WARNING_BYTES = 50 * 1024 * 1024;
 export const IMPORT_WARNING_TRIANGLES = 500_000;
+export const IMPORT_WARNING_OBJECTS = 250;
+export const MAX_SEPARATE_IMPORT_OBJECTS = 2000;
 export const SCENE_BUNDLE_MANIFEST = 'panoref-scene.json';
 
 const MAX_BUNDLE_ENTRIES = 64;
@@ -64,9 +67,32 @@ export interface ModelImportPlan {
   issues: ModelImportPlanIssue[];
 }
 
+export type ModelImportMode = ImportedModelImportMode;
+
+export interface ModelImportOptions {
+  mode: ModelImportMode;
+}
+
 export interface ModelImportResult {
   asset: ProjectAsset;
   object: SceneObject;
+}
+
+export interface ModelImportSummary {
+  sourceName: string;
+  sourceFormat: string;
+  mode: ModelImportMode;
+  totalObjects: number;
+  totalVertices: number;
+  totalTriangles: number;
+  sourceNodeCount: number;
+  combined: boolean;
+}
+
+export interface ModelImportBatchResult {
+  items: ModelImportResult[];
+  summary: ModelImportSummary;
+  warnings: string[];
 }
 
 interface LoadedModel {
@@ -77,16 +103,24 @@ interface LoadedModel {
   warnings: string[];
 }
 
-interface ExtractedGeometry {
+interface SourceMeshUnit {
+  sourceNodeName: string | undefined;
+  sourceNodePath: string;
   positions: Float32Array;
   indices: Uint32Array;
+  /** Center of world-space AABB for this unit. */
   center: Vec3;
   dimensions: Vec3;
-  meshCount: number;
   vertexCount: number;
   triangleCount: number;
-  warnings: string[];
-  sourceBounds: { min: Vec3; max: Vec3 };
+  instanceCount: number;
+  flipWinding: boolean;
+  worldMatrix: THREE.Matrix4;
+}
+
+interface PackedUnit {
+  packed: ReturnType<typeof encodePackedGrayboxMesh>;
+  source: SourceMeshUnit;
 }
 
 interface SceneBundleManifestData {
@@ -100,45 +134,29 @@ interface SceneBundleManifestData {
   };
 }
 
+// ------------------------------------------------------------------
+// Planning – direct workflow only, native files are errors
+// ------------------------------------------------------------------
+
 export function createModelImportPlan(files: readonly File[]): ModelImportPlan {
   const directFiles = files.filter((file) => directFormatForFile(file));
   const nativeFiles = files.filter((file) => nativeApplicationForFile(file));
   const bundleFiles = files.filter(isSceneBundleFile);
-  const recognized = new Set([...directFiles, ...nativeFiles, ...bundleFiles]);
-  const usedDirect = new Set<File>();
-  const jobs: ModelImportJob[] = bundleFiles.map((file) => ({ kind: 'bundle', file }));
+  const recognized = new Set<File>([...directFiles, ...nativeFiles, ...bundleFiles]);
+  const jobs: ModelImportJob[] = [
+    ...bundleFiles.map((file) => ({ kind: 'bundle', file } as ModelImportJob)),
+    ...directFiles.map((file) => ({ kind: 'file', file } as ModelImportJob)),
+  ];
   const issues: ModelImportPlanIssue[] = [];
 
   for (const nativeFile of nativeFiles) {
-    const application = nativeApplicationForFile(nativeFile)!;
-    const stem = fileStem(nativeFile.name);
-    const sameStem = directFiles.find((candidate) => (
-      !usedDirect.has(candidate) && fileStem(candidate.name).toLowerCase() === stem.toLowerCase()
-    ));
-    const onlyAvailable = nativeFiles.length === 1
-      ? directFiles.find((candidate) => !usedDirect.has(candidate))
-      : undefined;
-    const bridge = sameStem ?? onlyAvailable;
-    if (!bridge) {
-      issues.push({
-        fileName: nativeFile.name,
-        tone: 'error',
-        message: nativeBridgeMessage(application),
-      });
-      continue;
-    }
-    usedDirect.add(bridge);
-    jobs.push({
-      kind: 'file',
-      file: bridge,
-      sourceApplication: application,
-      sourceSceneName: nativeFile.name,
+    const ext = fileExtension(nativeFile.name);
+    issues.push({
+      fileName: nativeFile.name,
+      tone: 'error',
+      message: nativeExportGuidance(ext),
     });
   }
-
-  directFiles.forEach((file) => {
-    if (!usedDirect.has(file)) jobs.push({ kind: 'file', file });
-  });
 
   files.forEach((file) => {
     if (recognized.has(file)) return;
@@ -163,11 +181,40 @@ export function createModelImportPlan(files: readonly File[]): ModelImportPlan {
   return { jobs, issues };
 }
 
-export async function importModelJob(job: ModelImportJob): Promise<ModelImportResult> {
+export function nativeExportGuidance(extension: string): string {
+  const ext = extension.toLowerCase();
+  if (ext === 'blend') {
+    return 'PanoRef cannot read Blender project files directly. In Blender, export the entire scene as a GLB and import that GLB.';
+  }
+  if (ext === 'ma' || ext === 'mb') {
+    return 'PanoRef cannot read Maya scene files directly. In Maya, use Export All to create an FBX and import that FBX.';
+  }
+  if (['uproject', 'umap', 'uasset'].includes(ext)) {
+    return 'PanoRef cannot read Unreal project or asset files directly. Export the current level as GLB and import that GLB.';
+  }
+  return 'This file type is not supported for direct import. Export a GLB or FBX from your DCC and import that.';
+}
+
+export function nativeBridgeMessage(application: ImportedModelSourceApplication): string {
+  // Back-compat export – delegate to new guidance
+  if (application === 'blender') return nativeExportGuidance('blend');
+  if (application === 'maya') return nativeExportGuidance('ma');
+  return nativeExportGuidance('umap');
+}
+
+// ------------------------------------------------------------------
+// Import engine
+// ------------------------------------------------------------------
+
+export async function importModelJob(
+  job: ModelImportJob,
+  options: ModelImportOptions,
+): Promise<ModelImportBatchResult> {
   if (job.kind === 'bundle') {
     const bundled = await readSceneBundle(job.file);
     return importDirectModel(
       bundled.file,
+      options,
       bundled.manifest.source?.application,
       bundled.manifest.source?.file,
       bundled.manifest.geometryOnly === false
@@ -175,37 +222,58 @@ export async function importModelJob(job: ModelImportJob): Promise<ModelImportRe
         : [],
     );
   }
-  return importDirectModel(job.file, job.sourceApplication, job.sourceSceneName);
-}
-
-export function nativeBridgeMessage(application: ImportedModelSourceApplication): string {
-  if (application === 'blender') {
-    return 'Blender .blend files need a companion geometry-only .glb with the same name, or a PanoRef scene bundle.';
-  }
-  if (application === 'maya') {
-    return 'Maya .ma/.mb files need a companion geometry-only .fbx or .glb with the same name, or a PanoRef scene bundle.';
-  }
-  return 'Unreal scenes/assets need a companion geometry-only level/actor .glb or .fbx, or a PanoRef scene bundle.';
+  return importDirectModel(job.file, options, job.sourceApplication, job.sourceSceneName);
 }
 
 async function importDirectModel(
   file: File,
+  options: ModelImportOptions,
   sourceApplication?: ImportedModelSourceApplication,
   sourceSceneName?: string,
   initialWarnings: string[] = [],
-): Promise<ModelImportResult> {
+): Promise<ModelImportBatchResult> {
   assertSourceFileSize(file);
   const format = directFormatForFile(file);
   if (!format) throw new Error(`Unsupported model format: ${file.name}`);
 
   const loaded = await loadModel(file, format);
+  const sourceImportId = createId('import');
   try {
-    const extracted = extractGeometry(loaded.root);
-    const packed = encodePackedGrayboxMesh(extracted.positions, extracted.indices);
+    const sourceUnits = collectSourceMeshUnits(loaded.root);
+    if (sourceUnits.length === 0) {
+      throw new Error('No triangle meshes were found in this file.');
+    }
+
+    // Object-count safety
+    if (options.mode === 'separate' && sourceUnits.length > MAX_SEPARATE_IMPORT_OBJECTS) {
+      throw new Error(
+        `This file contains ${sourceUnits.length} separate objects, above the limit of ${MAX_SEPARATE_IMPORT_OBJECTS}. Use Combine into one object to import it.`,
+      );
+    }
+
+    // Pack each unit (bake world transform, center, flip winding)
+    const packedUnits: PackedUnit[] = [];
+    let totalVertices = 0;
+    let totalTriangles = 0;
+
+    for (const unit of sourceUnits) {
+      totalVertices += unit.vertexCount;
+      totalTriangles += unit.triangleCount;
+      // total check includes expanded instances
+      if (totalVertices > MAX_IMPORT_VERTICES || totalTriangles > MAX_IMPORT_TRIANGLES) {
+        throw new Error(
+          `Geometry exceeds the safety limit of ${MAX_IMPORT_VERTICES.toLocaleString()} vertices or ${MAX_IMPORT_TRIANGLES.toLocaleString()} triangles. No geometry was simplified.`,
+        );
+      }
+      const packed = encodePackedGrayboxMesh(unit.positions, unit.indices);
+      packedUnits.push({ packed, source: unit });
+    }
+
+    // Build warnings summary
     const warnings = uniqueWarnings([
       ...initialWarnings,
       ...loaded.warnings,
-      ...extracted.warnings,
+      // material/texture stripping
       ...(loaded.materialCount > 0 || loaded.textureCount > 0
         ? [`Removed ${loaded.materialCount} material${loaded.materialCount === 1 ? '' : 's'} and ${loaded.textureCount} texture reference${loaded.textureCount === 1 ? '' : 's'} for graybox rendering.`]
         : []),
@@ -218,45 +286,162 @@ async function importDirectModel(
       ...(file.size >= IMPORT_WARNING_BYTES
         ? [`Large source file (${formatBytes(file.size)}); initial conversion may take longer on low-power devices.`]
         : []),
-      ...(extracted.triangleCount >= IMPORT_WARNING_TRIANGLES
-        ? [`Heavy geometry (${extracted.triangleCount.toLocaleString()} triangles) was imported unchanged.`]
+      ...(totalTriangles >= IMPORT_WARNING_TRIANGLES
+        ? [`Heavy geometry (${totalTriangles.toLocaleString()} triangles) was imported unchanged.`]
         : []),
-      ...(extracted.meshCount > 1
-        ? [`Flattened ${extracted.meshCount} mesh nodes into one selectable graybox object without removing triangles.`]
+      ...(options.mode === 'separate' && sourceUnits.length >= IMPORT_WARNING_OBJECTS
+        ? [`Importing ${sourceUnits.length} separate objects may affect project performance.`]
         : []),
+      // Generic stripped notices
+      ...(() => {
+        const sawSkinned = loaded.warnings.some((w) => w.toLowerCase().includes('skinned'));
+        const sawMorph = loaded.warnings.some((w) => w.toLowerCase().includes('morph'));
+        const extra: string[] = [];
+        if (!sawSkinned || !sawMorph) {
+          // collectSourceMeshUnits already pushes skinned/morph warnings into loaded.warnings if seen,
+          // but we ensure they are present as dedicated warnings already – nothing extra needed here.
+        }
+        return extra;
+      })(),
     ]);
 
-    const assetId = createId('model');
-    const sourceKind = sourceApplication || extracted.meshCount > 1 ? 'scene' : 'model';
     const sourceName = sourceSceneName ?? file.name;
+    const sourceKind = sourceApplication || sourceUnits.length > 1 ? 'scene' : 'model';
+    const baseName = fileStem(sourceName);
+
+    if (options.mode === 'combined') {
+      return buildCombinedResult({
+        file,
+        format,
+        sourceApplication,
+        sourceSceneName,
+        sourceName,
+        sourceKind,
+        baseName,
+        sourceImportId,
+        packedUnits,
+        totalVertices,
+        totalTriangles,
+        loaded,
+        warnings,
+      });
+    }
+
+    return buildSeparateResult({
+      file,
+      format,
+      sourceApplication,
+      sourceSceneName,
+      sourceName,
+      sourceKind,
+      baseName,
+      sourceImportId,
+      packedUnits,
+      totalVertices,
+      totalTriangles,
+      loaded,
+      warnings,
+    });
+  } finally {
+    disposeLoadedRoot(loaded.root);
+  }
+}
+
+interface BuildArgs {
+  file: File;
+  format: string;
+  sourceApplication?: ImportedModelSourceApplication;
+  sourceSceneName?: string;
+  sourceName: string;
+  sourceKind: 'model' | 'scene';
+  baseName: string;
+  sourceImportId: string;
+  packedUnits: PackedUnit[];
+  totalVertices: number;
+  totalTriangles: number;
+  loaded: LoadedModel;
+  warnings: string[];
+}
+
+function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
+  const {
+    format, sourceApplication, sourceSceneName, sourceName, sourceKind,
+    baseName, sourceImportId, packedUnits, totalVertices, totalTriangles, warnings,
+  } = args;
+
+  // Unique naming within batch – dedup based on base key stripped of loader-added _N suffix
+  const usedNames = new Set<string>();
+  const baseCount = new Map<string, number>();
+  function normalizeDupBase(name: string): string {
+    // Strip three.js auto-uniquify suffix like "_1", "_2" and trim
+    const stripped = name.replace(/_\d+$/, '').trim();
+    return stripped || name.trim() || baseName;
+  }
+  function uniqueName(preferred: string): string {
+    const trimmed = preferred.trim() || baseName;
+    const base = normalizeDupBase(trimmed);
+    // Use base for dedup tracking but preserve original casing of base
+    if (!usedNames.has(base) && !usedNames.has(trimmed)) {
+      // First occurrence – keep the normalized base (which for Chair stays Chair, for Chair_1 becomes Chair)
+      // To keep UX clean, use base for output
+      const out = base;
+      usedNames.add(out);
+      baseCount.set(base, 1);
+      return out;
+    }
+    let count = baseCount.get(base) ?? 1;
+    let candidate: string;
+    do {
+      count += 1;
+      candidate = `${base} (${count})`;
+    } while (usedNames.has(candidate));
+    usedNames.add(candidate);
+    baseCount.set(base, count);
+    // Also mark trimmed as used to avoid collisions later
+    usedNames.add(trimmed);
+    return candidate;
+  }
+
+  const items: ModelImportResult[] = packedUnits.map(({ packed, source }) => {
+    const rawName = source.sourceNodeName?.trim() || baseName;
+    const unique = uniqueName(rawName);
     const now = new Date().toISOString();
+    const assetId = createId('model');
+    const objectId = createId('obj');
+
     const asset: ProjectAsset = {
       id: assetId,
       type: 'model',
-      name: `${fileStem(sourceName)}.panoref-mesh`,
+      name: `${unique}.panoref-mesh`,
       uri: packed.uri,
       mimeType: 'application/vnd.panoref.graybox-mesh',
       createdAt: now,
       metadata: {
         sourceName,
-        bridgeFileName: sourceSceneName ? file.name : undefined,
+        bridgeFileName: sourceSceneName ? args.file.name : undefined,
         sourceFormat: format,
         sourceApplication,
-        vertexCount: extracted.vertexCount,
-        triangleCount: extracted.triangleCount,
-        meshCount: extracted.meshCount,
+        sourceImportId,
+        sourceNodeName: source.sourceNodeName,
+        sourceNodePath: source.sourceNodePath,
+        sourceNodeCount: packedUnits.length,
+        importMode: 'separate',
+        vertexCount: source.vertexCount,
+        triangleCount: source.triangleCount,
+        instanceCount: source.instanceCount > 1 ? source.instanceCount : undefined,
+        meshCount: 1,
         packedBytes: packed.byteLength,
-        sourceBounds: extracted.sourceBounds,
         geometrySimplified: false,
         hierarchyFlattened: true,
       },
     };
+
     const object: SceneObject = {
-      id: createId('obj'),
-      name: fileStem(sourceName),
+      id: objectId,
+      name: unique,
       type: 'imported_model',
-      transform: createTransform(extracted.center),
-      dimensions: extracted.dimensions,
+      transform: createTransform(source.center),
+      dimensions: source.dimensions,
       category: 'architecture',
       locked: false,
       visible: true,
@@ -267,19 +452,458 @@ async function importDirectModel(
         sourceKind,
         sourceApplication,
         sourceSceneName,
-        vertexCount: extracted.vertexCount,
-        triangleCount: extracted.triangleCount,
-        meshCount: extracted.meshCount,
+        vertexCount: source.vertexCount,
+        triangleCount: source.triangleCount,
+        meshCount: 1,
+        instanceCount: source.instanceCount > 1 ? source.instanceCount : undefined,
+        importMode: 'separate',
+        sourceImportId,
+        sourceNodeName: source.sourceNodeName,
+        sourceNodePath: source.sourceNodePath,
         geometrySimplified: false,
         hierarchyFlattened: true,
-        warnings: warnings.length > 0 ? warnings : undefined,
+        warnings: warnings.length > 0 ? [...warnings] : undefined,
       },
     };
+
     return { asset, object };
-  } finally {
-    disposeLoadedRoot(loaded.root);
-  }
+  });
+
+  return {
+    items,
+    summary: {
+      sourceName,
+      sourceFormat: format,
+      mode: 'separate',
+      totalObjects: items.length,
+      totalVertices,
+      totalTriangles,
+      sourceNodeCount: packedUnits.length,
+      combined: false,
+    },
+    warnings,
+  };
 }
+
+function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
+  const { format, sourceApplication, sourceSceneName, sourceName, sourceKind, baseName, sourceImportId, packedUnits, totalVertices, totalTriangles, warnings } = args;
+
+  // Merge all units into one mesh set - world baked already per-unit (positions already centered per unit, but for combined
+  // we need to re-center globally to preserve world-space layout relative to combined bounds center).
+  // Strategy: collect all world-space positions before per-unit centering? Actually per SourceMeshUnit we already baked and centered per unit.
+  // For combined, we need to encode a single mesh where each triangle is placed as per original world + offset adjustment to combined center.
+  // So we reconstruct global positions: unit.positions (centered) + unit.center.
+  // Compute global min/max of those global positions, then recenter to global center.
+
+  // First reconstruct world positions
+  let globalMin = new THREE.Vector3(Infinity, Infinity, Infinity);
+  let globalMax = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  const worldPositionsPerUnit: Array<{ worldPositions: Float32Array; indices: Uint32Array; center: Vec3 }> = [];
+
+  for (const { source } of packedUnits) {
+    const wp = new Float32Array(source.positions.length);
+    for (let i = 0; i < source.positions.length; i += 3) {
+      const x = source.positions[i] + source.center[0];
+      const y = source.positions[i + 1] + source.center[1];
+      const z = source.positions[i + 2] + source.center[2];
+      wp[i] = x;
+      wp[i + 1] = y;
+      wp[i + 2] = z;
+      if (x < globalMin.x) globalMin.x = x;
+      if (y < globalMin.y) globalMin.y = y;
+      if (z < globalMin.z) globalMin.z = z;
+      if (x > globalMax.x) globalMax.x = x;
+      if (y > globalMax.y) globalMax.y = y;
+      if (z > globalMax.z) globalMax.z = z;
+    }
+    worldPositionsPerUnit.push({ worldPositions: wp, indices: source.indices, center: source.center });
+  }
+
+  const globalCenterVec = globalMin.clone().add(globalMax).multiplyScalar(0.5);
+  const globalCenter: Vec3 = globalCenterVec.toArray() as Vec3;
+  const size = globalMax.clone().sub(globalMin);
+  const dimensions: Vec3 = [
+    Math.max(size.x, 0.001),
+    Math.max(size.y, 0.001),
+    Math.max(size.z, 0.001),
+  ];
+
+  let totalVertexCount = 0;
+  let totalIndexCount = 0;
+  for (const unit of worldPositionsPerUnit) {
+    totalVertexCount += unit.worldPositions.length / 3;
+    totalIndexCount += unit.indices.length;
+  }
+
+  const combinedPositions = new Float32Array(totalVertexCount * 3);
+  const combinedIndices = new Uint32Array(totalIndexCount);
+  let vertexOffset = 0;
+  let indexOffset = 0;
+
+  for (const { worldPositions, indices } of worldPositionsPerUnit) {
+    const vCount = worldPositions.length / 3;
+    for (let i = 0; i < worldPositions.length; i += 3) {
+      const dst = (vertexOffset + i / 3) * 3;
+      combinedPositions[dst] = worldPositions[i] - globalCenterVec.x;
+      combinedPositions[dst + 1] = worldPositions[i + 1] - globalCenterVec.y;
+      combinedPositions[dst + 2] = worldPositions[i + 2] - globalCenterVec.z;
+    }
+    for (let i = 0; i < indices.length; i += 1) {
+      combinedIndices[indexOffset + i] = indices[i] + vertexOffset;
+    }
+    vertexOffset += vCount;
+    indexOffset += indices.length;
+  }
+
+  const packed = encodePackedGrayboxMesh(combinedPositions, combinedIndices);
+
+  const now = new Date().toISOString();
+  const assetId = createId('model');
+  const asset: ProjectAsset = {
+    id: assetId,
+    type: 'model',
+    name: `${baseName}.panoref-mesh`,
+    uri: packed.uri,
+    mimeType: 'application/vnd.panoref.graybox-mesh',
+    createdAt: now,
+    metadata: {
+      sourceName,
+      bridgeFileName: sourceSceneName ? args.file.name : undefined,
+      sourceFormat: format,
+      sourceApplication,
+      sourceImportId,
+      sourceNodeCount: packedUnits.length,
+      importMode: 'combined',
+      vertexCount: totalVertexCount,
+      triangleCount: totalIndexCount / 3,
+      meshCount: packedUnits.length,
+      packedBytes: packed.byteLength,
+      geometrySimplified: false,
+      hierarchyFlattened: true,
+    },
+  };
+
+  const object: SceneObject = {
+    id: createId('obj'),
+    name: baseName,
+    type: 'imported_model',
+    transform: createTransform(globalCenter),
+    dimensions,
+    category: 'architecture',
+    locked: false,
+    visible: true,
+    modelAssetId: assetId,
+    importedModel: {
+      sourceName,
+      sourceFormat: format,
+      sourceKind,
+      sourceApplication,
+      sourceSceneName,
+      vertexCount: totalVertexCount,
+      triangleCount: totalIndexCount / 3,
+      meshCount: packedUnits.length,
+      importMode: 'combined',
+      sourceImportId,
+      geometrySimplified: false,
+      hierarchyFlattened: true,
+      warnings: warnings.length > 0 ? [...warnings] : undefined,
+    },
+  };
+
+  return {
+    items: [{ asset, object }],
+    summary: {
+      sourceName,
+      sourceFormat: format,
+      mode: 'combined',
+      totalObjects: 1,
+      totalVertices: totalVertexCount,
+      totalTriangles: totalIndexCount / 3,
+      sourceNodeCount: packedUnits.length,
+      combined: true,
+    },
+    warnings,
+  };
+}
+
+// ------------------------------------------------------------------
+// Mesh extraction helpers – Section 9-12
+// ------------------------------------------------------------------
+
+function collectSourceMeshUnits(root: THREE.Object3D): SourceMeshUnit[] {
+  root.updateMatrixWorld(true);
+
+  // Gather candidate meshes in traversal order
+  interface Candidate {
+    mesh: THREE.Mesh;
+    index: number;
+  }
+  const candidates: Candidate[] = [];
+  let traverseIndex = 0;
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!(mesh as any).isMesh || !mesh.geometry) return;
+    const pos = mesh.geometry.getAttribute('position');
+    if (!pos || pos.itemSize < 3 || pos.count === 0) return;
+    // Filter non-triangle or points – count %3
+    const indexCount = mesh.geometry.index?.count ?? pos.count;
+    if (indexCount === 0 || indexCount % 3 !== 0) {
+      // skip invalid
+      return;
+    }
+    candidates.push({ mesh, index: traverseIndex++ });
+  });
+
+  // Build deterministic node paths
+  const paths = buildDeterministicPaths(candidates);
+
+  const units: SourceMeshUnit[] = [];
+  let totalVerticesSoFar = 0;
+  let totalTrianglesSoFar = 0;
+
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const { mesh } = candidates[ci];
+    const sourceNodePath = paths[ci];
+    const rawName = (mesh.name || '').trim();
+    const sourceNodeName = rawName || undefined;
+
+    const isInstanced = (mesh as THREE.InstancedMesh).isInstancedMesh;
+    if (isInstanced) {
+      // One unit containing all instances per spec (10b)
+      const instanced = mesh as THREE.InstancedMesh;
+      const count = instanced.count;
+      if (count === 0) continue;
+      // Merge all instances into one buffer set
+      const geometry = mesh.geometry;
+      const srcPosAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+      const srcIndex = geometry.index;
+      const indexCountPerInstance = srcIndex?.count ?? srcPosAttr.count;
+      const vertexCountPerInstance = srcPosAttr.count;
+
+      // Pre-count for safety counting duplicated vertices
+      const expandedVertexCount = vertexCountPerInstance * count;
+      const expandedTriangleCount = (indexCountPerInstance / 3) * count;
+
+      const flipPerInstance: boolean[] = [];
+      const matrixPerInstance: THREE.Matrix4[] = [];
+      const instanceMatrix = new THREE.Matrix4();
+      for (let i = 0; i < count; i++) {
+        instanced.getMatrixAt(i, instanceMatrix);
+        const world = new THREE.Matrix4().multiplyMatrices(mesh.matrixWorld, instanceMatrix);
+        matrixPerInstance.push(world);
+        flipPerInstance.push(world.determinant() < 0);
+      }
+
+      // Bounds calc: we need world-space min/max before centering
+      const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+      const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+      const tmpVertex = new THREE.Vector3();
+      for (let inst = 0; inst < count; inst++) {
+        const m = matrixPerInstance[inst];
+        for (let v = 0; v < vertexCountPerInstance; v++) {
+          tmpVertex.set(srcPosAttr.getX(v), srcPosAttr.getY(v), srcPosAttr.getZ(v));
+          tmpVertex.applyMatrix4(m);
+          if (!Number.isFinite(tmpVertex.x) || !Number.isFinite(tmpVertex.y) || !Number.isFinite(tmpVertex.z)) {
+            throw new Error('Imported geometry contains a non-finite transformed vertex.');
+          }
+          min.min(tmpVertex);
+          max.max(tmpVertex);
+        }
+      }
+
+      // Safety pre-check
+      totalVerticesSoFar += expandedVertexCount;
+      totalTrianglesSoFar += expandedTriangleCount;
+      if (totalVerticesSoFar > MAX_IMPORT_VERTICES || totalTrianglesSoFar > MAX_IMPORT_TRIANGLES) {
+        throw new Error(
+          `Geometry exceeds the safety limit of ${MAX_IMPORT_VERTICES.toLocaleString()} vertices or ${MAX_IMPORT_TRIANGLES.toLocaleString()} triangles. No geometry was simplified.`,
+        );
+      }
+
+      const centerVec = min.clone().add(max).multiplyScalar(0.5);
+      const center: Vec3 = centerVec.toArray() as Vec3;
+      const sizeVec = max.clone().sub(min);
+      const dimensions: Vec3 = [
+        Math.max(sizeVec.x, 0.001),
+        Math.max(sizeVec.y, 0.001),
+        Math.max(sizeVec.z, 0.001),
+      ];
+
+      // Now build positions centered
+      const positions = new Float32Array(expandedVertexCount * 3);
+      const indices = new Uint32Array(expandedTriangleCount * 3);
+
+      let vertexOffset = 0;
+      let indexOffset = 0;
+      for (let inst = 0; inst < count; inst++) {
+        const m = matrixPerInstance[inst];
+        const flip = flipPerInstance[inst];
+        for (let v = 0; v < vertexCountPerInstance; v++) {
+          tmpVertex.set(srcPosAttr.getX(v), srcPosAttr.getY(v), srcPosAttr.getZ(v));
+          tmpVertex.applyMatrix4(m);
+          const dst = (vertexOffset + v) * 3;
+          positions[dst] = tmpVertex.x - centerVec.x;
+          positions[dst + 1] = tmpVertex.y - centerVec.y;
+          positions[dst + 2] = tmpVertex.z - centerVec.z;
+        }
+        for (let k = 0; k < indexCountPerInstance; k += 3) {
+          const a = (srcIndex?.getX(k) ?? k) + vertexOffset;
+          const b = (srcIndex?.getX(k + 1) ?? k + 1) + vertexOffset;
+          const c = (srcIndex?.getX(k + 2) ?? k + 2) + vertexOffset;
+          indices[indexOffset + k] = a;
+          indices[indexOffset + k + 1] = flip ? c : b;
+          indices[indexOffset + k + 2] = flip ? b : c;
+        }
+        vertexOffset += vertexCountPerInstance;
+        indexOffset += indexCountPerInstance;
+      }
+
+      units.push({
+        sourceNodeName,
+        sourceNodePath,
+        positions,
+        indices,
+        center,
+        dimensions,
+        vertexCount: expandedVertexCount,
+        triangleCount: expandedTriangleCount,
+        instanceCount: count,
+        flipWinding: false, // already applied
+        worldMatrix: new THREE.Matrix4(), // not meaningful after merge
+      });
+    } else {
+      const geometry = mesh.geometry;
+      const srcPosAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+      const srcIndex = geometry.index;
+      const indexCount = srcIndex?.count ?? srcPosAttr.count;
+      const vertexCount = srcPosAttr.count;
+
+      totalVerticesSoFar += vertexCount;
+      totalTrianglesSoFar += indexCount / 3;
+      if (totalVerticesSoFar > MAX_IMPORT_VERTICES || totalTrianglesSoFar > MAX_IMPORT_TRIANGLES) {
+        throw new Error(
+          `Geometry exceeds the safety limit of ${MAX_IMPORT_VERTICES.toLocaleString()} vertices or ${MAX_IMPORT_TRIANGLES.toLocaleString()} triangles. No geometry was simplified.`,
+        );
+      }
+
+      const world = mesh.matrixWorld;
+      const flipWinding = world.determinant() < 0;
+      const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+      const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+      const tmpVertex = new THREE.Vector3();
+      // First pass bounds
+      for (let v = 0; v < vertexCount; v++) {
+        tmpVertex.set(srcPosAttr.getX(v), srcPosAttr.getY(v), srcPosAttr.getZ(v));
+        tmpVertex.applyMatrix4(world);
+        if (!Number.isFinite(tmpVertex.x) || !Number.isFinite(tmpVertex.y) || !Number.isFinite(tmpVertex.z)) {
+          throw new Error('Imported geometry contains a non-finite transformed vertex.');
+        }
+        min.min(tmpVertex);
+        max.max(tmpVertex);
+      }
+      const centerVec = min.clone().add(max).multiplyScalar(0.5);
+      const center: Vec3 = centerVec.toArray() as Vec3;
+      const sizeVec = max.clone().sub(min);
+      const dimensions: Vec3 = [
+        Math.max(sizeVec.x, 0.001),
+        Math.max(sizeVec.y, 0.001),
+        Math.max(sizeVec.z, 0.001),
+      ];
+
+      const positions = new Float32Array(vertexCount * 3);
+      const indices = new Uint32Array(indexCount);
+      for (let v = 0; v < vertexCount; v++) {
+        tmpVertex.set(srcPosAttr.getX(v), srcPosAttr.getY(v), srcPosAttr.getZ(v));
+        tmpVertex.applyMatrix4(world);
+        const dst = v * 3;
+        positions[dst] = tmpVertex.x - centerVec.x;
+        positions[dst + 1] = tmpVertex.y - centerVec.y;
+        positions[dst + 2] = tmpVertex.z - centerVec.z;
+      }
+      for (let k = 0; k < indexCount; k += 3) {
+        const a = srcIndex?.getX(k) ?? k;
+        const b = srcIndex?.getX(k + 1) ?? k + 1;
+        const c = srcIndex?.getX(k + 2) ?? k + 2;
+        indices[k] = a;
+        indices[k + 1] = flipWinding ? c : b;
+        indices[k + 2] = flipWinding ? b : c;
+      }
+
+      units.push({
+        sourceNodeName,
+        sourceNodePath,
+        positions,
+        indices,
+        center,
+        dimensions,
+        vertexCount,
+        triangleCount: indexCount / 3,
+        instanceCount: 1,
+        flipWinding,
+        worldMatrix: world.clone(),
+      });
+    }
+  }
+
+  return units;
+}
+
+function buildDeterministicPaths(candidates: Array<{ mesh: THREE.Mesh }>): string[] {
+  // For each candidate mesh, walk ancestors up to root (stop at the glTF scene root's parent chain)
+  // Build path segment as trimmed name or mesh type + child index.
+  // Child index: position among siblings (filtered to same parent's children order). We use parent.children index.
+
+  const paths: string[] = [];
+  for (const { mesh } of candidates) {
+    const segments: string[] = [];
+    let current: THREE.Object3D | null = mesh;
+    const chain: THREE.Object3D[] = [];
+    while (current) {
+      chain.push(current);
+      // Stop when parent is null or parent is Scene-like and not needed to go further? We'll go up until root parent is null
+      // But skip the root itself if it's the loaded root (we want children from top)
+      current = current.parent;
+    }
+    // chain is leaf->root, reverse to root->leaf
+    chain.reverse();
+    // Remove the topmost root if it's the imported root (usually named something generic). Keep all.
+    for (let i = 0; i < chain.length; i++) {
+      const obj = chain[i];
+      // Skip if this is the absolute scene root (first) and it has no name? Keep still but produce deterministic segment.
+      // To match spec Environment[0]/Furniture[3]/Chair[2], we need per parent child index.
+      const parent = obj.parent;
+      let childIndex = 0;
+      if (parent) {
+        childIndex = parent.children.indexOf(obj);
+      }
+      const trimmed = obj.name.trim();
+      let segment: string;
+      if (trimmed) {
+        segment = trimmed;
+      } else {
+        const type = (obj.type || 'Node').replace(/[^A-Za-z0-9]/g, '') || 'Node';
+        segment = `${type}[${childIndex}]`;
+      }
+      // Append [index] if needed? Spec example shows Name[index] ? Actually example shows Environment[0] etc – suggests including index for disambiguation.
+      // We'll produce: if name present, append [childIndex] to ensure determinism: Name[childIndex]
+      // However spec says "trimmed name or type + child index" – suggests if name missing, use type + index.
+      // To satisfy both, use for named: keep name plus [childIndex] if we are to disambiguate? Let's follow simple rule:
+      // If name present, use Name[index] pattern similar to example (Chair[2]). So include index.
+      // If name missing, use Type[index].
+      // Exception: to keep paths readable, always include [childIndex].
+      const base = trimmed || (obj.type || 'Node').replace(/[^A-Za-z0-9]/g, '') || 'Node';
+      segment = `${base}[${childIndex}]`;
+      segments.push(segment);
+    }
+    // Join with '/'
+    paths.push(segments.join('/'));
+  }
+  return paths;
+}
+
+// ------------------------------------------------------------------
+// Loaders
+// ------------------------------------------------------------------
 
 async function loadModel(file: File, format: DirectModelFormat): Promise<LoadedModel> {
   if (format === 'glb' || format === 'gltf') return loadGltf(file, format);
@@ -354,157 +978,38 @@ async function loadGltf(file: File, format: 'glb' | 'gltf'): Promise<LoadedModel
   return described;
 }
 
-function extractGeometry(root: THREE.Object3D): ExtractedGeometry {
-  type Part = {
-    geometry: THREE.BufferGeometry;
-    matrix: THREE.Matrix4;
-    vertexCount: number;
-    indexCount: number;
-    flipWinding: boolean;
-  };
-  const parts: Part[] = [];
-  const warnings: string[] = [];
-  let totalVertices = 0;
-  let totalIndices = 0;
-  let meshCount = 0;
-  let sawSkinnedMesh = false;
-  let sawMorphTargets = false;
-
-  root.updateMatrixWorld(true);
-  root.traverse((node) => {
-    const mesh = node as THREE.Mesh;
-    if (!mesh.isMesh || !mesh.geometry) return;
-    const position = mesh.geometry.getAttribute('position');
-    if (!position || position.itemSize < 3 || position.count === 0) return;
-    const indexCount = mesh.geometry.index?.count ?? position.count;
-    if (indexCount === 0 || indexCount % 3 !== 0) {
-      throw new Error(`Mesh "${mesh.name || 'unnamed'}" is not triangle geometry.`);
-    }
-    if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) sawSkinnedMesh = true;
-    if (Object.keys(mesh.geometry.morphAttributes).length > 0) sawMorphTargets = true;
-
-    const addPart = (matrix: THREE.Matrix4) => {
-      totalVertices += position.count;
-      totalIndices += indexCount;
-      meshCount += 1;
-      if (totalVertices > MAX_IMPORT_VERTICES || totalIndices / 3 > MAX_IMPORT_TRIANGLES) {
-        throw new Error(
-          `Geometry exceeds the safety limit of ${MAX_IMPORT_VERTICES.toLocaleString()} vertices or ${MAX_IMPORT_TRIANGLES.toLocaleString()} triangles. No geometry was simplified.`,
-        );
-      }
-      parts.push({
-        geometry: mesh.geometry,
-        matrix,
-        vertexCount: position.count,
-        indexCount,
-        flipWinding: matrix.determinant() < 0,
-      });
-    };
-
-    const instanced = mesh as THREE.InstancedMesh;
-    if (instanced.isInstancedMesh) {
-      const instanceMatrix = new THREE.Matrix4();
-      for (let index = 0; index < instanced.count; index += 1) {
-        instanced.getMatrixAt(index, instanceMatrix);
-        addPart(new THREE.Matrix4().multiplyMatrices(mesh.matrixWorld, instanceMatrix));
-      }
-    } else {
-      addPart(mesh.matrixWorld.clone());
-    }
-  });
-
-  if (parts.length === 0) throw new Error('No triangle meshes were found in this file.');
-  if (sawSkinnedMesh) warnings.push('Skinned geometry was imported in its static bind pose.');
-  if (sawMorphTargets) warnings.push('Morph target animation was ignored; base geometry was imported.');
-
-  const positions = new Float32Array(totalVertices * 3);
-  const indices = new Uint32Array(totalIndices);
-  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
-  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-  const vertex = new THREE.Vector3();
-  let vertexOffset = 0;
-  let indexOffset = 0;
-
-  for (const part of parts) {
-    const sourcePosition = part.geometry.getAttribute('position');
-    for (let index = 0; index < part.vertexCount; index += 1) {
-      vertex.set(sourcePosition.getX(index), sourcePosition.getY(index), sourcePosition.getZ(index));
-      vertex.applyMatrix4(part.matrix);
-      if (![vertex.x, vertex.y, vertex.z].every(Number.isFinite)) {
-        throw new Error('Imported geometry contains a non-finite transformed vertex.');
-      }
-      const target = (vertexOffset + index) * 3;
-      positions[target] = vertex.x;
-      positions[target + 1] = vertex.y;
-      positions[target + 2] = vertex.z;
-      min.min(vertex);
-      max.max(vertex);
-    }
-    const sourceIndex = part.geometry.index;
-    for (let index = 0; index < part.indexCount; index += 3) {
-      const a = (sourceIndex?.getX(index) ?? index) + vertexOffset;
-      const b = (sourceIndex?.getX(index + 1) ?? index + 1) + vertexOffset;
-      const c = (sourceIndex?.getX(index + 2) ?? index + 2) + vertexOffset;
-      indices[indexOffset + index] = a;
-      indices[indexOffset + index + 1] = part.flipWinding ? c : b;
-      indices[indexOffset + index + 2] = part.flipWinding ? b : c;
-    }
-    vertexOffset += part.vertexCount;
-    indexOffset += part.indexCount;
-  }
-
-  // Keep source-space placement exactly: center local vertices and place the wrapper at that center.
-  const centerVector = min.clone().add(max).multiplyScalar(0.5);
-  for (let index = 0; index < positions.length; index += 3) {
-    positions[index] -= centerVector.x;
-    positions[index + 1] -= centerVector.y;
-    positions[index + 2] -= centerVector.z;
-  }
-  const size = max.clone().sub(min);
-  const dimensions: Vec3 = [
-    Math.max(size.x, 0.001),
-    Math.max(size.y, 0.001),
-    Math.max(size.z, 0.001),
-  ];
-
-  return {
-    positions,
-    indices,
-    center: centerVector.toArray() as Vec3,
-    dimensions,
-    meshCount,
-    vertexCount: totalVertices,
-    triangleCount: totalIndices / 3,
-    warnings,
-    sourceBounds: {
-      min: min.toArray() as Vec3,
-      max: max.toArray() as Vec3,
-    },
-  };
-}
-
 function describeLoadedRoot(root: THREE.Object3D): LoadedModel {
   const materials = new Set<THREE.Material>();
   const textures = new Set<THREE.Texture>();
+  const warnings: string[] = [];
+  let sawSkinned = false;
+  let sawMorph = false;
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
-    if (!mesh.isMesh || !mesh.material) return;
-    const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    meshMaterials.forEach((material) => {
-      materials.add(material);
-      Object.values(material).forEach((value) => {
-        if (value && typeof value === 'object' && (value as THREE.Texture).isTexture) {
-          textures.add(value as THREE.Texture);
-        }
+    if (mesh.isMesh && mesh.material) {
+      const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      meshMaterials.forEach((material) => {
+        materials.add(material);
+        Object.values(material).forEach((value) => {
+          if (value && typeof value === 'object' && (value as THREE.Texture).isTexture) {
+            textures.add(value as THREE.Texture);
+          }
+        });
       });
-    });
+    }
+    if ((mesh as any).isSkinnedMesh) sawSkinned = true;
+    if (mesh.isMesh && mesh.geometry && Object.keys(mesh.geometry.morphAttributes).length > 0) {
+      sawMorph = true;
+    }
   });
+  if (sawSkinned) warnings.push('Skinned geometry was imported in its static bind pose.');
+  if (sawMorph) warnings.push('Morph target animation was ignored; base geometry was imported.');
   return {
     root,
     materialCount: materials.size,
     textureCount: textures.size,
     animationCount: 0,
-    warnings: [],
+    warnings,
   };
 }
 

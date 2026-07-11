@@ -19,6 +19,8 @@ export type SceneObjectType =
 
 export type ImportedModelSourceApplication = 'blender' | 'maya' | 'unreal';
 
+export type ImportedModelImportMode = 'separate' | 'combined';
+
 export interface ImportedModelInfo {
   sourceName: string;
   sourceFormat: string;
@@ -27,7 +29,17 @@ export interface ImportedModelInfo {
   sourceSceneName?: string;
   vertexCount: number;
   triangleCount: number;
+  /** Per-object mesh count: 1 in separate mode, total in combined mode. */
   meshCount: number;
+  /** Number of GPU instances aggregated when source node was an InstancedMesh. */
+  instanceCount?: number;
+  importMode: ImportedModelImportMode;
+  /** Shared across all objects produced from one source file import. */
+  sourceImportId: string;
+  /** Original mesh node name, trimmed, if available. */
+  sourceNodeName?: string;
+  /** Deterministic path like "Environment[0]/Furniture[3]/Chair[2]". */
+  sourceNodePath?: string;
   /** Imported triangles are preserved exactly; only hierarchy/material data is flattened. */
   geometrySimplified: false;
   hierarchyFlattened: true;
