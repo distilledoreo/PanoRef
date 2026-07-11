@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BUILD_PRIMITIVE_SHORTCUTS,
   getPrimitiveShortcutLabel,
+  isBuildFreeCameraKey,
   isEditableShortcutTarget,
   resolveBuildHistoryShortcut,
   resolveBuildShortcut,
@@ -49,6 +50,16 @@ describe('Build keyboard shortcuts', () => {
     expect(resolveBuildShortcut({ key: 's' })).toEqual({ kind: 'gizmo-scale' });
     expect(resolveBuildShortcut({ key: 'Delete' })).toEqual({ kind: 'delete' });
     expect(resolveBuildShortcut({ key: 'Backspace' })).toEqual({ kind: 'delete' });
+  });
+
+  it('reserves only the opt-in free-camera controls while that mode is active', () => {
+    expect(isBuildFreeCameraKey('KeyW')).toBe(true);
+    expect(isBuildFreeCameraKey('KeyD')).toBe(true);
+    expect(isBuildFreeCameraKey('Space')).toBe(true);
+    expect(isBuildFreeCameraKey('ShiftLeft')).toBe(true);
+    expect(isBuildFreeCameraKey('ControlLeft')).toBe(true);
+    expect(isBuildFreeCameraKey('ArrowUp')).toBe(false);
+    expect(isBuildFreeCameraKey('KeyF')).toBe(false);
   });
 
   it('suppresses shortcuts from editable fields and unsupported browser modifier chords', () => {

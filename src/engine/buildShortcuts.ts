@@ -20,6 +20,22 @@ export const CLICK_ONLY_BUILD_PRIMITIVES = [
   'sun_marker',
 ] as const satisfies ReadonlyArray<SceneObjectType>;
 
+export const BUILD_FREE_CAMERA_KEY_CODES = [
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'Space',
+  'ShiftLeft',
+  'ShiftRight',
+  'ControlLeft',
+  'ControlRight',
+] as const;
+
+export function isBuildFreeCameraKey(code: string): boolean {
+  return (BUILD_FREE_CAMERA_KEY_CODES as readonly string[]).includes(code);
+}
+
 export type BuildShortcutCommand =
   | { kind: 'primitive'; type: SceneObjectType }
   | { kind: 'mode'; mode: 'select' | 'pano_origin' }

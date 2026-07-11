@@ -111,6 +111,9 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain('data-build-rerender-graybox');
     expect(build).toContain('data-build-graybox-cta');
     expect(build).toContain('handleRenderGraybox');
+    expect(build).toContain('hint="Creates the latest graybox 360 for the Reference step."');
+    expect(build).toContain('data-build-free-camera-toggle');
+    expect(build).toContain('freeCameraActive');
     expect(build).toContain('data-object-surface-style');
     expect(build).toContain('1m × 1m checkerboard');
     expect(build).toContain('getPrimitiveShortcutLabel');
@@ -410,7 +413,7 @@ describe('ui revamp fidelity surfaces', () => {
   it('keeps Build floating controls below the mobile-safe header', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
 
-    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(4);
+    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(5);
     expect(build).not.toContain('top-20');
   });
 
@@ -450,7 +453,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(panoViewer).toContain('useThemeStore');
     expect(panoViewer).toContain('THEME_COLORS');
     expect(build).toContain('shadow-[var(--tray-glow)]');
-    expect(build).toContain("appearance={theme === 'dark' ? 'glow-outline' : 'solid'}");
+    expect(build).not.toContain("appearance={theme === 'dark' ? 'glow-outline' : 'solid'}");
     expect(styles).toContain('--tray-glow');
     expect(styles).toContain('--cta-glow');
   });

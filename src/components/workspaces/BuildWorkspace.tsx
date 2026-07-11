@@ -12,6 +12,7 @@ import {
   Globe,
   Grid3X3,
   Layers,
+  Navigation,
   Lock,
   Scissors,
   Mountain,
@@ -58,7 +59,6 @@ import {
   resolveSurfaceStyle,
 } from '../../engine/sceneObjects';
 import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
-import { useThemeStore } from '../../state/useThemeStore';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { ContextualPanel } from '../common/ContextualPanel';
 import { Field, Select, TextInput } from '../common/Field';
@@ -92,7 +92,6 @@ const primaryTrayItems = trayItems.slice(0, 8);
 const overflowTrayItems = trayItems.slice(8);
 
 export function BuildWorkspace() {
-  const theme = useThemeStore((state) => state.theme);
   const [precisionOpen, setPrecisionOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [showSceneGuides, setShowSceneGuides] = useState(false);
@@ -104,6 +103,7 @@ export function BuildWorkspace() {
   const [modelImportOpen, setModelImportOpen] = useState(false);
   const [frameRequest, setFrameRequest] = useState(0);
   const [frameObjectIds, setFrameObjectIds] = useState<string[]>([]);
+  const [freeCameraActive, setFreeCameraActive] = useState(false);
   const {
     project,
     selectedObjectIds,
@@ -236,6 +236,7 @@ export function BuildWorkspace() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (freeCameraActive) return;
       const command = resolveBuildShortcut(event);
       if (!command) return;
       event.preventDefault();
@@ -369,6 +370,7 @@ export function BuildWorkspace() {
     toggleSelectedLocked,
     toggleSelectedVisibility,
     undoBuild,
+    freeCameraActive,
   ]);
 
   useEffect(() => {
@@ -385,6 +387,8 @@ export function BuildWorkspace() {
           placementType={buildMode === 'place' ? activePrimitive : undefined}
           placementLabel={primitiveLabel(activePrimitive)}
           originPlacementActive={buildMode === 'pano_origin'}
+          freeCameraActive={freeCameraActive}
+          onFreeCameraActiveChange={setFreeCameraActive}
           showSceneGuides={showSceneGuides}
           showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked)}
           gizmoMode={gizmoMode}
@@ -421,6 +425,31 @@ export function BuildWorkspace() {
           frameRequest={frameRequest}
           frameObjectIds={frameObjectIds}
         />
+
+        <div
+          className="pointer-events-none absolute left-5 z-20"
+          style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+          data-build-free-camera-control
+        >
+          <div className="pointer-events-auto flex items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm">
+            <button
+              type="button"
+              title={freeCameraActive ? 'Exit free camera (Esc)' : 'Free camera: drag to look, then use WASD to move'}
+              aria-label={freeCameraActive ? 'Exit free camera' : 'Enable free camera'}
+              aria-pressed={freeCameraActive}
+              data-build-free-camera-toggle
+              onClick={() => setFreeCameraActive((active) => !active)}
+              className={`inline-flex h-11 items-center gap-2 border-0 px-3 text-xs font-medium transition ${
+                freeCameraActive
+                  ? 'bg-accent-soft text-accent'
+                  : 'bg-transparent text-secondary hover:bg-surface-muted/80 hover:text-primary'
+              }`}
+            >
+              <Navigation className="h-4 w-4" />
+              <span>Free camera</span>
+            </button>
+          </div>
+        </div>
 
         {/* Sit below the global header action cluster so undo/redo isn't stacked under theme. */}
         <div
@@ -504,6 +533,19 @@ export function BuildWorkspace() {
                 </>
               )}
             </div>
+          </div>
+        )}
+
+        {freeCameraActive && (
+          <div
+            data-build-free-camera-guidance
+            className="pointer-events-none absolute left-5 z-10"
+            style={{ top: 'calc(var(--stage-header-safe) + 4rem)' }}
+          >
+            <ContextualPanel className="text-sm text-secondary">
+              <Navigation className="mr-1.5 inline h-4 w-4 text-accent" />
+              Free camera: drag to look · WASD move · Space/Shift up/down · Ctrl sprint
+            </ContextualPanel>
           </div>
         )}
 
@@ -665,7 +707,6 @@ export function BuildWorkspace() {
                   downloadDataUrl,
                 )}
                 disabled={isRenderingGraybox}
-                appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
               />
               <button
                 type="button"
@@ -682,10 +723,10 @@ export function BuildWorkspace() {
             <PrimaryCTA
               icon={<Globe className="h-5 w-5" />}
               label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
+              hint="Creates the latest graybox 360 for the Reference step."
               onClick={handleRenderGraybox}
               disabled={isRenderingGraybox}
               highlighted={primaryAction?.id === 'render-graybox'}
-              appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
             />
           )}
           {grayboxRenderError && (

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { objectDisplayName } from '../../domain/defaults';
 import { CameraData, LocationProject, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
+import { isBuildFreeCameraKey } from '../../engine/buildShortcuts';
 import { createPlacedSceneObject, resolveStampPoint, snapBuildPoint } from '../../engine/sandbox';
 import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
 import { buildScene, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
@@ -28,6 +29,8 @@ import {
 import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
 import {
+  cameraFromOrbit,
+  cameraOrbitFromCamera,
   cameraFromFlyState,
   flyCameraFromCamera,
   horizontalFlyDirections,
@@ -37,7 +40,7 @@ import { computeFullCssRendererRect, type CssRendererRect } from '../../engine/v
 import { useThemeStore } from '../../state/useThemeStore';
 import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 
-type DragKind = 'idle' | 'orbit' | 'gizmo_translate' | 'gizmo_rotate' | 'gizmo_scale' | 'pano_origin' | 'place' | 'shot_framing';
+type DragKind = 'idle' | 'orbit' | 'gizmo_translate' | 'gizmo_rotate' | 'gizmo_scale' | 'pano_origin' | 'place' | 'shot_framing' | 'free_camera';
 
 const FLY_SPEED = 6;
 const FLY_SPRINT_MULTIPLIER = 2.4;
@@ -77,6 +80,8 @@ export function SceneViewport({
   showTransformGizmo = false,
   gizmoMode = 'translate',
   snapToGrid = true,
+  freeCameraActive = false,
+  onFreeCameraActiveChange,
   shotFraming,
   onSelectObject,
   onPlaceObject,
@@ -101,6 +106,9 @@ export function SceneViewport({
   showTransformGizmo?: boolean;
   gizmoMode?: GizmoMode;
   snapToGrid?: boolean;
+  /** Opt-in Build navigation mode; the default viewport remains orbit/select. */
+  freeCameraActive?: boolean;
+  onFreeCameraActiveChange?: (active: boolean) => void;
   shotFraming?: {
     camera: CameraData;
     frameAspectRatio: number;
@@ -131,6 +139,7 @@ export function SceneViewport({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const frameRef = useRef<number>(0);
   const orbitRef = useRef({ yaw: -34, pitch: 28, distance: 15.5, target: new THREE.Vector3(0, 1.15, 1.25) });
+  const freeCameraActiveRef = useRef(freeCameraActive);
   const dragRef = useRef<DragState>({ kind: 'idle', x: 0, y: 0, moved: false });
   const lastFloorPointRef = useRef<Vec3 | undefined>();
   const selectedObjectIdsRef = useRef(selectedObjectIds);
@@ -146,6 +155,7 @@ export function SceneViewport({
     onMovePanoOrigin,
     onEditBatchStart,
     onEditBatchEnd,
+    onFreeCameraActiveChange,
   });
   const editBatchActiveRef = useRef(false);
   const previewPointRef = useRef<Vec3 | undefined>();
@@ -175,6 +185,7 @@ export function SceneViewport({
   projectRef.current = project;
   flyBoundsRef.current = computeSceneFlyBounds(project.scene);
   snapToGridRef.current = snapToGrid;
+  freeCameraActiveRef.current = freeCameraActive;
   placementTypeRef.current = placementType;
   shotFramingRef.current = shotFraming;
   showSceneGuidesRef.current = showSceneGuides;
@@ -191,6 +202,7 @@ export function SceneViewport({
     onMovePanoOrigin,
     onEditBatchStart,
     onEditBatchEnd,
+    onFreeCameraActiveChange,
   };
 
   const clearTransformGizmo = useCallback(() => {
@@ -389,14 +401,14 @@ export function SceneViewport({
       const cssWidth = Math.max(1, container?.clientWidth ?? 1);
       const cssHeight = Math.max(1, container?.clientHeight ?? 1);
 
-      if (framing) {
-        if (framing.flyActive) processFlyMovement(deltaSeconds);
-        if (flyDirtyRef.current) emitFramingCamera();
+      if (framing || freeCameraActiveRef.current) {
+        if (framing?.flyActive || freeCameraActiveRef.current) processFlyMovement(deltaSeconds);
+        if (framing && flyDirtyRef.current) emitFramingCamera();
         applyFlyCameraToPerspectiveCamera(
           activeCamera,
           flyRef.current,
           framingFovRef.current,
-          framing.frameAspectRatio,
+          framing?.frameAspectRatio ?? cssWidth / cssHeight,
         );
 
         const viewport = computeFullCssRendererRect(cssWidth, cssHeight);
@@ -550,6 +562,18 @@ export function SceneViewport({
       }
 
       if (framing) return;
+
+      if (freeCameraActiveRef.current && event.button === 0) {
+        event.preventDefault();
+        dragRef.current = {
+          kind: 'free_camera',
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+        };
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
 
       if (event.button === 1 || event.button === 2) {
         event.preventDefault();
@@ -776,12 +800,12 @@ export function SceneViewport({
         return;
       }
 
-      if (drag.kind === 'shot_framing') {
+      if (drag.kind === 'shot_framing' || drag.kind === 'free_camera') {
         const fly = flyRef.current;
         fly.yawDegrees -= dx * LOOK_SENSITIVITY;
         fly.pitchDegrees = Math.max(-89, Math.min(89, fly.pitchDegrees - dy * LOOK_SENSITIVITY));
         flyDirtyRef.current = true;
-        emitFramingCamera();
+        if (drag.kind === 'shot_framing') emitFramingCamera();
         return;
       }
 
@@ -794,6 +818,12 @@ export function SceneViewport({
     const onPointerUp = (event: PointerEvent) => {
       const drag = dragRef.current;
       if (drag.kind === 'shot_framing') {
+        dragRef.current = { kind: 'idle', x: 0, y: 0, moved: false };
+        if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+        return;
+      }
+
+      if (drag.kind === 'free_camera') {
         dragRef.current = { kind: 'idle', x: 0, y: 0, moved: false };
         if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
         return;
@@ -856,16 +886,20 @@ export function SceneViewport({
         emitFramingCamera();
         return;
       }
+      if (freeCameraActiveRef.current) return;
       orbitRef.current.distance = Math.max(3, Math.min(28, orbitRef.current.distance + event.deltaY * 0.01));
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!shotFramingRef.current?.flyActive) return;
-      if (event.code === 'Escape') return;
-      flyKeysRef.current.add(event.code);
-      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(event.code)) {
-        event.preventDefault();
+      if (!shotFramingRef.current?.flyActive && !freeCameraActiveRef.current) return;
+      if (event.target && (event.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      if (event.code === 'Escape') {
+        if (freeCameraActiveRef.current) callbacksRef.current.onFreeCameraActiveChange?.(false);
+        return;
       }
+      if (!isBuildFreeCameraKey(event.code)) return;
+      flyKeysRef.current.add(event.code);
+      event.preventDefault();
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
@@ -912,17 +946,60 @@ export function SceneViewport({
   }, [clearTransformGizmo, emitFramingCamera, syncTransformGizmo, theme]);
 
   useEffect(() => {
+    if (shotFraming) return;
+    const camera = cameraRef.current;
+    if (!camera) return;
+
+    flyKeysRef.current.clear();
+    flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
+    flyDirtyRef.current = false;
+
+    if (freeCameraActive) {
+      updateCamera(camera, orbitRef.current);
+      flyRef.current = flyCameraFromCamera(cameraFromOrbit(
+        {
+          yaw: orbitRef.current.yaw,
+          pitch: orbitRef.current.pitch,
+          distance: orbitRef.current.distance,
+          target: [orbitRef.current.target.x, orbitRef.current.target.y, orbitRef.current.target.z],
+        },
+        camera.fov,
+        camera.aspect,
+        camera.near,
+        camera.far,
+      ));
+      return;
+    }
+
+    const cameraData = cameraFromFlyState(
+      flyRef.current,
+      camera.fov,
+      camera.aspect,
+      camera.near,
+      camera.far,
+      orbitRef.current.distance,
+    );
+    const nextOrbit = cameraOrbitFromCamera(cameraData);
+    orbitRef.current = {
+      yaw: nextOrbit.yaw,
+      pitch: Math.max(-10, Math.min(78, nextOrbit.pitch)),
+      distance: Math.max(3, Math.min(28, nextOrbit.distance)),
+      target: new THREE.Vector3().fromArray(nextOrbit.target),
+    };
+  }, [freeCameraActive, shotFraming]);
+
+  useEffect(() => {
     return subscribeHumanMannequinReady(() => {
       setMannequinRevision(getHumanMannequinRevision());
     });
   }, []);
 
   useEffect(() => {
-    if (!shotFraming?.flyActive) {
+    if (!shotFraming?.flyActive && !freeCameraActive) {
       flyKeysRef.current.clear();
       flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
     }
-  }, [shotFraming?.flyActive]);
+  }, [freeCameraActive, shotFraming?.flyActive]);
 
   const setFlyAxes = useCallback((axes: { forward: number; strafe: number; vertical?: number }) => {
     flyAxesRef.current = {
@@ -1007,7 +1084,7 @@ export function SceneViewport({
     else clearPreviewMesh();
   }, [placementType, snapToGrid, clearPreviewMesh, updatePreviewMesh]);
 
-  const cursorClass = shotFraming
+  const cursorClass = shotFraming || freeCameraActive
     ? 'cursor-crosshair'
     : placementType
       ? 'cursor-crosshair'
@@ -1030,7 +1107,7 @@ export function SceneViewport({
           variant="full"
         />
       )}
-      {shotFraming?.flyActive && (
+      {(shotFraming?.flyActive || freeCameraActive) && (
         <TouchFlyPad
           onAxesChange={setFlyAxes}
         />
