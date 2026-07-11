@@ -1069,6 +1069,7 @@ export function SceneViewport({
       showPanoOrigin: shotFraming ? false : (showSceneGuides || originPlacementActive),
       showHelpers: shotFraming ? false : showSceneGuides,
       theme,
+      fogDistance: shotFraming ? undefined : renderDistance,
     });
     if (previewPointRef.current && placementTypeRef.current) {
       updatePreviewMesh(previewPointRef.current);
@@ -1078,6 +1079,7 @@ export function SceneViewport({
     clearTransformGizmo,
     originPlacementActive,
     project,
+    renderDistance,
     selectedShotId,
     shotFraming,
     showSceneGuides,

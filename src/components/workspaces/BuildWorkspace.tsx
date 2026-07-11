@@ -462,8 +462,8 @@ export function BuildWorkspace() {
               <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
               <button
                 type="button"
-                title="Adjust Build render distance"
-                aria-label="Adjust render distance"
+                title="Adjust Build visibility distance"
+                aria-label="Adjust visibility distance"
                 aria-expanded={renderDistanceOpen}
                 data-build-render-distance-toggle
                 onClick={() => setRenderDistanceOpen((open) => !open)}
@@ -479,7 +479,7 @@ export function BuildWorkspace() {
             {renderDistanceOpen && (
               <ContextualPanel className="pointer-events-auto absolute left-0 top-full mt-2 w-64 space-y-2">
                 <div className="flex items-center justify-between gap-3 text-xs">
-                  <label htmlFor="build-render-distance" className="font-semibold text-primary">Render distance</label>
+                  <label htmlFor="build-render-distance" className="font-semibold text-primary">Visibility distance</label>
                   <output data-build-render-distance-value className="font-semibold tabular-nums text-accent">
                     {Math.round(renderDistance)}m
                   </output>
@@ -493,11 +493,11 @@ export function BuildWorkspace() {
                   value={renderDistance}
                   onChange={(event) => setRenderDistance(clampBuildRenderDistance(Number(event.target.value)))}
                   className="w-full accent-[var(--accent)]"
-                  aria-label="Render distance"
+                  aria-label="Visibility distance"
                   data-build-render-distance-slider
                 />
                 <p className="text-[11px] leading-relaxed text-secondary">
-                  Controls how far the Build viewport draws. This does not change shot or export cameras.
+                  Controls how far the Build viewport draws before the fog/shroud obscures it. This does not change shot or export cameras.
                 </p>
               </ContextualPanel>
             )}

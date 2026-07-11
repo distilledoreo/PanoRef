@@ -6,6 +6,18 @@ import { degreesToRadians } from './sync';
 
 export type SceneVisualTheme = 'light' | 'dark';
 
+export const DEFAULT_BUILD_FOG_NEAR = 18;
+export const DEFAULT_BUILD_FOG_FAR = 42;
+
+/** Keep the shroud readable while making its outer edge follow Build visibility distance. */
+export function computeBuildFogRange(distance: number): { near: number; far: number } {
+  const far = Number.isFinite(distance) ? Math.max(DEFAULT_BUILD_FOG_NEAR + 1, distance) : DEFAULT_BUILD_FOG_FAR;
+  return {
+    near: Math.min(DEFAULT_BUILD_FOG_NEAR, far * 0.45),
+    far,
+  };
+}
+
 /** World-space checker tile size in meters (1m × 1m scale reference). */
 export const CHECKERBOARD_TILE_METERS = 1;
 
@@ -170,15 +182,19 @@ export function buildScene(
     hiddenObjectTypes?: SceneObjectType[];
     previewObject?: SceneObject;
     theme?: SceneVisualTheme;
+    fogDistance?: number;
   } = {},
 ) {
   const theme = options.theme ?? 'light';
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(theme === 'dark' ? 0x0f1419 : 0xf3f6f4);
+  const fogRange = options.fogDistance === undefined
+    ? { near: DEFAULT_BUILD_FOG_NEAR, far: DEFAULT_BUILD_FOG_FAR }
+    : computeBuildFogRange(options.fogDistance);
   scene.fog = new THREE.Fog(
     theme === 'dark' ? 0x0f1419 : 0xf3f6f4,
-    18,
-    42,
+    fogRange.near,
+    fogRange.far,
   );
   const hiddenTypes = new Set(options.hiddenObjectTypes ?? []);
 
