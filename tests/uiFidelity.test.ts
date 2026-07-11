@@ -141,10 +141,20 @@ describe('ui revamp fidelity surfaces', () => {
 
   it('keeps the default Build orbit centered and consumes free-camera shortcuts before Build actions', () => {
     const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
     expect(viewport).toContain('const freeCameraModeRef = useRef(freeCameraActive);');
     expect(viewport).toContain('if (!modeChanged || shotFraming) return;');
     expect(viewport).toContain("window.addEventListener('keydown', onKeyDown, true);");
     expect(viewport).toContain('event.stopImmediatePropagation();');
+    expect(viewport).toMatch(/if \(event\.code === 'Escape'\) \{[\s\S]*\n\s*if \(event\.target && \(event\.target as HTMLElement\)\.closest/);
+    expect(viewport).toContain("? 'cursor-grab active:cursor-grabbing'");
+    expect(viewport).toContain("verticalPositionClassName={freeCameraActive ? 'bottom-[12rem]' : undefined}");
+    expect(build).toContain('const editingChromeVisible = !freeCameraActive && !renderDistanceOpen;');
+    expect(build).toContain("showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked && editingChromeVisible)}");
+    expect(build).toContain("{selectedObject && buildMode === 'select' && editingChromeVisible && (");
+    expect(build).toContain('{selectedObjects.length > 0 && editingChromeVisible && (');
+    expect(build).toContain('Esc exits');
+    expect(build).toContain('tap Free camera to edit');
   });
 
   it('surfaces reference alignment yaw/opacity on viewer chrome', () => {

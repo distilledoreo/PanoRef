@@ -905,15 +905,16 @@ export function SceneViewport({
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (!shotFramingRef.current?.flyActive && !freeCameraActiveRef.current) return;
-      if (event.target && (event.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) return;
       if (event.code === 'Escape') {
-        if (freeCameraActiveRef.current) {
+        const escapeInsideDialog = Boolean((event.target as HTMLElement | null)?.closest?.('[role="dialog"]'));
+        if (freeCameraActiveRef.current && !escapeInsideDialog) {
           event.preventDefault();
           event.stopImmediatePropagation();
           callbacksRef.current.onFreeCameraActiveChange?.(false);
         }
         return;
       }
+      if (event.target && (event.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) return;
       if (!isBuildFreeCameraKey(event.code)) return;
       flyKeysRef.current.add(event.code);
       event.preventDefault();
@@ -1112,8 +1113,10 @@ export function SceneViewport({
     else clearPreviewMesh();
   }, [placementType, snapToGrid, clearPreviewMesh, updatePreviewMesh]);
 
-  const cursorClass = shotFraming || freeCameraActive
+  const cursorClass = shotFraming
     ? 'cursor-crosshair'
+    : freeCameraActive
+      ? 'cursor-grab active:cursor-grabbing'
     : placementType
       ? 'cursor-crosshair'
       : originPlacementActive || !placementType
@@ -1138,6 +1141,7 @@ export function SceneViewport({
       {(shotFraming?.flyActive || freeCameraActive) && (
         <TouchFlyPad
           onAxesChange={setFlyAxes}
+          verticalPositionClassName={freeCameraActive ? 'bottom-[12rem]' : undefined}
         />
       )}
     </div>
@@ -1152,8 +1156,10 @@ function clampUnit(value: number): number {
 /** On-screen move pad for touch devices (keyboard WASD has no mobile equivalent). */
 function TouchFlyPad({
   onAxesChange,
+  verticalPositionClassName = 'bottom-[7.5rem]',
 }: {
   onAxesChange: (axes: { forward: number; strafe: number; vertical?: number }) => void;
+  verticalPositionClassName?: string;
 }) {
   const padRef = useRef<HTMLDivElement>(null);
   const activePointerId = useRef<number | null>(null);
@@ -1181,7 +1187,7 @@ function TouchFlyPad({
 
   return (
     <div
-      className="pointer-events-none absolute bottom-[7.5rem] left-3 z-30 flex flex-col items-center gap-2 md:hidden"
+      className={`pointer-events-none absolute left-3 z-30 flex flex-col items-center gap-2 md:hidden ${verticalPositionClassName}`}
       data-touch-fly-pad
     >
       <div className="pointer-events-auto flex gap-2">

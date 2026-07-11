@@ -167,6 +167,7 @@ export function BuildWorkspace() {
   const selectionHasLocked = selectedObjects.some((object) => object.locked);
   const selectionAllLocked = selectedObjects.length > 0 && selectedObjects.every((object) => object.locked);
   const selectionAllHidden = selectedObjects.length > 0 && selectedObjects.every((object) => !object.visible);
+  const editingChromeVisible = !freeCameraActive && !renderDistanceOpen;
   const grayboxPano = getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
   const primaryAction = useMemo(
@@ -399,7 +400,7 @@ export function BuildWorkspace() {
           renderDistance={renderDistance}
           onFreeCameraActiveChange={setFreeCameraActive}
           showSceneGuides={showSceneGuides}
-          showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked)}
+          showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked && editingChromeVisible)}
           gizmoMode={gizmoMode}
           snapToGrid={gridSnap}
           onSelectObject={selectObject}
@@ -560,7 +561,7 @@ export function BuildWorkspace() {
           </div>
         </div>
 
-        {selectedObject && buildMode === 'select' && (
+        {selectedObject && buildMode === 'select' && editingChromeVisible && (
           <div
             data-build-drag-guidance
             className="pointer-events-none absolute left-[58%] top-[54%] z-10 -translate-x-1/2"
@@ -593,15 +594,17 @@ export function BuildWorkspace() {
             data-build-free-camera-guidance
             className="pointer-events-none absolute left-5 z-10"
             style={{ top: renderDistanceOpen ? 'calc(var(--stage-header-safe) + 11rem)' : 'calc(var(--stage-header-safe) + 4rem)' }}
+            role="status"
           >
-            <ContextualPanel className="text-sm text-secondary">
+            <ContextualPanel className="max-w-[calc(100vw-2.5rem)] text-sm text-secondary">
               <Navigation className="mr-1.5 inline h-4 w-4 text-accent" />
-              Free camera: drag to look · WASD move · Space/Shift up/down · Ctrl sprint
+              <span className="hidden md:inline">Free camera: drag to look · WASD move · Space/Shift up/down · Ctrl sprint · Esc exits</span>
+              <span className="md:hidden">Free camera: drag to look · use the pad to move · tap Free camera to edit</span>
             </ContextualPanel>
           </div>
         )}
 
-        {selectedObjects.length > 0 && (
+        {selectedObjects.length > 0 && editingChromeVisible && (
           <div
             className="pointer-events-none absolute right-5 z-10"
             style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
