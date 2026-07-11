@@ -14,7 +14,37 @@ export type SceneObjectType =
   | 'terrain_mass'
   | 'background_card'
   | 'human_dummy'
-  | 'sun_marker';
+  | 'sun_marker'
+  | 'imported_model';
+
+export type ImportedModelSourceApplication = 'blender' | 'maya' | 'unreal';
+
+export type ImportedModelImportMode = 'separate' | 'combined';
+
+export interface ImportedModelInfo {
+  sourceName: string;
+  sourceFormat: string;
+  sourceKind: 'model' | 'scene';
+  sourceApplication?: ImportedModelSourceApplication;
+  sourceSceneName?: string;
+  vertexCount: number;
+  triangleCount: number;
+  /** Per-object mesh count: 1 in separate mode, total in combined mode. */
+  meshCount: number;
+  /** Number of GPU instances aggregated when source node was an InstancedMesh. */
+  instanceCount?: number;
+  importMode: ImportedModelImportMode;
+  /** Shared across all objects produced from one source file import. */
+  sourceImportId: string;
+  /** Original mesh node name, trimmed, if available. */
+  sourceNodeName?: string;
+  /** Deterministic path like "Environment[0]/Furniture[3]/Chair[2]". */
+  sourceNodePath?: string;
+  /** Imported triangles are preserved exactly; only hierarchy/material data is flattened. */
+  geometrySimplified: false;
+  hierarchyFlattened: true;
+  warnings?: string[];
+}
 
 export type PanoReferenceType =
   | 'graybox_render'
@@ -56,6 +86,9 @@ export interface SceneObject {
   color?: string;
   /** Secondary hex for checkerboard dark squares. */
   secondaryColor?: string;
+  /** Canonical texture-free mesh asset used by imported graybox geometry. */
+  modelAssetId?: string;
+  importedModel?: ImportedModelInfo;
   metadata?: Record<string, unknown>;
 }
 
@@ -170,7 +203,7 @@ export interface Shot {
 
 export interface ProjectAsset {
   id: string;
-  type: 'image' | 'video' | 'json' | 'text' | 'other';
+  type: 'image' | 'video' | 'model' | 'json' | 'text' | 'other';
   name: string;
   uri: string;
   mimeType?: string;

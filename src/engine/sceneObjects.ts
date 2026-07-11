@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { Landmark, LocationProject, ObjectSurfaceStyle, SceneObject, SceneObjectType } from '../domain/types';
+import { AssetRegistry, Landmark, LocationProject, ObjectSurfaceStyle, SceneObject, SceneObjectType } from '../domain/types';
 import { createHumanMannequinObject } from './humanMannequinModel';
+import { createImportedMeshNode, releaseImportedGeometry } from './importedMesh';
 import { degreesToRadians } from './sync';
 
 export type SceneVisualTheme = 'light' | 'dark';
@@ -222,6 +223,7 @@ export function buildScene(
       object,
       Boolean(options.selectedObjectIds?.includes(object.id)),
       theme,
+      project.assets,
     );
     mesh.userData.sceneObjectId = object.id;
     scene.add(mesh);
@@ -280,7 +282,12 @@ export function resolveObjectMaterial(
   return materialByTheme[theme][object.category];
 }
 
-export function createObject3D(object: SceneObject, _selected = false, theme: SceneVisualTheme = 'light'): THREE.Object3D {
+export function createObject3D(
+  object: SceneObject,
+  _selected = false,
+  theme: SceneVisualTheme = 'light',
+  assets?: AssetRegistry,
+): THREE.Object3D {
   let node: THREE.Object3D;
   const material = resolveObjectMaterial(object, theme);
   const style = resolveSurfaceStyle(object);
@@ -320,11 +327,16 @@ export function createObject3D(object: SceneObject, _selected = false, theme: Sc
     case 'sun_marker':
       node = createSunMarker(object, theme, style === 'default' ? undefined : material);
       break;
+    case 'imported_model':
+      node = createImportedMeshNode(object, assets, material);
+      break;
     default:
       node = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
   }
 
-  const preservesProceduralScale = ['arch', 'doorway', 'stairs', 'tree_blob', 'human_dummy', 'sun_marker'].includes(object.type);
+  const preservesProceduralScale = [
+    'arch', 'doorway', 'stairs', 'tree_blob', 'human_dummy', 'sun_marker', 'imported_model',
+  ].includes(object.type);
   node.name = object.name;
   node.position.fromArray(object.transform.position);
   node.rotation.set(
@@ -472,7 +484,7 @@ export function disposePreviewMesh(node: THREE.Object3D) {
 export function disposeScene(scene: THREE.Scene) {
   scene.traverse((object) => {
     const mesh = object as THREE.Mesh;
-    if (mesh.geometry) mesh.geometry.dispose();
+    if (mesh.geometry && !releaseImportedGeometry(mesh.geometry)) mesh.geometry.dispose();
     disposeOwnedMaterials(mesh.material);
   });
 }

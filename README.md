@@ -35,13 +35,67 @@ Open **Help & Documentation** from the Continuity Stage brand menu for the searc
 3. **Shots:** iPhone-style camera chrome — full-bleed viewfinder, **Still / Video** modes, one center **shutter**, and a bottom-left thumbnail that opens the shot library. The viewfinder stays live: shutter **Capture** saves the current pose to the gallery (and creates another shot on the next capture) without freezing. Re-capturing a shot replaces its stored viewport preview instead of retaining orphaned project assets. **Video** mode shows length chips (1–8s), auto-sets start, fly the end, capture end, then export the graybox MP4; unsupported-browser and export errors appear directly above the shutter. Everything else (FOV, PNG download, pano match, duplicate/delete, manual keyframes) lives in the **settings** gear. Fly Camera keeps a broad invisible safety volume around the set (~10m past the farthest visible non-helper object).
 4. **Export:** multi-select shots and download continuity ZIP handoff packages with **Export Selected Shots**. Packages carry clay control frames, pano/cubemap references, camera metadata, and prompts for external tools. You do **not** need to import AI results back into Continuity Stage. Package include/exclude toggles stay in **Export Settings**.
 
+## 3D Model and Scene Import
+
+Open **Build > More > Import 3D model or scene**. Import is local-only and geometry-only: source materials, textures, cameras, lights, rigs, animation, and morphs are omitted. Exact triangles are retained; the importer does not automatically decimate or otherwise simplify geometry. World-space placement is preserved with hierarchy flattened.
+
+Recommended exports:
+
+- Blender: File → Export → glTF 2.0 (.glb) – include the entire scene, apply transforms if you want final world space.
+- Maya: File → Export All → FBX – include all visible objects.
+- Unreal: File → Export All → export selected level/actors as GLB.
+
+Direct import formats are:
+
+- GLB and embedded glTF 2.0 (preferred)
+- FBX, OBJ, STL, PLY
+- .panoscene bundles (.panoscene, .panoscene.zip)
+
+Import modes:
+
+- **Keep objects separate (default)**: One Mesh = one object, one InstancedMesh = one object containing all instances, no per-instance objects. Hierarchy is not recreated – world transforms are baked. Each object gets position = center of its world bounds, rotation [0,0,0], scale [1,1,1]. Move one chair without moving others.
+- **Combine into one object**: All nodes world-transformed into one asset and one object.
+
+The import report shows one summary card per source file; the individual imported nodes remain available in Layers. Imported object names preserve source node names, including meaningful numeric suffixes such as `Wall_01`; only exact duplicates receive `(2)`, `(3)`, and so on. If a recognized mesh has malformed or non-triangle geometry, that source file is rejected with the mesh name instead of silently omitting the geometry.
+
+Preserved: world-space positions/rotations/scales baked, exact triangles, instance counts aggregated. Not preserved: editable parent-child hierarchy, pivot points, materials, textures, cameras, lights, animation, rigs, deformers, morphs.
+
+Native DCC files like `.blend`, `.ma`, `.mb`, `.uproject`, `.umap`, `.uasset` are not supported for direct import. If selected, PanoRef shows a useful error guiding you to export GLB/FBX. The importer never executes native scene logic.
+
+Loaders are fetched from the existing Three.js dependency only after a user chooses that format. Each imported object is converted once to a compact PanoRef graybox mesh stored with the project. Large imports may increase project JSON size – external references are not supported in this slice. OBJ, STL, and PLY have no reliable unit metadata; 1 source unit is treated as 1 meter. External `.gltf` `.bin` sidecars and compressed Draco/Meshopt glTF are not supported; export uncompressed GLB.
+
+Pipeline handoffs can instead provide a `.panoscene` ZIP with this shape:
+
+```text
+scene.panoscene
+  panoref-scene.json
+  geometry/scene.glb
+```
+
+Example `panoref-scene.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "entry": "geometry/scene.glb",
+  "geometryOnly": true,
+  "source": {
+    "application": "blender",
+    "file": "scene.blend",
+    "version": "4.x"
+  }
+}
+```
+
+Imports above the encoded mesh or source-file safety limits stop with a clear error and leave the source unchanged. Heavy imports report their triangle count; no hidden simplification is performed.
+
 ## Build Shortcuts
 
 Primitive stamps use game-inventory style number slots: `1` Floor, `2` Wall, `3` Box, `4` Arch, `5` Doorway, `6` Column, `7` Stairs, `8` Tree, `9` Terrain, and `0` Person. Backdrop, Sun, Arch, Terrain, and Person are also reachable from the tray's **More** tool when they are not part of the primary visible strip.
 
 Build supports ordered multi-selection: click replaces the selection, `Shift`-click or `Ctrl`/`Cmd`-click toggles objects, and the Layers list supports `Shift` range selection. `Ctrl`/`Cmd+A` selects all visible unlocked objects, `Ctrl`/`Cmd+Shift+A` or `Esc` clears selection, and group move/rotate/scale uses the shared selection bounds.
 
-Clipboard actions are `Ctrl`/`Cmd+C`, `X`, and `V`; `Ctrl`/`Cmd+Shift+V` pastes in place and ordinary paste cascades copies visibly. `D` or `Ctrl`/`Cmd+D` duplicates. Arrow keys nudge on world X/Z, `Page Up` / `Page Down` nudge vertically, `Shift` makes nudges coarse, and `Alt` makes them fine. `F` frames the selection, `Home` frames the scene, `F2` renames one object, `Alt+H` shows all, and `?` opens the full reference.
+Clipboard actions are `Ctrl`/`Cmd+C`, `X`, and `V`; `Ctrl`/`Cmd+Shift+V` pastes in place and ordinary paste cascades copies visibly. Imported-model clipboard payloads include their packed mesh assets; incomplete or malformed asset references are rejected instead of creating missing-mesh placeholders. `D` or `Ctrl`/`Cmd+D` duplicates. Arrow keys nudge on world X/Z, `Page Up` / `Page Down` nudge vertically, `Shift` makes nudges coarse, and `Alt` makes them fine. `F` frames the selection, `Home` frames the scene, `F2` renames one object, `Alt+H` shows all, and `?` opens the full reference.
 
 Existing Build actions remain: `V` or `Esc` for Select, `O` for Origin, `G` for Snap, `R` / `Shift+R` for rotate right/left, `[` / `]` for scale down/up, `T` / `E` / `S` for gizmo mode, `L` for lock, `H` for hide/show, `I` for Precision, and `Delete` / `Backspace` for delete. Shortcuts are ignored while typing in editable fields so native text cut/copy/paste remains available.
 
@@ -59,7 +113,7 @@ Top-level fields include:
 - Pano reference `rotation[1]` stores the calibrated yaw offset in degrees. A value of `0` means image center (`u=0.5`) faces world `+Z`; positive values rotate that image center toward world `+X`.
 - `landmarks`: named continuity anchors used in prompts and packages.
 - `shots`: camera truth, status, linked pano, selected landmarks, prompt overrides, and export settings.
-- `assets`: local data URLs for imported or rendered images.
+- `assets`: local data URLs for imported/rendered images and canonical texture-free model meshes.
 - `workflow`: persisted production-path checkpoints for reference approval, landed framing, and package export.
 
 Legacy project files may still contain ignored `projectionStamp` fields on scene objects or `includeContinuityControlView` in shot export settings. Those values are dropped on load.
@@ -141,6 +195,8 @@ For Fly Camera specifically, verify sustained movement can travel beyond walls a
 
 - MVP is local-first; there is no backend, account system, or AI API integration.
 - Geometry editing is primitive-level only. There is no vertex editing, UV editing, shader graph, rigging, or timeline.
+- Native `.blend`, `.ma`, `.mb`, and Unreal asset bytes require a GLB/FBX bridge or `.panoscene` handoff; the browser does not parse those proprietary formats directly.
+- Imported mesh assets are embedded in saved project JSON as base64 data URLs, so large geometry can make project files substantially larger.
 - Shot packages rely on `viewport_clay.png` for camera-locked layout control rather than projected pano textures on proxy geometry.
 - Projection quality depends on pano alignment. If the canonical pano is yaw-shifted relative to the graybox pano, use the opacity compare view and set the reference yaw offset before exporting shot packages.
 - Final/generated AI images and videos live outside Continuity Stage; the in-app MP4 export is a graybox camera-motion control clip, not final AI video generation.

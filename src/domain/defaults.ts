@@ -32,6 +32,7 @@ const primitiveDefaults: Record<SceneObjectType, { dimensions: Vec3; category: S
   background_card: { dimensions: [8, 4, 0.08], category: 'environment' },
   human_dummy: { dimensions: [0.55, 1.75, 0.55], category: 'helper' },
   sun_marker: { dimensions: [0.8, 0.8, 0.8], category: 'helper' },
+  imported_model: { dimensions: [1, 1, 1], category: 'architecture' },
 };
 
 export const DEFAULT_CAMERA_LENS_MM = 35;

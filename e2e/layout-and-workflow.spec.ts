@@ -69,6 +69,42 @@ async function dismissOverlays(page: Page) {
   }
 }
 
+function multiNodeGltfBuffer() {
+  const positions = Buffer.alloc(72);
+  [
+    [0, 0, 0], [1, 0, 0], [0, 1, 0],
+    [5, 0, 0], [6, 0, 0], [5, 1, 0],
+  ].flat().forEach((value, index) => positions.writeFloatLE(value, index * 4));
+  const indices = Buffer.alloc(12);
+  [0, 1, 2, 0, 1, 2].forEach((value, index) => indices.writeUInt16LE(value, index * 2));
+  const binary = Buffer.concat([positions, indices]);
+  return Buffer.from(JSON.stringify({
+    asset: { version: '2.0' },
+    buffers: [{ byteLength: binary.byteLength, uri: `data:application/octet-stream;base64,${binary.toString('base64')}` }],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: 72 },
+      { buffer: 0, byteOffset: 72, byteLength: 6 },
+      { buffer: 0, byteOffset: 78, byteLength: 6 },
+    ],
+    accessors: [
+      { bufferView: 0, byteOffset: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] },
+      { bufferView: 0, byteOffset: 36, componentType: 5126, count: 3, type: 'VEC3', min: [5, 0, 0], max: [6, 1, 0] },
+      { bufferView: 1, componentType: 5123, count: 3, type: 'SCALAR' },
+      { bufferView: 2, componentType: 5123, count: 3, type: 'SCALAR' },
+    ],
+    meshes: [
+      { primitives: [{ attributes: { POSITION: 0 }, indices: 2 }] },
+      { primitives: [{ attributes: { POSITION: 1 }, indices: 3 }] },
+    ],
+    nodes: [
+      { mesh: 0, name: 'LeftPanel' },
+      { mesh: 1, name: 'RightPanel' },
+    ],
+    scenes: [{ nodes: [0, 1] }],
+    scene: 0,
+  }));
+}
+
 test.describe('layout and core chrome', () => {
   test('header actions stay in viewport', async ({ page }, testInfo) => {
     await enterContinuityStage(page);
@@ -160,6 +196,72 @@ test.describe('layout and core chrome', () => {
     await expect(page.locator('[data-build-shortcut-reference]')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-build-selection-count]')).toHaveCount(0);
+  });
+
+  test('imports a texture-free OBJ through the Build tray', async ({ page }) => {
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+
+    await page.locator('[data-build-object-tray]').getByRole('button', { name: 'More' }).click();
+    await page.locator('[data-build-import-model]').click();
+    const dialog = page.getByRole('dialog', { name: /Import 3D/ });
+    await expect(dialog).toBeVisible();
+    await dialog.locator('[data-model-import-input]').setInputFiles({
+      name: 'triangle.obj',
+      mimeType: 'text/plain',
+      buffer: Buffer.from([
+        'v 0 0 0',
+        'v 1 0 0',
+        'v 0 1 0',
+        'f 1 2 3',
+      ].join('\n')),
+    });
+
+    await expect(dialog.getByText(/Imported 1 selectable object/)).toBeVisible();
+    await dialog.getByText('Close', { exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole('textbox', { name: 'Selected object name' })).toHaveValue('triangle');
+  });
+
+  test('imports separate multi-node scenes with one report card per source file', async ({ page }) => {
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+
+    await page.locator('[data-build-object-tray]').getByRole('button', { name: 'More' }).click();
+    await page.locator('[data-build-import-model]').click();
+    const dialog = page.getByRole('dialog', { name: /Import 3D/ });
+    await dialog.locator('[data-model-import-input]').setInputFiles({
+      name: 'two-panels.gltf',
+      mimeType: 'model/gltf+json',
+      buffer: multiNodeGltfBuffer(),
+    });
+
+    await expect(dialog.getByText(/Imported 2 selectable objects/)).toBeVisible();
+    await expect(dialog.locator('[data-model-import-report-item="success"]')).toHaveCount(1);
+  });
+
+  test('imports the same multi-node scene in combined mode', async ({ page }) => {
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+
+    await page.locator('[data-build-object-tray]').getByRole('button', { name: 'More' }).click();
+    await page.locator('[data-build-import-model]').click();
+    const dialog = page.getByRole('dialog', { name: /Import 3D/ });
+    await dialog.locator('[data-import-mode="combined"]').check();
+    await dialog.locator('[data-model-import-input]').setInputFiles({
+      name: 'two-panels.gltf',
+      mimeType: 'model/gltf+json',
+      buffer: multiNodeGltfBuffer(),
+    });
+
+    await expect(dialog.getByText(/Imported 1 combined object from 2 mesh nodes/)).toBeVisible();
+    await expect(dialog.locator('[data-model-import-report-item="success"]')).toHaveCount(1);
   });
 
   test('Help documentation is searchable and returns to the active workspace', async ({ page }) => {

@@ -27,6 +27,7 @@ import {
   TreeDeciduous,
   Undo2,
   Unlock,
+  Upload,
   User,
   Wrench,
   ZoomIn,
@@ -63,6 +64,7 @@ import { ContextualPanel } from '../common/ContextualPanel';
 import { Field, Select, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
+import { ModelImportDialog } from '../common/ModelImportDialog';
 import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { FullBleedLayout } from './WorkspaceShell';
@@ -99,6 +101,7 @@ export function BuildWorkspace() {
   const [clipboardStatus, setClipboardStatus] = useState<string | undefined>();
   const [systemClipboardSyncedAt, setSystemClipboardSyncedAt] = useState<string | undefined>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [modelImportOpen, setModelImportOpen] = useState(false);
   const [frameRequest, setFrameRequest] = useState(0);
   const [frameObjectIds, setFrameObjectIds] = useState<string[]>([]);
   const {
@@ -173,7 +176,7 @@ export function BuildWorkspace() {
 
   const copySelection = useCallback(async () => {
     if (selectedObjects.length === 0) return undefined;
-    const payload = createBuildClipboardPayload(project.id, selectedObjects);
+    const payload = createBuildClipboardPayload(project.id, selectedObjects, project.assets);
     setBuildClipboard(payload);
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
@@ -635,6 +638,7 @@ export function BuildWorkspace() {
           onModeChange={setBuildMode}
           onPrimitiveChange={setActivePrimitive}
           onGridSnapChange={setGridSnap}
+          onImport={() => setModelImportOpen(true)}
         />
 
         {/* Isolated stacking context so the viewport canvas cannot swallow CTA clicks. */}
@@ -756,6 +760,14 @@ export function BuildWorkspace() {
           </div>
         )}
       </PrecisionDrawer>
+      <ModelImportDialog
+        open={modelImportOpen}
+        onClose={() => setModelImportOpen(false)}
+        onImported={(objects) => {
+          setBuildMode('select');
+          requestFrame(objects.map((object) => object.id));
+        }}
+      />
     </FullBleedLayout>
   );
 }
@@ -767,6 +779,7 @@ function BuildObjectTray({
   onModeChange,
   onPrimitiveChange,
   onGridSnapChange,
+  onImport,
 }: {
   activePrimitive: SceneObjectType;
   buildMode: BuildMode;
@@ -774,6 +787,7 @@ function BuildObjectTray({
   onModeChange: (mode: BuildMode) => void;
   onPrimitiveChange: (type: SceneObjectType) => void;
   onGridSnapChange: (value: boolean) => void;
+  onImport: () => void;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
 
@@ -793,6 +807,18 @@ function BuildObjectTray({
             </TrayButton>
           </div>
           <div className="grid grid-cols-2 gap-2 border-t border-subtle pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setToolsOpen(false);
+                onImport();
+              }}
+              className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-accent/50 bg-accent-soft px-3 py-2 text-xs font-semibold text-accent transition hover:border-accent"
+              data-build-import-model
+            >
+              <Upload className="h-4 w-4" />
+              Import 3D model or scene
+            </button>
             {overflowTrayItems.map(({ type, label, icon: Icon }) => (
               <div key={type}>
                 <TrayButton
@@ -971,10 +997,35 @@ function PrecisionControls({
         <TextInput value={object.name} onChange={(event) => onChange({ name: event.target.value }, 'coalesce')} />
       </Field>
       <Field label="Type">
-        <Select value={object.type} onChange={(event) => onChange({ type: event.target.value as SceneObjectType }, 'step')}>
-          {primitiveTypes.map((type) => <option key={type} value={type}>{objectDisplayName(type)}</option>)}
-        </Select>
+        {object.type === 'imported_model' ? (
+          <div className="rounded-lg border border-subtle bg-surface-muted px-3 py-2 text-sm text-secondary">
+            Imported graybox mesh
+          </div>
+        ) : (
+          <Select value={object.type} onChange={(event) => onChange({ type: event.target.value as SceneObjectType }, 'step')}>
+            {primitiveTypes.map((type) => <option key={type} value={type}>{objectDisplayName(type)}</option>)}
+          </Select>
+        )}
       </Field>
+      {object.importedModel && (
+        <div className="rounded-lg border border-subtle bg-surface-muted px-3 py-2 text-xs leading-relaxed text-secondary">
+          <div className="font-medium text-primary">{object.importedModel.sourceName}</div>
+          <div className="mt-1">
+            {object.importedModel.triangleCount.toLocaleString()} tri · {object.importedModel.vertexCount.toLocaleString()} verts · {object.importedModel.meshCount} mesh{object.importedModel.meshCount === 1 ? '' : 'es'}
+            {object.importedModel.instanceCount ? ` · ${object.importedModel.instanceCount} instances` : ''}
+          </div>
+          {object.importedModel.sourceNodeName && (
+            <div>Node: {object.importedModel.sourceNodeName}</div>
+          )}
+          {object.importedModel.sourceNodePath && (
+            <div className="truncate">Path: {object.importedModel.sourceNodePath}</div>
+          )}
+          <div>Mode: {object.importedModel.importMode} · world-transform baked · hierarchy flattened · texture-free</div>
+          {object.importedModel.warnings && object.importedModel.warnings.length > 0 && (
+            <div className="mt-1 text-amber-600">{object.importedModel.warnings[0]}</div>
+          )}
+        </div>
+      )}
       <Field label="Surface">
         <Select
           value={surfaceStyle}

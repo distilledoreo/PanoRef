@@ -2,7 +2,7 @@ import { LocationProject, PanoReference, SceneObject, Shot } from '../domain/typ
 import { normalizeProjectSettings, normalizeProjectWorkflow } from '../domain/defaults';
 
 export function serializeProject(project: LocationProject): string {
-  return JSON.stringify(project, null, 2);
+  return JSON.stringify(withoutOrphanedModelAssets(project), null, 2);
 }
 
 export function parseProject(json: string): LocationProject {
@@ -147,4 +147,22 @@ export function readFileAsText(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error);
     reader.readAsText(file);
   });
+}
+
+function withoutOrphanedModelAssets(project: LocationProject): LocationProject {
+  const referencedModelIds = new Set(
+    project.scene.objects
+      .map((object) => object.modelAssetId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const assets = Object.fromEntries(
+    Object.entries(project.assets.assets).filter(([, asset]) => (
+      asset.type !== 'model' || referencedModelIds.has(asset.id)
+    )),
+  );
+  if (Object.keys(assets).length === Object.keys(project.assets.assets).length) return project;
+  return {
+    ...project,
+    assets: { assets },
+  };
 }

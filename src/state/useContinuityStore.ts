@@ -52,6 +52,7 @@ import { normalizeWorkspace } from '../engine/workflow';
 import {
   BuildClipboardPayload,
   pasteBuildClipboardObjects,
+  pasteBuildClipboardObjectsWithAssets,
 } from '../engine/buildClipboard';
 import {
   normalizeSelectedIds,
@@ -113,6 +114,8 @@ interface ContinuityStore {
   canUndoBuild: () => boolean;
   canRedoBuild: () => boolean;
   addObject: (type: SceneObjectType) => void;
+  addImportedModel: (result: { asset: ProjectAsset; object: SceneObject }) => SceneObject;
+  addImportedModels: (results: Array<{ asset: ProjectAsset; object: SceneObject }>) => SceneObject[];
   placeObject: (type: SceneObjectType, point: Vec3) => SceneObject;
   selectObject: (id?: string, mode?: SelectionMode) => void;
   selectObjectRange: (id: string) => void;
@@ -341,6 +344,40 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       history: 'step',
     });
   }),
+  addImportedModel: ({ asset, object }) => {
+    set((state) => applyBuildSceneChange(state, {
+      objects: [...state.project.scene.objects, object],
+      assets: {
+        assets: {
+          ...state.project.assets.assets,
+          [asset.id]: asset,
+        },
+      },
+      selectedObjectIds: [object.id],
+      history: 'step',
+      extra: { buildMode: 'select' },
+    }));
+    return object;
+  },
+  addImportedModels: (results) => {
+    if (results.length === 0) return [];
+    set((state) => {
+      const nextAssets: Record<string, ProjectAsset> = { ...state.project.assets.assets };
+      const nextObjects: SceneObject[] = [...state.project.scene.objects];
+      for (const { asset, object } of results) {
+        nextAssets[asset.id] = asset;
+        nextObjects.push(object);
+      }
+      return applyBuildSceneChange(state, {
+        objects: nextObjects,
+        assets: { assets: nextAssets },
+        selectedObjectIds: results.map((r) => r.object.id),
+        history: 'step',
+        extra: { buildMode: 'select' },
+      });
+    });
+    return results.map((r) => r.object);
+  },
   placeObject: (type, point) => {
     const state = get();
     const count = state.project.scene.objects.filter((object) => object.type === type).length + 1;
@@ -441,7 +478,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     if (selected.length === 0) return [];
     const payload: BuildClipboardPayload = {
       kind: 'panoref/build-objects',
-      version: 1,
+      version: 2 as any,
       sourceProjectId: state.project.id,
       copiedAt: new Date().toISOString(),
       anchor: [0, 0, 0],
@@ -450,6 +487,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const duplicates = pasteBuildClipboardObjects({
       payload,
       existingObjects: state.project.scene.objects,
+      existingAssets: state.project.assets,
       pasteIndex: 1,
       snapToGrid: state.gridSnap,
     });
@@ -465,15 +503,19 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const state = get();
     const samePayload = state.buildClipboard?.copiedAt === payload.copiedAt;
     const pasteIndex = options?.inPlace ? 0 : (samePayload ? state.buildClipboardPasteCount + 1 : 1);
-    const pasted = pasteBuildClipboardObjects({
+    const { objects: pasted, assets: pastedAssets } = pasteBuildClipboardObjectsWithAssets({
       payload,
       existingObjects: state.project.scene.objects,
+      existingAssets: state.project.assets,
       pasteIndex,
       snapToGrid: state.gridSnap,
       inPlace: options?.inPlace,
     });
     set((current) => applyBuildSceneChange(current, {
       objects: [...current.project.scene.objects, ...pasted],
+      assets: pastedAssets && Object.keys(pastedAssets).length > 0
+        ? { assets: { ...current.project.assets.assets, ...pastedAssets } }
+        : undefined,
       selectedObjectIds: pasted.map((object) => object.id),
       history: 'step',
       extra: {
@@ -1244,6 +1286,7 @@ function applyBuildSceneChange(
   state: BuildHistoryStateSlice,
   change: {
     objects?: SceneObject[];
+    assets?: LocationProject['assets'];
     panoOrigin?: Vec3;
     panoRotation?: [number, number, number];
     selectedObjectIds?: string[];
@@ -1252,6 +1295,7 @@ function applyBuildSceneChange(
   },
 ) {
   const objects = change.objects ?? state.project.scene.objects;
+  const assets = change.assets ?? state.project.assets;
   const panoOrigin = change.panoOrigin ?? state.project.scene.panoOrigin;
   const panoRotation = change.panoRotation ?? state.project.scene.panoRotation;
   const selectedObjectIds = Object.prototype.hasOwnProperty.call(change, 'selectedObjectIds')
@@ -1276,6 +1320,7 @@ function applyBuildSceneChange(
     selectedObjectIds,
     project: touchProject({
       ...state.project,
+      assets,
       scene: {
         ...state.project.scene,
         objects,

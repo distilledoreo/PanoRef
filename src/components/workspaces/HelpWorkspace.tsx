@@ -211,6 +211,7 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
               ['Stamp objects', 'Use the bottom tray or number keys 1–9/0. Click the floor to place each piece.'],
               ['Select and transform', 'Click, Shift-click, or Ctrl/Cmd-click. Multi-object gizmos use the shared bounding-box center.'],
               ['Clipboard editing', 'Cut, copy, paste, duplicate, and undo work on the full selection. Paste cascades; Shift+Paste preserves coordinates.'],
+              ['Import 3D geometry', 'Open More > Import 3D scene. Export GLB from Blender, FBX from Maya, GLB from Unreal, then import. Choose Keep objects separate (default) or Combine into one object. World-space layout preserved, hierarchy flattened, textures/materials stripped.'],
               ['Pano origin', 'Press O and place the amber marker where the canonical 360 camera belongs.'],
               ['Scene guides', 'The eye control reveals helpers and camera frustums without including them in renders.'],
               ['Render 360', 'Create a native 4096×2048 graybox panorama for alignment and export.'],
