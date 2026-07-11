@@ -140,6 +140,7 @@ export function SceneViewport({
   const frameRef = useRef<number>(0);
   const orbitRef = useRef({ yaw: -34, pitch: 28, distance: 15.5, target: new THREE.Vector3(0, 1.15, 1.25) });
   const freeCameraActiveRef = useRef(freeCameraActive);
+  const freeCameraModeRef = useRef(freeCameraActive);
   const dragRef = useRef<DragState>({ kind: 'idle', x: 0, y: 0, moved: false });
   const lastFloorPointRef = useRef<Vec3 | undefined>();
   const selectedObjectIdsRef = useRef(selectedObjectIds);
@@ -894,12 +895,17 @@ export function SceneViewport({
       if (!shotFramingRef.current?.flyActive && !freeCameraActiveRef.current) return;
       if (event.target && (event.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) return;
       if (event.code === 'Escape') {
-        if (freeCameraActiveRef.current) callbacksRef.current.onFreeCameraActiveChange?.(false);
+        if (freeCameraActiveRef.current) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          callbacksRef.current.onFreeCameraActiveChange?.(false);
+        }
         return;
       }
       if (!isBuildFreeCameraKey(event.code)) return;
       flyKeysRef.current.add(event.code);
       event.preventDefault();
+      event.stopImmediatePropagation();
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
@@ -920,7 +926,7 @@ export function SceneViewport({
     canvas.addEventListener('pointerleave', onPointerLeave);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('contextmenu', onContextMenu);
-    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp);
 
     return () => {
@@ -933,7 +939,7 @@ export function SceneViewport({
       canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('contextmenu', onContextMenu);
-      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keyup', onKeyUp);
       flyKeysRef.current.clear();
       resizeObserver.disconnect();
@@ -946,7 +952,9 @@ export function SceneViewport({
   }, [clearTransformGizmo, emitFramingCamera, syncTransformGizmo, theme]);
 
   useEffect(() => {
-    if (shotFraming) return;
+    const modeChanged = freeCameraModeRef.current !== freeCameraActive;
+    freeCameraModeRef.current = freeCameraActive;
+    if (!modeChanged || shotFraming) return;
     const camera = cameraRef.current;
     if (!camera) return;
 

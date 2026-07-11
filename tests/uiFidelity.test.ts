@@ -137,6 +137,14 @@ describe('ui revamp fidelity surfaces', () => {
     expect(renderers).toContain('forceContextLoss');
   });
 
+  it('keeps the default Build orbit centered and consumes free-camera shortcuts before Build actions', () => {
+    const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
+    expect(viewport).toContain('const freeCameraModeRef = useRef(freeCameraActive);');
+    expect(viewport).toContain('if (!modeChanged || shotFraming) return;');
+    expect(viewport).toContain("window.addEventListener('keydown', onKeyDown, true);");
+    expect(viewport).toContain('event.stopImmediatePropagation();');
+  });
+
   it('surfaces reference alignment yaw/opacity on viewer chrome', () => {
     const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
     expect(reference).toContain('data-reference-alignment-chrome');
