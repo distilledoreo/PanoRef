@@ -56,7 +56,7 @@ Import modes:
 - **Keep objects separate (default)**: One Mesh = one object, one InstancedMesh = one object containing all instances, no per-instance objects. Hierarchy is not recreated – world transforms are baked. Each object gets position = center of its world bounds, rotation [0,0,0], scale [1,1,1]. Move one chair without moving others.
 - **Combine into one object**: All nodes world-transformed into one asset and one object.
 
-The import report shows one summary card per source file; the individual imported nodes remain available in Layers. If a recognized mesh has malformed or non-triangle geometry, that source file is rejected with the mesh name instead of silently omitting the geometry.
+The import report shows one summary card per source file; the individual imported nodes remain available in Layers. Imported object names preserve source node names, including meaningful numeric suffixes such as `Wall_01`; only exact duplicates receive `(2)`, `(3)`, and so on. If a recognized mesh has malformed or non-triangle geometry, that source file is rejected with the mesh name instead of silently omitting the geometry.
 
 Preserved: world-space positions/rotations/scales baked, exact triangles, instance counts aggregated. Not preserved: editable parent-child hierarchy, pivot points, materials, textures, cameras, lights, animation, rigs, deformers, morphs.
 

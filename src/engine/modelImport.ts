@@ -363,36 +363,25 @@ function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
     baseName, sourceImportId, sourceUnits, totalVertices, totalTriangles, warnings,
   } = args;
 
-  // Unique naming within batch – dedup based on base key stripped of loader-added _N suffix
+  // Unique naming within the batch – preserve source names and only deduplicate
+  // exact duplicates.
   const usedNames = new Set<string>();
   const baseCount = new Map<string, number>();
-  function normalizeDupBase(name: string): string {
-    // Strip three.js auto-uniquify suffix like "_1", "_2" and trim
-    const stripped = name.replace(/_\d+$/, '').trim();
-    return stripped || name.trim() || baseName;
-  }
   function uniqueName(preferred: string): string {
     const trimmed = preferred.trim() || baseName;
-    const base = normalizeDupBase(trimmed);
-    // Use base for dedup tracking but preserve original casing of base
-    if (!usedNames.has(base) && !usedNames.has(trimmed)) {
-      // First occurrence – keep the normalized base (which for Chair stays Chair, for Chair_1 becomes Chair)
-      // To keep UX clean, use base for output
-      const out = base;
-      usedNames.add(out);
-      baseCount.set(base, 1);
-      return out;
+    if (!usedNames.has(trimmed)) {
+      usedNames.add(trimmed);
+      baseCount.set(trimmed, 1);
+      return trimmed;
     }
-    let count = baseCount.get(base) ?? 1;
+    let count = baseCount.get(trimmed) ?? 1;
     let candidate: string;
     do {
       count += 1;
-      candidate = `${base} (${count})`;
+      candidate = `${trimmed} (${count})`;
     } while (usedNames.has(candidate));
     usedNames.add(candidate);
-    baseCount.set(base, count);
-    // Also mark trimmed as used to avoid collisions later
-    usedNames.add(trimmed);
+    baseCount.set(trimmed, count);
     return candidate;
   }
 
@@ -638,7 +627,7 @@ function collectSourceMeshUnits(root: THREE.Object3D): SourceMeshUnit[] {
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
     if (!(mesh as any).isMesh) return;
-    const meshName = (mesh.name || '').trim() || 'unnamed';
+    const meshName = sourceMeshName(mesh) || 'unnamed';
     if (!mesh.geometry) {
       throw new Error(`Mesh "${meshName}" has no geometry.`);
     }
@@ -663,7 +652,7 @@ function collectSourceMeshUnits(root: THREE.Object3D): SourceMeshUnit[] {
   for (let ci = 0; ci < candidates.length; ci++) {
     const { mesh } = candidates[ci];
     const sourceNodePath = paths[ci];
-    const rawName = (mesh.name || '').trim();
+    const rawName = sourceMeshName(mesh);
     const sourceNodeName = rawName || undefined;
 
     const isInstanced = (mesh as THREE.InstancedMesh).isInstancedMesh;
@@ -845,6 +834,12 @@ function collectSourceMeshUnits(root: THREE.Object3D): SourceMeshUnit[] {
   }
 
   return units;
+}
+
+function sourceMeshName(mesh: THREE.Mesh): string {
+  const originalName = mesh.userData?.name;
+  if (typeof originalName === 'string' && originalName.trim()) return originalName.trim();
+  return (mesh.name || '').trim();
 }
 
 function buildDeterministicPaths(candidates: Array<{ mesh: THREE.Mesh }>): string[] {

@@ -414,22 +414,21 @@ describe('multi-object scene import', () => {
     expect(result.items[0].object.importedModel?.triangleCount).toBe(2);
   });
 
-  it('dedupes duplicate names within a batch to Chair, Chair (2), Chair (3)', async () => {
-    // Use two meshes with identical name
+  it('dedupes exact names without stripping meaningful numeric suffixes', async () => {
     const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
     const indices = new Uint16Array([0, 1, 2]);
     const binary = new ArrayBuffer(positions.byteLength + indices.byteLength);
     new Float32Array(binary, 0, positions.length).set(positions);
     new Uint16Array(binary, positions.byteLength, indices.length).set(indices);
 
-    const makeGltfWithDupNames = (count: number) => {
-      const meshes = Array.from({ length: count }, () => ({
+    const makeGltfWithNames = (names: string[]) => {
+      const meshes = names.map((name) => ({
         primitives: [{ attributes: { POSITION: 0 }, indices: 1 }],
-        name: 'Chair',
+        name,
       }));
-      const nodes = Array.from({ length: count }, (_, i) => ({
+      const nodes = names.map((name, i) => ({
         mesh: i,
-        name: 'Chair',
+        name,
         translation: [i * 2, 0, 0],
       }));
       return {
@@ -450,13 +449,20 @@ describe('multi-object scene import', () => {
       };
     };
 
-    const gltf = makeGltfWithDupNames(3);
+    const gltf = makeGltfWithNames(['Chair', 'Chair', 'Chair']);
     const result = await importModelJob({
       kind: 'file',
       file: file([JSON.stringify(gltf)], 'chairs.gltf', 'model/gltf+json'),
     }, { mode: 'separate' });
 
     expect(result.items.map((i) => i.object.name)).toEqual(['Chair', 'Chair (2)', 'Chair (3)']);
+
+    const numbered = await importModelJob({
+      kind: 'file',
+      file: file([JSON.stringify(makeGltfWithNames(['Wall_01', 'Wall_02', 'Wall_02']))], 'walls.gltf', 'model/gltf+json'),
+    }, { mode: 'separate' });
+
+    expect(numbered.items.map((i) => i.object.name)).toEqual(['Wall_01', 'Wall_02', 'Wall_02 (2)']);
   });
 
   it('preserves world transforms and flips winding on negative scale', async () => {
