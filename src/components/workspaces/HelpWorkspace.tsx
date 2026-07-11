@@ -54,7 +54,7 @@ const searchableSections: Record<string, string> = {
   welcome: 'overview continuity stage panorama graybox camera handoff documentation',
   'quick-start': 'new project build reference shots export first package steps',
   workflow: 'build reference shots export checkpoints stages',
-  build: 'objects primitives multi-select transform gizmo cut copy paste panorama render orbit free camera WASD',
+  build: 'objects primitives multi-select transform gizmo cut copy paste panorama render distance orbit free camera WASD',
   reference: '360 panorama alignment yaw origin landmarks approve',
   shots: 'camera still video capture keyframes framing gallery thumbnails',
   export: 'zip package shots metadata prompts cubemap download',
@@ -214,6 +214,7 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
               ['Import 3D geometry', 'Open More > Import 3D scene. Export GLB from Blender, FBX from Maya, GLB from Unreal, then import. Choose Keep objects separate (default) or Combine into one object. World-space layout preserved, hierarchy flattened, textures/materials stripped.'],
               ['Pano origin', 'Press O and place the amber marker where the canonical 360 camera belongs.'],
               ['Free camera', 'The viewport defaults to orbit/select. Toggle Free camera to drag-look and walk with WASD; Space/Shift move vertically and Ctrl sprints. Esc exits without changing the scene.'],
+              ['Render distance', 'Open the adjacent Render distance control in Build to choose how far the viewport draws. It changes the Build viewport only, not shot or export cameras.'],
               ['Scene guides', 'The eye control reveals helpers and camera frustums without including them in renders.'],
               ['Render 360', 'Create a native 4096×2048 graybox panorama for alignment and export.'],
             ]} />

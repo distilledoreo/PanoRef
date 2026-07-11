@@ -36,7 +36,12 @@ import {
   horizontalFlyDirections,
   type FlyCameraState,
 } from '../../engine/sync';
-import { computeFullCssRendererRect, type CssRendererRect } from '../../engine/viewport';
+import {
+  clampBuildRenderDistance,
+  computeFullCssRendererRect,
+  DEFAULT_BUILD_RENDER_DISTANCE,
+  type CssRendererRect,
+} from '../../engine/viewport';
 import { useThemeStore } from '../../state/useThemeStore';
 import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 
@@ -81,6 +86,7 @@ export function SceneViewport({
   gizmoMode = 'translate',
   snapToGrid = true,
   freeCameraActive = false,
+  renderDistance = DEFAULT_BUILD_RENDER_DISTANCE,
   onFreeCameraActiveChange,
   shotFraming,
   onSelectObject,
@@ -108,6 +114,8 @@ export function SceneViewport({
   snapToGrid?: boolean;
   /** Opt-in Build navigation mode; the default viewport remains orbit/select. */
   freeCameraActive?: boolean;
+  /** Build viewport far clipping distance in meters; shot framing keeps its own camera data. */
+  renderDistance?: number;
   onFreeCameraActiveChange?: (active: boolean) => void;
   shotFraming?: {
     camera: CameraData;
@@ -141,6 +149,7 @@ export function SceneViewport({
   const orbitRef = useRef({ yaw: -34, pitch: 28, distance: 15.5, target: new THREE.Vector3(0, 1.15, 1.25) });
   const freeCameraActiveRef = useRef(freeCameraActive);
   const freeCameraModeRef = useRef(freeCameraActive);
+  const renderDistanceRef = useRef(clampBuildRenderDistance(renderDistance));
   const dragRef = useRef<DragState>({ kind: 'idle', x: 0, y: 0, moved: false });
   const lastFloorPointRef = useRef<Vec3 | undefined>();
   const selectedObjectIdsRef = useRef(selectedObjectIds);
@@ -187,6 +196,7 @@ export function SceneViewport({
   flyBoundsRef.current = computeSceneFlyBounds(project.scene);
   snapToGridRef.current = snapToGrid;
   freeCameraActiveRef.current = freeCameraActive;
+  renderDistanceRef.current = clampBuildRenderDistance(renderDistance);
   placementTypeRef.current = placementType;
   shotFramingRef.current = shotFraming;
   showSceneGuidesRef.current = showSceneGuides;
@@ -330,7 +340,7 @@ export function SceneViewport({
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    const camera = new THREE.PerspectiveCamera(framingFovRef.current, 1, 0.1, 200);
+    const camera = new THREE.PerspectiveCamera(framingFovRef.current, 1, 0.1, renderDistanceRef.current);
     cameraRef.current = camera;
 
     const syncViewportSize = () => {
@@ -410,6 +420,8 @@ export function SceneViewport({
           flyRef.current,
           framingFovRef.current,
           framing?.frameAspectRatio ?? cssWidth / cssHeight,
+          0.1,
+          framing?.camera.far ?? renderDistanceRef.current,
         );
 
         const viewport = computeFullCssRendererRect(cssWidth, cssHeight);
@@ -995,6 +1007,14 @@ export function SceneViewport({
       target: new THREE.Vector3().fromArray(nextOrbit.target),
     };
   }, [freeCameraActive, shotFraming]);
+
+  useEffect(() => {
+    if (shotFraming) return;
+    const camera = cameraRef.current;
+    if (!camera) return;
+    camera.far = clampBuildRenderDistance(renderDistance);
+    camera.updateProjectionMatrix();
+  }, [renderDistance, shotFraming]);
 
   useEffect(() => {
     return subscribeHumanMannequinReady(() => {

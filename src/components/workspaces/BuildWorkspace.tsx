@@ -50,6 +50,12 @@ import {
   serializeBuildClipboard,
 } from '../../engine/buildClipboard';
 import { BUILD_GRID_SIZE } from '../../engine/sandbox';
+import {
+  clampBuildRenderDistance,
+  DEFAULT_BUILD_RENDER_DISTANCE,
+  MAX_BUILD_RENDER_DISTANCE,
+  MIN_BUILD_RENDER_DISTANCE,
+} from '../../engine/viewport';
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
 import {
@@ -104,6 +110,8 @@ export function BuildWorkspace() {
   const [frameRequest, setFrameRequest] = useState(0);
   const [frameObjectIds, setFrameObjectIds] = useState<string[]>([]);
   const [freeCameraActive, setFreeCameraActive] = useState(false);
+  const [renderDistanceOpen, setRenderDistanceOpen] = useState(false);
+  const [renderDistance, setRenderDistance] = useState(DEFAULT_BUILD_RENDER_DISTANCE);
   const {
     project,
     selectedObjectIds,
@@ -388,6 +396,7 @@ export function BuildWorkspace() {
           placementLabel={primitiveLabel(activePrimitive)}
           originPlacementActive={buildMode === 'pano_origin'}
           freeCameraActive={freeCameraActive}
+          renderDistance={renderDistance}
           onFreeCameraActiveChange={setFreeCameraActive}
           showSceneGuides={showSceneGuides}
           showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked)}
@@ -431,23 +440,66 @@ export function BuildWorkspace() {
           style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
           data-build-free-camera-control
         >
-          <div className="pointer-events-auto flex items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm">
-            <button
-              type="button"
-              title={freeCameraActive ? 'Exit free camera (Esc)' : 'Free camera: drag to look, then use WASD to move'}
-              aria-label={freeCameraActive ? 'Exit free camera' : 'Enable free camera'}
-              aria-pressed={freeCameraActive}
-              data-build-free-camera-toggle
-              onClick={() => setFreeCameraActive((active) => !active)}
-              className={`inline-flex h-11 items-center gap-2 border-0 px-3 text-xs font-medium transition ${
-                freeCameraActive
-                  ? 'bg-accent-soft text-accent'
-                  : 'bg-transparent text-secondary hover:bg-surface-muted/80 hover:text-primary'
-              }`}
-            >
-              <Navigation className="h-4 w-4" />
-              <span>Free camera</span>
-            </button>
+          <div className="relative">
+            <div className="pointer-events-auto flex items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm">
+              <button
+                type="button"
+                title={freeCameraActive ? 'Exit free camera (Esc)' : 'Free camera: drag to look, then use WASD to move'}
+                aria-label={freeCameraActive ? 'Exit free camera' : 'Enable free camera'}
+                aria-pressed={freeCameraActive}
+                data-build-free-camera-toggle
+                onClick={() => setFreeCameraActive((active) => !active)}
+                className={`inline-flex h-11 items-center gap-2 border-0 px-3 text-xs font-medium transition ${
+                  freeCameraActive
+                    ? 'bg-accent-soft text-accent'
+                    : 'bg-transparent text-secondary hover:bg-surface-muted/80 hover:text-primary'
+                }`}
+              >
+                <Navigation className="h-4 w-4" />
+                <span>Free camera</span>
+              </button>
+              <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
+              <button
+                type="button"
+                title="Adjust Build render distance"
+                aria-label="Adjust render distance"
+                aria-expanded={renderDistanceOpen}
+                data-build-render-distance-toggle
+                onClick={() => setRenderDistanceOpen((open) => !open)}
+                className={`inline-flex h-11 w-11 items-center justify-center border-0 transition ${
+                  renderDistanceOpen
+                    ? 'bg-accent-soft text-accent'
+                    : 'bg-transparent text-secondary hover:bg-surface-muted/80 hover:text-primary'
+                }`}
+              >
+                <Ruler className="h-4 w-4" />
+              </button>
+            </div>
+            {renderDistanceOpen && (
+              <ContextualPanel className="pointer-events-auto absolute left-0 top-full mt-2 w-64 space-y-2">
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <label htmlFor="build-render-distance" className="font-semibold text-primary">Render distance</label>
+                  <output data-build-render-distance-value className="font-semibold tabular-nums text-accent">
+                    {Math.round(renderDistance)}m
+                  </output>
+                </div>
+                <input
+                  id="build-render-distance"
+                  type="range"
+                  min={MIN_BUILD_RENDER_DISTANCE}
+                  max={MAX_BUILD_RENDER_DISTANCE}
+                  step="10"
+                  value={renderDistance}
+                  onChange={(event) => setRenderDistance(clampBuildRenderDistance(Number(event.target.value)))}
+                  className="w-full accent-[var(--accent)]"
+                  aria-label="Render distance"
+                  data-build-render-distance-slider
+                />
+                <p className="text-[11px] leading-relaxed text-secondary">
+                  Controls how far the Build viewport draws. This does not change shot or export cameras.
+                </p>
+              </ContextualPanel>
+            )}
           </div>
         </div>
 
@@ -540,7 +592,7 @@ export function BuildWorkspace() {
           <div
             data-build-free-camera-guidance
             className="pointer-events-none absolute left-5 z-10"
-            style={{ top: 'calc(var(--stage-header-safe) + 4rem)' }}
+            style={{ top: renderDistanceOpen ? 'calc(var(--stage-header-safe) + 11rem)' : 'calc(var(--stage-header-safe) + 4rem)' }}
           >
             <ContextualPanel className="text-sm text-secondary">
               <Navigation className="mr-1.5 inline h-4 w-4 text-accent" />

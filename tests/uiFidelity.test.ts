@@ -113,6 +113,8 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain('handleRenderGraybox');
     expect(build).toContain('hint="Creates the latest graybox 360 for the Reference step."');
     expect(build).toContain('data-build-free-camera-toggle');
+    expect(build).toContain('data-build-render-distance-toggle');
+    expect(build).toContain('data-build-render-distance-slider');
     expect(build).toContain('freeCameraActive');
     expect(build).toContain('data-object-surface-style');
     expect(build).toContain('1m × 1m checkerboard');
