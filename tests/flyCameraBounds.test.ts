@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDefaultProject } from '../src/domain/defaults';
 import {
-  DEFAULT_FLY_CAMERA_HORIZONTAL_MARGIN_METERS,
   clampFlyCameraPosition,
   computeSceneFlyBounds,
 } from '../src/engine/flyCameraBounds';
@@ -69,10 +68,10 @@ describe('fly camera bounds', () => {
     const clamped = clampFlyCameraPosition([0, project.scene.panoOrigin[1], 100], bounds);
 
     expect(clamped[2]).toBe(bounds.max[2]);
-    expect(bounds.max[2]).toBeGreaterThan(14);
+    expect(bounds.max[2]).toBeGreaterThan(12);
   });
 
-  it('extends the default horizontal movement volume ten meters past the farthest visible object', () => {
+  it('scales the default horizontal movement volume with scene size', () => {
     const project = createDefaultProject();
     const bounds = computeSceneFlyBounds(project.scene);
     const farthestObjectZ = Math.max(
@@ -82,10 +81,8 @@ describe('fly camera bounds', () => {
       project.scene.panoOrigin[2],
     );
 
-    expect(bounds.max[2]).toBeCloseTo(
-      farthestObjectZ + DEFAULT_FLY_CAMERA_HORIZONTAL_MARGIN_METERS,
-      5,
-    );
+    expect(bounds.max[2]).toBeGreaterThan(farthestObjectZ);
+    expect(bounds.max[2] - farthestObjectZ).toBeGreaterThanOrEqual(4);
   });
 
   it('clamps fly movement inside the computed bounds without changing look state', () => {

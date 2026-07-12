@@ -13,7 +13,7 @@ export const DEFAULT_BUILD_FOG_FAR = 42;
 export function computeBuildFogRange(distance: number): { near: number; far: number } {
   const far = Number.isFinite(distance) ? Math.max(DEFAULT_BUILD_FOG_NEAR + 1, distance) : DEFAULT_BUILD_FOG_FAR;
   return {
-    near: Math.min(DEFAULT_BUILD_FOG_NEAR, far * 0.45),
+    near: Math.max(8, Math.min(far * 0.45, far - 1)),
     far,
   };
 }

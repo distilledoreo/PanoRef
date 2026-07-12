@@ -5,7 +5,7 @@ import { CameraData, LocationProject, SceneObject, SceneObjectType, Vec3 } from 
 import { isBuildFreeCameraKey } from '../../engine/buildShortcuts';
 import { createPlacedSceneObject, resolveStampPoint, snapBuildPoint } from '../../engine/sandbox';
 import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
-import { buildScene, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
+import { buildScene, computeBuildFogRange, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
 import {
   angleInAxisPlane,
   applyAxisRotationDelta,
@@ -51,6 +51,17 @@ const FLY_SPEED = 6;
 const FLY_SPRINT_MULTIPLIER = 2.4;
 const LOOK_SENSITIVITY = 0.12;
 const MAX_INTERACTIVE_PIXEL_RATIO = 1.5;
+
+function sceneBoundingRadius(project: LocationProject): number {
+  const box = new THREE.Box3();
+  box.expandByPoint(new THREE.Vector3(...project.scene.panoOrigin));
+  project.scene.objects.filter((object) => object.visible && object.type !== 'sun_marker').forEach((object) => {
+    const center = new THREE.Vector3(...object.transform.position);
+    const half = new THREE.Vector3(...object.dimensions).multiplyScalar(0.5);
+    box.expandByPoint(center.clone().sub(half)).expandByPoint(center.clone().add(half));
+  });
+  return Math.max(box.getSize(new THREE.Vector3()).length() * 0.5, 2);
+}
 
 interface DragState {
   kind: DragKind;
@@ -900,7 +911,7 @@ export function SceneViewport({
         return;
       }
       if (freeCameraActiveRef.current) return;
-      orbitRef.current.distance = Math.max(3, Math.min(28, orbitRef.current.distance + event.deltaY * 0.01));
+      orbitRef.current.distance = Math.max(3, Math.min(sceneBoundingRadius(projectRef.current) * 4, orbitRef.current.distance + event.deltaY * 0.01));
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -924,6 +935,11 @@ export function SceneViewport({
     const onKeyUp = (event: KeyboardEvent) => {
       flyKeysRef.current.delete(event.code);
     };
+    const clearFlyInput = () => {
+      flyKeysRef.current.clear();
+      flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
+    };
+    const onVisibilityChange = () => { if (document.hidden) clearFlyInput(); };
 
     const onContextMenu = (event: MouseEvent) => event.preventDefault();
 
@@ -941,6 +957,8 @@ export function SceneViewport({
     canvas.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', clearFlyInput);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       endEditBatch();
@@ -954,6 +972,8 @@ export function SceneViewport({
       canvas.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', clearFlyInput);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       flyKeysRef.current.clear();
       resizeObserver.disconnect();
       window.removeEventListener('resize', syncViewportSize);
@@ -1004,7 +1024,7 @@ export function SceneViewport({
     orbitRef.current = {
       yaw: nextOrbit.yaw,
       pitch: Math.max(-10, Math.min(78, nextOrbit.pitch)),
-      distance: Math.max(3, Math.min(28, nextOrbit.distance)),
+      distance: Math.max(3, Math.min(sceneBoundingRadius(projectRef.current) * 4, nextOrbit.distance)),
       target: new THREE.Vector3().fromArray(nextOrbit.target),
     };
   }, [freeCameraActive, shotFraming]);
@@ -1013,7 +1033,13 @@ export function SceneViewport({
     if (shotFraming) return;
     const camera = cameraRef.current;
     if (!camera) return;
-    camera.far = clampBuildRenderDistance(renderDistance);
+    const far = clampBuildRenderDistance(renderDistance);
+    camera.far = far;
+    if (sceneRef.current?.fog) {
+      const fogRange = computeBuildFogRange(far);
+      sceneRef.current.fog.near = fogRange.near;
+      sceneRef.current.fog.far = fogRange.far;
+    }
     camera.updateProjectionMatrix();
   }, [renderDistance, shotFraming]);
 
@@ -1079,7 +1105,6 @@ export function SceneViewport({
     clearTransformGizmo,
     originPlacementActive,
     project,
-    renderDistance,
     selectedShotId,
     shotFraming,
     showSceneGuides,
@@ -1107,7 +1132,8 @@ export function SceneViewport({
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     orbitRef.current.target.copy(center);
-    orbitRef.current.distance = THREE.MathUtils.clamp(Math.max(size.x, size.y, size.z) * 2.2, 3, 28);
+    const framingDistance = Math.max(size.length() * 0.5, 2) / Math.tan(THREE.MathUtils.degToRad(framingFovRef.current * 0.5));
+    orbitRef.current.distance = THREE.MathUtils.clamp(framingDistance * 1.15, 3, sceneBoundingRadius(projectRef.current) * 4);
   }, [frameObjectIds, frameRequest, project.scene.objects, shotFraming]);
 
   useEffect(() => {

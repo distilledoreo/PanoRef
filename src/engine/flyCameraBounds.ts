@@ -60,8 +60,8 @@ export function computeSceneFlyBounds(
     fallbackHalfExtent?: Vec3;
   },
 ): FlyCameraBounds {
-  const horizontalMargin = options?.horizontalMarginMeters ?? DEFAULT_FLY_CAMERA_HORIZONTAL_MARGIN_METERS;
-  const verticalMargin = options?.verticalMarginMeters ?? DEFAULT_VERTICAL_MARGIN_METERS;
+  const horizontalMarginOption = options?.horizontalMarginMeters;
+  const verticalMarginOption = options?.verticalMarginMeters;
   const fallbackHalf = options?.fallbackHalfExtent ?? FALLBACK_HALF_EXTENT;
   const [originX, originY, originZ] = scene.panoOrigin;
 
@@ -96,6 +96,10 @@ export function computeSceneFlyBounds(
     maxZ = Math.max(maxZ, extents.maxZ);
     [minY, maxY] = expandVerticalBounds(minY, maxY, extents);
   }
+
+  const sceneRadius = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) / 2;
+  const horizontalMargin = horizontalMarginOption ?? Math.max(4, sceneRadius * 0.75);
+  const verticalMargin = verticalMarginOption ?? Math.max(1, sceneRadius * 0.35);
 
   return {
     min: [
