@@ -27,6 +27,7 @@ import {
   type GizmoMode,
 } from '../../engine/transformGizmo';
 import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
+import { sceneEnvelope, selectionBounds } from '../../engine/buildSelection';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
 import {
   cameraFromOrbit,
@@ -53,13 +54,7 @@ const LOOK_SENSITIVITY = 0.12;
 const MAX_INTERACTIVE_PIXEL_RATIO = 1.5;
 
 function sceneBoundingRadius(project: LocationProject): number {
-  const box = new THREE.Box3();
-  box.expandByPoint(new THREE.Vector3(...project.scene.panoOrigin));
-  project.scene.objects.filter((object) => object.visible && object.type !== 'sun_marker').forEach((object) => {
-    const center = new THREE.Vector3(...object.transform.position);
-    const half = new THREE.Vector3(...object.dimensions).multiplyScalar(0.5);
-    box.expandByPoint(center.clone().sub(half)).expandByPoint(center.clone().add(half));
-  });
+  const box = sceneEnvelope(project.scene);
   return Math.max(box.getSize(new THREE.Vector3()).length() * 0.5, 2);
 }
 
@@ -1035,7 +1030,7 @@ export function SceneViewport({
     if (!camera) return;
     const far = clampBuildRenderDistance(renderDistance);
     camera.far = far;
-    if (sceneRef.current?.fog) {
+    if (sceneRef.current?.fog instanceof THREE.Fog) {
       const fogRange = computeBuildFogRange(far);
       sceneRef.current.fog.near = fogRange.near;
       sceneRef.current.fog.far = fogRange.far;
@@ -1123,11 +1118,7 @@ export function SceneViewport({
     const objects = project.scene.objects.filter((object) => frameObjectIds.includes(object.id) && object.visible);
     const scene = sceneRef.current;
     if (!scene || objects.length === 0) return;
-    const box = new THREE.Box3();
-    objects.forEach((object) => {
-      const mesh = findSceneObjectMesh(scene, object.id);
-      if (mesh) box.union(new THREE.Box3().setFromObject(mesh));
-    });
+    const box = selectionBounds(objects);
     if (box.isEmpty()) return;
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());

@@ -1,12 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { createDefaultProject } from '../src/domain/defaults';
+import { createDefaultProject, createSceneObject } from '../src/domain/defaults';
 import {
   clampFlyCameraPosition,
   computeSceneFlyBounds,
 } from '../src/engine/flyCameraBounds';
+import { sceneEnvelope } from '../src/engine/buildSelection';
 import type { SceneData } from '../src/domain/types';
 
 describe('fly camera bounds', () => {
+  it('uses rotated dimensions and scale when computing the scene envelope', () => {
+    const object = createSceneObject('box', 1, [20, 1, 0]);
+    object.dimensions = [2, 1, 8];
+    object.transform.rotation = [0, 45, 0];
+    object.transform.scale = [2, 1, 0.5];
+    const scene = { ...createDefaultProject().scene, objects: [object] };
+    const envelope = sceneEnvelope(scene);
+
+    expect(envelope.max.x).toBeGreaterThan(20 + 1);
+    expect(envelope.max.z).toBeGreaterThan(2);
+  });
+
   it('derives navigable bounds from the full object envelope plus outward margin', () => {
     const project = createDefaultProject();
     const bounds = computeSceneFlyBounds(project.scene, {
@@ -14,13 +27,11 @@ describe('fly camera bounds', () => {
       verticalMarginMeters: 1,
     });
     const qualifyingObjects = project.scene.objects.filter((object) => object.visible && object.type !== 'sun_marker');
-    const minObjectX = Math.min(...qualifyingObjects.map((object) => object.transform.position[0] - object.dimensions[0] / 2));
-    const maxObjectX = Math.max(...qualifyingObjects.map((object) => object.transform.position[0] + object.dimensions[0] / 2));
-    const minObjectZ = Math.min(...qualifyingObjects.map((object) => object.transform.position[2] - object.dimensions[2] / 2));
+    const envelope = sceneEnvelope(project.scene, qualifyingObjects);
 
-    expect(bounds.min[0]).toBeCloseTo(minObjectX - 3, 5);
-    expect(bounds.max[0]).toBeCloseTo(maxObjectX + 3, 5);
-    expect(bounds.min[2]).toBeCloseTo(minObjectZ - 3, 5);
+    expect(bounds.min[0]).toBeCloseTo(envelope.min.x - 3, 5);
+    expect(bounds.max[0]).toBeCloseTo(envelope.max.x + 3, 5);
+    expect(bounds.min[2]).toBeCloseTo(envelope.min.z - 3, 5);
     expect(bounds.max[2]).toBeGreaterThan(8);
     expect(bounds.min[1]).toBeGreaterThanOrEqual(0.45);
     expect(bounds.max[1]).toBeGreaterThan(project.scene.panoOrigin[1]);
