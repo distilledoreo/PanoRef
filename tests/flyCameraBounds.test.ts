@@ -4,7 +4,7 @@ import {
   clampFlyCameraPosition,
   computeSceneFlyBounds,
 } from '../src/engine/flyCameraBounds';
-import { sceneEnvelope } from '../src/engine/buildSelection';
+import { sceneEnvelope, selectionBounds } from '../src/engine/buildSelection';
 import type { SceneData } from '../src/domain/types';
 
 describe('fly camera bounds', () => {
@@ -18,6 +18,16 @@ describe('fly camera bounds', () => {
 
     expect(envelope.max.x).toBeGreaterThan(20 + 1);
     expect(envelope.max.z).toBeGreaterThan(2);
+  });
+
+  it('honors scale independently for an unrotated object', () => {
+    const object = createSceneObject('box', 1, [10, 2, 20]);
+    object.dimensions = [2, 4, 6];
+    object.transform.scale = [2, 0.5, 3];
+    const bounds = selectionBounds([object]);
+
+    expect(bounds.min.toArray()).toEqual([8, 1, 11]);
+    expect(bounds.max.toArray()).toEqual([12, 3, 29]);
   });
 
   it('derives navigable bounds from the full object envelope plus outward margin', () => {
