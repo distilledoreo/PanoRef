@@ -12,6 +12,7 @@ import {
   Globe,
   Grid3X3,
   Layers,
+  Navigation,
   Lock,
   Scissors,
   Mountain,
@@ -49,6 +50,12 @@ import {
   serializeBuildClipboard,
 } from '../../engine/buildClipboard';
 import { BUILD_GRID_SIZE } from '../../engine/sandbox';
+import {
+  clampBuildRenderDistance,
+  DEFAULT_BUILD_RENDER_DISTANCE,
+  MAX_BUILD_RENDER_DISTANCE,
+  MIN_BUILD_RENDER_DISTANCE,
+} from '../../engine/viewport';
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
 import {
@@ -58,7 +65,6 @@ import {
   resolveSurfaceStyle,
 } from '../../engine/sceneObjects';
 import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
-import { useThemeStore } from '../../state/useThemeStore';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { ContextualPanel } from '../common/ContextualPanel';
 import { Field, Select, TextInput } from '../common/Field';
@@ -92,7 +98,6 @@ const primaryTrayItems = trayItems.slice(0, 8);
 const overflowTrayItems = trayItems.slice(8);
 
 export function BuildWorkspace() {
-  const theme = useThemeStore((state) => state.theme);
   const [precisionOpen, setPrecisionOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [showSceneGuides, setShowSceneGuides] = useState(false);
@@ -104,6 +109,9 @@ export function BuildWorkspace() {
   const [modelImportOpen, setModelImportOpen] = useState(false);
   const [frameRequest, setFrameRequest] = useState(0);
   const [frameObjectIds, setFrameObjectIds] = useState<string[]>([]);
+  const [freeCameraActive, setFreeCameraActive] = useState(false);
+  const [renderDistanceOpen, setRenderDistanceOpen] = useState(false);
+  const [renderDistance, setRenderDistance] = useState(DEFAULT_BUILD_RENDER_DISTANCE);
   const {
     project,
     selectedObjectIds,
@@ -159,6 +167,7 @@ export function BuildWorkspace() {
   const selectionHasLocked = selectedObjects.some((object) => object.locked);
   const selectionAllLocked = selectedObjects.length > 0 && selectedObjects.every((object) => object.locked);
   const selectionAllHidden = selectedObjects.length > 0 && selectedObjects.every((object) => !object.visible);
+  const editingChromeVisible = !freeCameraActive && !renderDistanceOpen;
   const grayboxPano = getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
   const primaryAction = useMemo(
@@ -236,6 +245,7 @@ export function BuildWorkspace() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (freeCameraActive) return;
       const command = resolveBuildShortcut(event);
       if (!command) return;
       event.preventDefault();
@@ -369,6 +379,7 @@ export function BuildWorkspace() {
     toggleSelectedLocked,
     toggleSelectedVisibility,
     undoBuild,
+    freeCameraActive,
   ]);
 
   useEffect(() => {
@@ -385,8 +396,11 @@ export function BuildWorkspace() {
           placementType={buildMode === 'place' ? activePrimitive : undefined}
           placementLabel={primitiveLabel(activePrimitive)}
           originPlacementActive={buildMode === 'pano_origin'}
+          freeCameraActive={freeCameraActive}
+          renderDistance={renderDistance}
+          onFreeCameraActiveChange={setFreeCameraActive}
           showSceneGuides={showSceneGuides}
-          showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked)}
+          showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked && editingChromeVisible)}
           gizmoMode={gizmoMode}
           snapToGrid={gridSnap}
           onSelectObject={selectObject}
@@ -421,6 +435,74 @@ export function BuildWorkspace() {
           frameRequest={frameRequest}
           frameObjectIds={frameObjectIds}
         />
+
+        <div
+          className="pointer-events-none absolute left-5 z-20"
+          style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+          data-build-free-camera-control
+        >
+          <div className="relative">
+            <div className="pointer-events-auto flex items-center overflow-hidden rounded-2xl border border-subtle/80 bg-surface-overlay/80 shadow-card backdrop-blur-sm">
+              <button
+                type="button"
+                title={freeCameraActive ? 'Exit free camera (Esc)' : 'Free camera: drag to look, then use WASD to move'}
+                aria-label={freeCameraActive ? 'Exit free camera' : 'Enable free camera'}
+                aria-pressed={freeCameraActive}
+                data-build-free-camera-toggle
+                onClick={() => setFreeCameraActive((active) => !active)}
+                className={`inline-flex h-11 items-center gap-2 border-0 px-3 text-xs font-medium transition ${
+                  freeCameraActive
+                    ? 'bg-accent-soft text-accent'
+                    : 'bg-transparent text-secondary hover:bg-surface-muted/80 hover:text-primary'
+                }`}
+              >
+                <Navigation className="h-4 w-4" />
+                <span>Free camera</span>
+              </button>
+              <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
+              <button
+                type="button"
+                title="Adjust Build visibility distance"
+                aria-label="Adjust visibility distance"
+                aria-expanded={renderDistanceOpen}
+                data-build-render-distance-toggle
+                onClick={() => setRenderDistanceOpen((open) => !open)}
+                className={`inline-flex h-11 w-11 items-center justify-center border-0 transition ${
+                  renderDistanceOpen
+                    ? 'bg-accent-soft text-accent'
+                    : 'bg-transparent text-secondary hover:bg-surface-muted/80 hover:text-primary'
+                }`}
+              >
+                <Ruler className="h-4 w-4" />
+              </button>
+            </div>
+            {renderDistanceOpen && (
+              <ContextualPanel className="pointer-events-auto absolute left-0 top-full mt-2 w-64 space-y-2">
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <label htmlFor="build-render-distance" className="font-semibold text-primary">Visibility distance</label>
+                  <output data-build-render-distance-value className="font-semibold tabular-nums text-accent">
+                    {Math.round(renderDistance)}m
+                  </output>
+                </div>
+                <input
+                  id="build-render-distance"
+                  type="range"
+                  min={MIN_BUILD_RENDER_DISTANCE}
+                  max={MAX_BUILD_RENDER_DISTANCE}
+                  step="10"
+                  value={renderDistance}
+                  onChange={(event) => setRenderDistance(clampBuildRenderDistance(Number(event.target.value)))}
+                  className="w-full accent-[var(--accent)]"
+                  aria-label="Visibility distance"
+                  data-build-render-distance-slider
+                />
+                <p className="text-[11px] leading-relaxed text-secondary">
+                  Controls how far the Build viewport draws before the fog/shroud obscures it. This does not change shot or export cameras.
+                </p>
+              </ContextualPanel>
+            )}
+          </div>
+        </div>
 
         {/* Sit below the global header action cluster so undo/redo isn't stacked under theme. */}
         <div
@@ -479,7 +561,7 @@ export function BuildWorkspace() {
           </div>
         </div>
 
-        {selectedObject && buildMode === 'select' && (
+        {selectedObject && buildMode === 'select' && editingChromeVisible && (
           <div
             data-build-drag-guidance
             className="pointer-events-none absolute left-[58%] top-[54%] z-10 -translate-x-1/2"
@@ -507,7 +589,22 @@ export function BuildWorkspace() {
           </div>
         )}
 
-        {selectedObjects.length > 0 && (
+        {freeCameraActive && (
+          <div
+            data-build-free-camera-guidance
+            className="pointer-events-none absolute left-5 z-10"
+            style={{ top: renderDistanceOpen ? 'calc(var(--stage-header-safe) + 11rem)' : 'calc(var(--stage-header-safe) + 4rem)' }}
+            role="status"
+          >
+            <ContextualPanel className="max-w-[calc(100vw-2.5rem)] text-sm text-secondary">
+              <Navigation className="mr-1.5 inline h-4 w-4 text-accent" />
+              <span className="hidden md:inline">Free camera: drag to look · WASD move · Space/Shift up/down · Ctrl sprint · Esc exits</span>
+              <span className="md:hidden">Free camera: drag to look · use the pad to move · tap Free camera to edit</span>
+            </ContextualPanel>
+          </div>
+        )}
+
+        {selectedObjects.length > 0 && editingChromeVisible && (
           <div
             className="pointer-events-none absolute right-5 z-10"
             style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
@@ -665,7 +762,6 @@ export function BuildWorkspace() {
                   downloadDataUrl,
                 )}
                 disabled={isRenderingGraybox}
-                appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
               />
               <button
                 type="button"
@@ -682,10 +778,10 @@ export function BuildWorkspace() {
             <PrimaryCTA
               icon={<Globe className="h-5 w-5" />}
               label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
+              hint="Creates the latest graybox 360 for the Reference step."
               onClick={handleRenderGraybox}
               disabled={isRenderingGraybox}
               highlighted={primaryAction?.id === 'render-graybox'}
-              appearance={theme === 'dark' ? 'glow-outline' : 'solid'}
             />
           )}
           {grayboxRenderError && (

@@ -1,4 +1,5 @@
 import { SceneData, SceneObject, SceneObjectType, Vec3 } from '../domain/types';
+import { sceneEnvelope } from './buildSelection';
 import { clamp } from './sync';
 
 export interface FlyCameraBounds {
@@ -13,43 +14,8 @@ const MIN_EYE_HEIGHT_METERS = 0.45;
 
 const EXCLUDED_BOUND_TYPES = new Set<SceneObjectType>(['sun_marker']);
 
-interface ObjectExtents {
-  minX: number;
-  minY: number;
-  minZ: number;
-  maxX: number;
-  maxY: number;
-  maxZ: number;
-}
-
-function objectExtents(object: SceneObject): ObjectExtents {
-  const [px, py, pz] = object.transform.position;
-  const halfWidth = object.dimensions[0] / 2;
-  const halfHeight = object.dimensions[1] / 2;
-  const halfDepth = object.dimensions[2] / 2;
-  return {
-    minX: px - halfWidth,
-    minY: py - halfHeight,
-    minZ: pz - halfDepth,
-    maxX: px + halfWidth,
-    maxY: py + halfHeight,
-    maxZ: pz + halfDepth,
-  };
-}
-
 function isQualifyingObject(object: SceneObject): boolean {
   return object.visible && !EXCLUDED_BOUND_TYPES.has(object.type);
-}
-
-function expandVerticalBounds(
-  minY: number,
-  maxY: number,
-  extents: ObjectExtents,
-): [number, number] {
-  return [
-    Math.min(minY, extents.minY),
-    Math.max(maxY, extents.maxY),
-  ];
 }
 
 export function computeSceneFlyBounds(
@@ -60,8 +26,8 @@ export function computeSceneFlyBounds(
     fallbackHalfExtent?: Vec3;
   },
 ): FlyCameraBounds {
-  const horizontalMargin = options?.horizontalMarginMeters ?? DEFAULT_FLY_CAMERA_HORIZONTAL_MARGIN_METERS;
-  const verticalMargin = options?.verticalMarginMeters ?? DEFAULT_VERTICAL_MARGIN_METERS;
+  const horizontalMarginOption = options?.horizontalMarginMeters;
+  const verticalMarginOption = options?.verticalMarginMeters;
   const fallbackHalf = options?.fallbackHalfExtent ?? FALLBACK_HALF_EXTENT;
   const [originX, originY, originZ] = scene.panoOrigin;
 
@@ -81,21 +47,14 @@ export function computeSceneFlyBounds(
     };
   }
 
-  let minX = originX;
-  let minY = originY;
-  let minZ = originZ;
-  let maxX = originX;
-  let maxY = originY;
-  let maxZ = originZ;
+  const envelope = sceneEnvelope(scene, qualifyingObjects);
+  const { min, max } = envelope;
+  const [minX, minY, minZ] = min.toArray();
+  const [maxX, maxY, maxZ] = max.toArray();
 
-  for (const object of qualifyingObjects) {
-    const extents = objectExtents(object);
-    minX = Math.min(minX, extents.minX);
-    minZ = Math.min(minZ, extents.minZ);
-    maxX = Math.max(maxX, extents.maxX);
-    maxZ = Math.max(maxZ, extents.maxZ);
-    [minY, maxY] = expandVerticalBounds(minY, maxY, extents);
-  }
+  const sceneRadius = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) / 2;
+  const horizontalMargin = horizontalMarginOption ?? Math.max(4, sceneRadius * 0.75);
+  const verticalMargin = verticalMarginOption ?? Math.max(1, sceneRadius * 0.35);
 
   return {
     min: [

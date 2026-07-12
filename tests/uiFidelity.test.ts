@@ -111,6 +111,11 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain('data-build-rerender-graybox');
     expect(build).toContain('data-build-graybox-cta');
     expect(build).toContain('handleRenderGraybox');
+    expect(build).toContain('hint="Creates the latest graybox 360 for the Reference step."');
+    expect(build).toContain('data-build-free-camera-toggle');
+    expect(build).toContain('data-build-render-distance-toggle');
+    expect(build).toContain('data-build-render-distance-slider');
+    expect(build).toContain('freeCameraActive');
     expect(build).toContain('data-object-surface-style');
     expect(build).toContain('1m × 1m checkerboard');
     expect(build).toContain('getPrimitiveShortcutLabel');
@@ -132,6 +137,24 @@ describe('ui revamp fidelity surfaces', () => {
     expect(store).toMatch(/setProject:[\s\S]*isExportingPackage: false/);
     expect(renderers).toContain('disposeRenderer');
     expect(renderers).toContain('forceContextLoss');
+  });
+
+  it('keeps the default Build orbit centered and consumes free-camera shortcuts before Build actions', () => {
+    const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    expect(viewport).toContain('const freeCameraModeRef = useRef(freeCameraActive);');
+    expect(viewport).toContain('if (!modeChanged || shotFraming) return;');
+    expect(viewport).toContain("window.addEventListener('keydown', onKeyDown, true);");
+    expect(viewport).toContain('event.stopImmediatePropagation();');
+    expect(viewport).toMatch(/if \(event\.code === 'Escape'\) \{[\s\S]*\n\s*if \(event\.target && \(event\.target as HTMLElement\)\.closest/);
+    expect(viewport).toContain("? 'cursor-grab active:cursor-grabbing'");
+    expect(viewport).toContain("verticalPositionClassName={freeCameraActive ? 'bottom-[12rem]' : undefined}");
+    expect(build).toContain('const editingChromeVisible = !freeCameraActive && !renderDistanceOpen;');
+    expect(build).toContain("showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked && editingChromeVisible)}");
+    expect(build).toContain("{selectedObject && buildMode === 'select' && editingChromeVisible && (");
+    expect(build).toContain('{selectedObjects.length > 0 && editingChromeVisible && (');
+    expect(build).toContain('Esc exits');
+    expect(build).toContain('tap Free camera to edit');
   });
 
   it('surfaces reference alignment yaw/opacity on viewer chrome', () => {
@@ -410,7 +433,7 @@ describe('ui revamp fidelity surfaces', () => {
   it('keeps Build floating controls below the mobile-safe header', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
 
-    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(4);
+    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(5);
     expect(build).not.toContain('top-20');
   });
 
@@ -450,7 +473,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(panoViewer).toContain('useThemeStore');
     expect(panoViewer).toContain('THEME_COLORS');
     expect(build).toContain('shadow-[var(--tray-glow)]');
-    expect(build).toContain("appearance={theme === 'dark' ? 'glow-outline' : 'solid'}");
+    expect(build).not.toContain("appearance={theme === 'dark' ? 'glow-outline' : 'solid'}");
     expect(styles).toContain('--tray-glow');
     expect(styles).toContain('--cta-glow');
   });

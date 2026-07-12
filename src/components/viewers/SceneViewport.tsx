@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { objectDisplayName } from '../../domain/defaults';
 import { CameraData, LocationProject, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
+import { isBuildFreeCameraKey } from '../../engine/buildShortcuts';
 import { createPlacedSceneObject, resolveStampPoint, snapBuildPoint } from '../../engine/sandbox';
 import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
-import { buildScene, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
+import { buildScene, computeBuildFogRange, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
 import {
   angleInAxisPlane,
   applyAxisRotationDelta,
@@ -26,23 +27,36 @@ import {
   type GizmoMode,
 } from '../../engine/transformGizmo';
 import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
+import { sceneEnvelope, selectionBounds } from '../../engine/buildSelection';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
 import {
+  cameraFromOrbit,
+  cameraOrbitFromCamera,
   cameraFromFlyState,
   flyCameraFromCamera,
   horizontalFlyDirections,
   type FlyCameraState,
 } from '../../engine/sync';
-import { computeFullCssRendererRect, type CssRendererRect } from '../../engine/viewport';
+import {
+  clampBuildRenderDistance,
+  computeFullCssRendererRect,
+  DEFAULT_BUILD_RENDER_DISTANCE,
+  type CssRendererRect,
+} from '../../engine/viewport';
 import { useThemeStore } from '../../state/useThemeStore';
 import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 
-type DragKind = 'idle' | 'orbit' | 'gizmo_translate' | 'gizmo_rotate' | 'gizmo_scale' | 'pano_origin' | 'place' | 'shot_framing';
+type DragKind = 'idle' | 'orbit' | 'gizmo_translate' | 'gizmo_rotate' | 'gizmo_scale' | 'pano_origin' | 'place' | 'shot_framing' | 'free_camera';
 
 const FLY_SPEED = 6;
 const FLY_SPRINT_MULTIPLIER = 2.4;
 const LOOK_SENSITIVITY = 0.12;
 const MAX_INTERACTIVE_PIXEL_RATIO = 1.5;
+
+function sceneBoundingRadius(project: LocationProject): number {
+  const box = sceneEnvelope(project.scene);
+  return Math.max(box.getSize(new THREE.Vector3()).length() * 0.5, 2);
+}
 
 interface DragState {
   kind: DragKind;
@@ -77,6 +91,9 @@ export function SceneViewport({
   showTransformGizmo = false,
   gizmoMode = 'translate',
   snapToGrid = true,
+  freeCameraActive = false,
+  renderDistance = DEFAULT_BUILD_RENDER_DISTANCE,
+  onFreeCameraActiveChange,
   shotFraming,
   onSelectObject,
   onPlaceObject,
@@ -101,6 +118,11 @@ export function SceneViewport({
   showTransformGizmo?: boolean;
   gizmoMode?: GizmoMode;
   snapToGrid?: boolean;
+  /** Opt-in Build navigation mode; the default viewport remains orbit/select. */
+  freeCameraActive?: boolean;
+  /** Build viewport far clipping distance in meters; shot framing keeps its own camera data. */
+  renderDistance?: number;
+  onFreeCameraActiveChange?: (active: boolean) => void;
   shotFraming?: {
     camera: CameraData;
     frameAspectRatio: number;
@@ -131,6 +153,9 @@ export function SceneViewport({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const frameRef = useRef<number>(0);
   const orbitRef = useRef({ yaw: -34, pitch: 28, distance: 15.5, target: new THREE.Vector3(0, 1.15, 1.25) });
+  const freeCameraActiveRef = useRef(freeCameraActive);
+  const freeCameraModeRef = useRef(freeCameraActive);
+  const renderDistanceRef = useRef(clampBuildRenderDistance(renderDistance));
   const dragRef = useRef<DragState>({ kind: 'idle', x: 0, y: 0, moved: false });
   const lastFloorPointRef = useRef<Vec3 | undefined>();
   const selectedObjectIdsRef = useRef(selectedObjectIds);
@@ -146,6 +171,7 @@ export function SceneViewport({
     onMovePanoOrigin,
     onEditBatchStart,
     onEditBatchEnd,
+    onFreeCameraActiveChange,
   });
   const editBatchActiveRef = useRef(false);
   const previewPointRef = useRef<Vec3 | undefined>();
@@ -175,6 +201,8 @@ export function SceneViewport({
   projectRef.current = project;
   flyBoundsRef.current = computeSceneFlyBounds(project.scene);
   snapToGridRef.current = snapToGrid;
+  freeCameraActiveRef.current = freeCameraActive;
+  renderDistanceRef.current = clampBuildRenderDistance(renderDistance);
   placementTypeRef.current = placementType;
   shotFramingRef.current = shotFraming;
   showSceneGuidesRef.current = showSceneGuides;
@@ -191,6 +219,7 @@ export function SceneViewport({
     onMovePanoOrigin,
     onEditBatchStart,
     onEditBatchEnd,
+    onFreeCameraActiveChange,
   };
 
   const clearTransformGizmo = useCallback(() => {
@@ -317,7 +346,7 @@ export function SceneViewport({
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    const camera = new THREE.PerspectiveCamera(framingFovRef.current, 1, 0.1, 200);
+    const camera = new THREE.PerspectiveCamera(framingFovRef.current, 1, 0.1, renderDistanceRef.current);
     cameraRef.current = camera;
 
     const syncViewportSize = () => {
@@ -389,14 +418,16 @@ export function SceneViewport({
       const cssWidth = Math.max(1, container?.clientWidth ?? 1);
       const cssHeight = Math.max(1, container?.clientHeight ?? 1);
 
-      if (framing) {
-        if (framing.flyActive) processFlyMovement(deltaSeconds);
-        if (flyDirtyRef.current) emitFramingCamera();
+      if (framing || freeCameraActiveRef.current) {
+        if (framing?.flyActive || freeCameraActiveRef.current) processFlyMovement(deltaSeconds);
+        if (framing && flyDirtyRef.current) emitFramingCamera();
         applyFlyCameraToPerspectiveCamera(
           activeCamera,
           flyRef.current,
           framingFovRef.current,
-          framing.frameAspectRatio,
+          framing?.frameAspectRatio ?? cssWidth / cssHeight,
+          0.1,
+          framing?.camera.far ?? renderDistanceRef.current,
         );
 
         const viewport = computeFullCssRendererRect(cssWidth, cssHeight);
@@ -550,6 +581,18 @@ export function SceneViewport({
       }
 
       if (framing) return;
+
+      if (freeCameraActiveRef.current && event.button === 0) {
+        event.preventDefault();
+        dragRef.current = {
+          kind: 'free_camera',
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+        };
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
 
       if (event.button === 1 || event.button === 2) {
         event.preventDefault();
@@ -776,12 +819,12 @@ export function SceneViewport({
         return;
       }
 
-      if (drag.kind === 'shot_framing') {
+      if (drag.kind === 'shot_framing' || drag.kind === 'free_camera') {
         const fly = flyRef.current;
         fly.yawDegrees -= dx * LOOK_SENSITIVITY;
         fly.pitchDegrees = Math.max(-89, Math.min(89, fly.pitchDegrees - dy * LOOK_SENSITIVITY));
         flyDirtyRef.current = true;
-        emitFramingCamera();
+        if (drag.kind === 'shot_framing') emitFramingCamera();
         return;
       }
 
@@ -794,6 +837,12 @@ export function SceneViewport({
     const onPointerUp = (event: PointerEvent) => {
       const drag = dragRef.current;
       if (drag.kind === 'shot_framing') {
+        dragRef.current = { kind: 'idle', x: 0, y: 0, moved: false };
+        if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+        return;
+      }
+
+      if (drag.kind === 'free_camera') {
         dragRef.current = { kind: 'idle', x: 0, y: 0, moved: false };
         if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
         return;
@@ -856,21 +905,36 @@ export function SceneViewport({
         emitFramingCamera();
         return;
       }
-      orbitRef.current.distance = Math.max(3, Math.min(28, orbitRef.current.distance + event.deltaY * 0.01));
+      if (freeCameraActiveRef.current) return;
+      orbitRef.current.distance = Math.max(3, Math.min(sceneBoundingRadius(projectRef.current) * 4, orbitRef.current.distance + event.deltaY * 0.01));
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!shotFramingRef.current?.flyActive) return;
-      if (event.code === 'Escape') return;
-      flyKeysRef.current.add(event.code);
-      if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(event.code)) {
-        event.preventDefault();
+      if (!shotFramingRef.current?.flyActive && !freeCameraActiveRef.current) return;
+      if (event.code === 'Escape') {
+        const escapeInsideDialog = Boolean((event.target as HTMLElement | null)?.closest?.('[role="dialog"]'));
+        if (freeCameraActiveRef.current && !escapeInsideDialog) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          callbacksRef.current.onFreeCameraActiveChange?.(false);
+        }
+        return;
       }
+      if (event.target && (event.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      if (!isBuildFreeCameraKey(event.code)) return;
+      flyKeysRef.current.add(event.code);
+      event.preventDefault();
+      event.stopImmediatePropagation();
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
       flyKeysRef.current.delete(event.code);
     };
+    const clearFlyInput = () => {
+      flyKeysRef.current.clear();
+      flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
+    };
+    const onVisibilityChange = () => { if (document.hidden) clearFlyInput(); };
 
     const onContextMenu = (event: MouseEvent) => event.preventDefault();
 
@@ -886,8 +950,10 @@ export function SceneViewport({
     canvas.addEventListener('pointerleave', onPointerLeave);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('contextmenu', onContextMenu);
-    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', clearFlyInput);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       endEditBatch();
@@ -899,8 +965,10 @@ export function SceneViewport({
       canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('contextmenu', onContextMenu);
-      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', clearFlyInput);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       flyKeysRef.current.clear();
       resizeObserver.disconnect();
       window.removeEventListener('resize', syncViewportSize);
@@ -912,17 +980,76 @@ export function SceneViewport({
   }, [clearTransformGizmo, emitFramingCamera, syncTransformGizmo, theme]);
 
   useEffect(() => {
+    const modeChanged = freeCameraModeRef.current !== freeCameraActive;
+    freeCameraModeRef.current = freeCameraActive;
+    if (!modeChanged || shotFraming) return;
+    const camera = cameraRef.current;
+    if (!camera) return;
+
+    flyKeysRef.current.clear();
+    flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
+    flyDirtyRef.current = false;
+
+    if (freeCameraActive) {
+      updateCamera(camera, orbitRef.current);
+      flyRef.current = flyCameraFromCamera(cameraFromOrbit(
+        {
+          yaw: orbitRef.current.yaw,
+          pitch: orbitRef.current.pitch,
+          distance: orbitRef.current.distance,
+          target: [orbitRef.current.target.x, orbitRef.current.target.y, orbitRef.current.target.z],
+        },
+        camera.fov,
+        camera.aspect,
+        camera.near,
+        camera.far,
+      ));
+      return;
+    }
+
+    const cameraData = cameraFromFlyState(
+      flyRef.current,
+      camera.fov,
+      camera.aspect,
+      camera.near,
+      camera.far,
+      orbitRef.current.distance,
+    );
+    const nextOrbit = cameraOrbitFromCamera(cameraData);
+    orbitRef.current = {
+      yaw: nextOrbit.yaw,
+      pitch: Math.max(-10, Math.min(78, nextOrbit.pitch)),
+      distance: Math.max(3, Math.min(sceneBoundingRadius(projectRef.current) * 4, nextOrbit.distance)),
+      target: new THREE.Vector3().fromArray(nextOrbit.target),
+    };
+  }, [freeCameraActive, shotFraming]);
+
+  useEffect(() => {
+    if (shotFraming) return;
+    const camera = cameraRef.current;
+    if (!camera) return;
+    const far = clampBuildRenderDistance(renderDistance);
+    camera.far = far;
+    if (sceneRef.current?.fog instanceof THREE.Fog) {
+      const fogRange = computeBuildFogRange(far);
+      sceneRef.current.fog.near = fogRange.near;
+      sceneRef.current.fog.far = fogRange.far;
+    }
+    camera.updateProjectionMatrix();
+  }, [renderDistance, shotFraming]);
+
+  useEffect(() => {
     return subscribeHumanMannequinReady(() => {
       setMannequinRevision(getHumanMannequinRevision());
     });
   }, []);
 
   useEffect(() => {
-    if (!shotFraming?.flyActive) {
+    if (!shotFraming?.flyActive && !freeCameraActive) {
       flyKeysRef.current.clear();
       flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
     }
-  }, [shotFraming?.flyActive]);
+  }, [freeCameraActive, shotFraming?.flyActive]);
 
   const setFlyAxes = useCallback((axes: { forward: number; strafe: number; vertical?: number }) => {
     flyAxesRef.current = {
@@ -963,6 +1090,7 @@ export function SceneViewport({
       showPanoOrigin: shotFraming ? false : (showSceneGuides || originPlacementActive),
       showHelpers: shotFraming ? false : showSceneGuides,
       theme,
+      fogDistance: shotFraming ? undefined : renderDistance,
     });
     if (previewPointRef.current && placementTypeRef.current) {
       updatePreviewMesh(previewPointRef.current);
@@ -990,16 +1118,13 @@ export function SceneViewport({
     const objects = project.scene.objects.filter((object) => frameObjectIds.includes(object.id) && object.visible);
     const scene = sceneRef.current;
     if (!scene || objects.length === 0) return;
-    const box = new THREE.Box3();
-    objects.forEach((object) => {
-      const mesh = findSceneObjectMesh(scene, object.id);
-      if (mesh) box.union(new THREE.Box3().setFromObject(mesh));
-    });
+    const box = selectionBounds(objects);
     if (box.isEmpty()) return;
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     orbitRef.current.target.copy(center);
-    orbitRef.current.distance = THREE.MathUtils.clamp(Math.max(size.x, size.y, size.z) * 2.2, 3, 28);
+    const framingDistance = Math.max(size.length() * 0.5, 2) / Math.tan(THREE.MathUtils.degToRad(framingFovRef.current * 0.5));
+    orbitRef.current.distance = THREE.MathUtils.clamp(framingDistance * 1.15, 3, sceneBoundingRadius(projectRef.current) * 4);
   }, [frameObjectIds, frameRequest, project.scene.objects, shotFraming]);
 
   useEffect(() => {
@@ -1009,6 +1134,8 @@ export function SceneViewport({
 
   const cursorClass = shotFraming
     ? 'cursor-crosshair'
+    : freeCameraActive
+      ? 'cursor-grab active:cursor-grabbing'
     : placementType
       ? 'cursor-crosshair'
       : originPlacementActive || !placementType
@@ -1030,9 +1157,10 @@ export function SceneViewport({
           variant="full"
         />
       )}
-      {shotFraming?.flyActive && (
+      {(shotFraming?.flyActive || freeCameraActive) && (
         <TouchFlyPad
           onAxesChange={setFlyAxes}
+          verticalPositionClassName={freeCameraActive ? 'bottom-[12rem]' : undefined}
         />
       )}
     </div>
@@ -1047,8 +1175,10 @@ function clampUnit(value: number): number {
 /** On-screen move pad for touch devices (keyboard WASD has no mobile equivalent). */
 function TouchFlyPad({
   onAxesChange,
+  verticalPositionClassName = 'bottom-[7.5rem]',
 }: {
   onAxesChange: (axes: { forward: number; strafe: number; vertical?: number }) => void;
+  verticalPositionClassName?: string;
 }) {
   const padRef = useRef<HTMLDivElement>(null);
   const activePointerId = useRef<number | null>(null);
@@ -1076,7 +1206,7 @@ function TouchFlyPad({
 
   return (
     <div
-      className="pointer-events-none absolute bottom-[7.5rem] left-3 z-30 flex flex-col items-center gap-2 md:hidden"
+      className={`pointer-events-none absolute left-3 z-30 flex flex-col items-center gap-2 md:hidden ${verticalPositionClassName}`}
       data-touch-fly-pad
     >
       <div className="pointer-events-auto flex gap-2">

@@ -4,6 +4,7 @@ import { createDefaultProject, createSceneObject } from '../src/domain/defaults'
 import {
   CHECKERBOARD_TILE_METERS,
   buildScene,
+  computeBuildFogRange,
   createObject3D,
   createPreviewMesh,
   defaultSecondaryColor,
@@ -14,6 +15,11 @@ import {
 } from '../src/engine/sceneObjects';
 
 describe('scene object disposal', () => {
+  it('maps Build visibility distance to the fog/shroud range', () => {
+    expect(computeBuildFogRange(40)).toEqual({ near: 18, far: 40 });
+    expect(computeBuildFogRange(200)).toEqual({ near: 90, far: 200 });
+  });
+
   it('keeps shared build materials alive across scene rebuilds', () => {
     const project = createDefaultProject();
     const firstScene = buildScene(project, { showHelpers: false });

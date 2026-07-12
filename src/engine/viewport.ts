@@ -7,6 +7,15 @@ export interface CssRendererRect {
   height: number;
 }
 
+export const DEFAULT_BUILD_RENDER_DISTANCE = 200;
+export const MIN_BUILD_RENDER_DISTANCE = 40;
+export const MAX_BUILD_RENDER_DISTANCE = 500;
+
+export function clampBuildRenderDistance(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_BUILD_RENDER_DISTANCE;
+  return Math.max(MIN_BUILD_RENDER_DISTANCE, Math.min(MAX_BUILD_RENDER_DISTANCE, value));
+}
+
 export function computeFullCssRendererRect(containerWidth: number, containerHeight: number): CssRendererRect {
   return roundCssRect({
     left: 0,

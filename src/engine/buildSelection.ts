@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SceneObject, Vec3 } from '../domain/types';
+import { SceneData, SceneObject, Vec3 } from '../domain/types';
 import { snapBuildPoint } from './sandbox';
 
 export type SelectionMode = 'replace' | 'toggle' | 'range';
@@ -31,6 +31,12 @@ export function selectionBounds(objects: SceneObject[]): THREE.Box3 {
     );
     box.union(localBox.applyMatrix4(matrix));
   });
+  return box;
+}
+
+export function sceneEnvelope(scene: SceneData, objects = scene.objects.filter((object) => object.visible && object.type !== 'sun_marker')): THREE.Box3 {
+  const box = selectionBounds(objects);
+  box.expandByPoint(new THREE.Vector3(...scene.panoOrigin));
   return box;
 }
 
