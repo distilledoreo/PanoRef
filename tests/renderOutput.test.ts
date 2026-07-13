@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createDefaultProject } from '../src/domain/defaults';
+import { computeGrayboxPanoFarPlane } from '../src/engine/renderers';
 import { buildScene, disposeScene } from '../src/engine/sceneObjects';
 
 describe('rendered shot output', () => {
@@ -40,6 +41,21 @@ describe('rendered shot output', () => {
     expect(storeSource).toContain('useThemeStore.getState().theme');
     expect(storeSource).not.toContain('renderGrayboxEquirectangularPano(state.project, 2048, 1024)');
     expect(storeSource).not.toMatch(/renderGrayboxPano:[\s\S]*downloadDataUrl/);
+  });
+
+  it('renders the full graybox scene without fog or a fixed distance cutoff', () => {
+    const project = createDefaultProject();
+    project.scene.objects[1].transform.position = [0, 0, 500];
+    const scene = buildScene(project, {
+      showHelpers: false,
+      hiddenObjectTypes: ['sun_marker'],
+      fog: false,
+    });
+
+    expect(scene.fog).toBeNull();
+    expect(computeGrayboxPanoFarPlane(scene, project.scene.panoOrigin)).toBeGreaterThan(500);
+
+    disposeScene(scene);
   });
 
   it('applies linked pano rotation to local reference exports', () => {

@@ -183,19 +183,22 @@ export function buildScene(
     previewObject?: SceneObject;
     theme?: SceneVisualTheme;
     fogDistance?: number;
+    fog?: boolean;
   } = {},
 ) {
   const theme = options.theme ?? 'light';
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(theme === 'dark' ? 0x0f1419 : 0xf3f6f4);
-  const fogRange = options.fogDistance === undefined
-    ? { near: DEFAULT_BUILD_FOG_NEAR, far: DEFAULT_BUILD_FOG_FAR }
-    : computeBuildFogRange(options.fogDistance);
-  scene.fog = new THREE.Fog(
-    theme === 'dark' ? 0x0f1419 : 0xf3f6f4,
-    fogRange.near,
-    fogRange.far,
-  );
+  if (options.fog !== false) {
+    const fogRange = options.fogDistance === undefined
+      ? { near: DEFAULT_BUILD_FOG_NEAR, far: DEFAULT_BUILD_FOG_FAR }
+      : computeBuildFogRange(options.fogDistance);
+    scene.fog = new THREE.Fog(
+      theme === 'dark' ? 0x0f1419 : 0xf3f6f4,
+      fogRange.near,
+      fogRange.far,
+    );
+  }
   const hiddenTypes = new Set(options.hiddenObjectTypes ?? []);
 
   const hemisphere = new THREE.HemisphereLight(

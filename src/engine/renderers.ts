@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CameraData, Euler, LocationProject, PanoCropSettings, Shot } from '../domain/types';
+import { CameraData, Euler, LocationProject, PanoCropSettings, Shot, Vec3 } from '../domain/types';
 import {
   getCameraMoveDurationSeconds,
   getSortedCameraKeyframes,
@@ -64,6 +64,23 @@ export function getSupportedCameraMoveMp4MimeType(): string | undefined {
   return MP4_MIME_CANDIDATES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
+/** Enclose every rendered object so the 360 export has no fixed-distance clipping plane. */
+export function computeGrayboxPanoFarPlane(scene: THREE.Scene, panoOrigin: Vec3, near = 0.1): number {
+  const bounds = new THREE.Box3().setFromObject(scene);
+  if (bounds.isEmpty()) return near + 1;
+
+  const origin = new THREE.Vector3(...panoOrigin);
+  let farthestDistance = 0;
+  for (const x of [bounds.min.x, bounds.max.x]) {
+    for (const y of [bounds.min.y, bounds.max.y]) {
+      for (const z of [bounds.min.z, bounds.max.z]) {
+        farthestDistance = Math.max(farthestDistance, origin.distanceTo(new THREE.Vector3(x, y, z)));
+      }
+    }
+  }
+  return Math.max(near + 1, farthestDistance * 1.01 + 1);
+}
+
 export async function renderGrayboxEquirectangularPano(
   project: LocationProject,
   width = DEFAULT_GRAYBOX_PANO_WIDTH,
@@ -76,6 +93,7 @@ export async function renderGrayboxEquirectangularPano(
     showHelpers: false,
     hiddenObjectTypes: ['sun_marker'],
     theme,
+    fog: false,
   });
   const cubeFaceSize = Math.min(2048, Math.max(512, Math.round(width / 2)));
   const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(cubeFaceSize, {
@@ -83,7 +101,11 @@ export async function renderGrayboxEquirectangularPano(
     generateMipmaps: true,
     minFilter: THREE.LinearMipmapLinearFilter,
   });
-  const cubeCamera = new THREE.CubeCamera(0.1, 100, cubeRenderTarget);
+  const cubeCamera = new THREE.CubeCamera(
+    0.1,
+    computeGrayboxPanoFarPlane(scene, project.scene.panoOrigin),
+    cubeRenderTarget,
+  );
   cubeCamera.position.fromArray(project.scene.panoOrigin);
   cubeCamera.update(renderer, scene);
 
