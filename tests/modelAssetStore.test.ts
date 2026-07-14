@@ -1,0 +1,57 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { deleteModelAsset, getModelAsset, putModelAsset, resetModelAssetStoreForTests } from '../src/engine/modelAssetStore';
+import { createDefaultProject, createTransform } from '../src/domain/defaults';
+import { encodeBinaryGrayboxMesh, encodePackedGrayboxMesh, MODEL_ASSET_URI_PREFIX } from '../src/engine/importedMesh';
+import { createProjectPackage, readProjectFile } from '../src/engine/projectIO';
+import JSZip from 'jszip';
+
+describe('binary model asset storage', () => {
+  beforeEach(resetModelAssetStoreForTests);
+
+  it('creates, retrieves, and deletes binary geometry without sharing mutable buffers', async () => {
+    await putModelAsset('mesh/a', new Uint8Array([1, 2, 3]).buffer);
+    const first = new Uint8Array((await getModelAsset('mesh/a'))!);
+    first[0] = 9;
+    expect(Array.from(new Uint8Array((await getModelAsset('mesh/a'))!))).toEqual([1, 2, 3]);
+    await deleteModelAsset('mesh/a');
+    expect(await getModelAsset('mesh/a')).toBeUndefined();
+  });
+
+  it('does not create an asset when already cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(putModelAsset('mesh/cancelled', new ArrayBuffer(8), controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await getModelAsset('mesh/cancelled')).toBeUndefined();
+  });
+
+  it('round-trips a binary-backed model through a project package', async () => {
+    const packed = encodeBinaryGrayboxMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), new Uint32Array([0, 1, 2]));
+    await putModelAsset('project/mesh', packed.buffer);
+    const project = createDefaultProject();
+    project.assets.assets.mesh = { id: 'mesh', type: 'model', name: 'mesh.panoref-mesh', uri: `${MODEL_ASSET_URI_PREFIX}project/mesh`, createdAt: new Date(0).toISOString() };
+    project.scene.objects.push({ id: 'model-object', name: 'Model', type: 'imported_model', transform: createTransform(), dimensions: [1, 1, 0.001], category: 'architecture', locked: false, visible: true, modelAssetId: 'mesh' });
+    const blob = await createProjectPackage(project);
+    resetModelAssetStoreForTests();
+    const reopened = await readProjectFile(new File([blob], 'scene.panoref-project'));
+    expect(reopened.assets.assets.mesh.uri).toBe(`${MODEL_ASSET_URI_PREFIX}project/mesh`);
+    expect(await getModelAsset('project/mesh')).toBeTruthy();
+  });
+
+  it('migrates legacy base64 geometry into a binary package on save', async () => {
+    const legacy = encodePackedGrayboxMesh(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), new Uint32Array([0, 1, 2]));
+    const project = createDefaultProject();
+    project.assets.assets.mesh = { id: 'mesh', type: 'model', name: 'legacy.panoref-mesh', uri: legacy.uri, createdAt: new Date(0).toISOString() };
+    project.scene.objects.push({ id: 'model-object', name: 'Model', type: 'imported_model', transform: createTransform(), dimensions: [1, 1, 0.001], category: 'architecture', locked: false, visible: true, modelAssetId: 'mesh' });
+    const zip = await JSZip.loadAsync(await (await createProjectPackage(project)).arrayBuffer());
+    const manifest = await zip.file('project.json')!.async('text');
+    expect(manifest).toContain(MODEL_ASSET_URI_PREFIX);
+    expect(manifest).not.toContain(';base64,');
+  });
+
+  it('reports a recoverable missing binary in a project package', async () => {
+    const project = createDefaultProject();
+    project.assets.assets.mesh = { id: 'mesh', type: 'model', name: 'missing.panoref-mesh', uri: `${MODEL_ASSET_URI_PREFIX}missing/key`, createdAt: new Date(0).toISOString() };
+    project.scene.objects.push({ id: 'model-object', name: 'Model', type: 'imported_model', transform: createTransform(), dimensions: [1, 1, 0.001], category: 'architecture', locked: false, visible: true, modelAssetId: 'mesh' });
+    await expect(createProjectPackage(project)).rejects.toThrow('binary model asset missing.panoref-mesh is missing');
+  });
+});

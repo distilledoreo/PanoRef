@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import { AssetRegistry, ProjectAsset, SceneObject } from '../domain/types';
+import { getRegisteredModelAssetBytes } from './modelAssetStore';
+import { IMPORT_BUDGET_POLICY } from './modelImportBudget';
 
 export const PANOREF_MESH_MIME = 'application/vnd.panoref.graybox-mesh';
-export const PANOREF_MESH_VERSION = 1;
-export const MAX_PACKED_MESH_BYTES = 96 * 1024 * 1024;
+export const PANOREF_MESH_VERSION = 2;
+export const MAX_PACKED_MESH_BYTES = IMPORT_BUDGET_POLICY.maxPackedAssetBytes;
+export const MODEL_ASSET_URI_PREFIX = 'panoref-idb:';
 
 const HEADER_BYTES = 40;
 const MAGIC = [0x50, 0x52, 0x47, 0x4d] as const; // PRGM
@@ -29,6 +32,15 @@ export interface PackedGrayboxMesh {
   };
 }
 
+export interface BinaryPackedGrayboxMesh extends Omit<PackedGrayboxMesh, 'uri'> {
+  buffer: ArrayBuffer;
+}
+
+export function encodeBinaryGrayboxMesh(positions: Float32Array, indices: Uint32Array): BinaryPackedGrayboxMesh {
+  const legacy = encodePackedBuffer(positions, indices);
+  return { buffer: legacy.buffer, byteLength: legacy.byteLength, vertexCount: legacy.vertexCount, triangleCount: legacy.triangleCount, bounds: legacy.bounds };
+}
+
 /**
  * Encode exact triangle positions/indices into PanoRef's small synchronous runtime format.
  * Materials, texture coordinates, animation and hierarchy intentionally do not belong here.
@@ -37,6 +49,11 @@ export function encodePackedGrayboxMesh(
   positions: Float32Array,
   indices: Uint32Array,
 ): PackedGrayboxMesh {
+  const packed = encodePackedBuffer(positions, indices);
+  return { ...packed, uri: `data:${PANOREF_MESH_MIME};base64,${bytesToBase64(new Uint8Array(packed.buffer))}` };
+}
+
+function encodePackedBuffer(positions: Float32Array, indices: Uint32Array): BinaryPackedGrayboxMesh {
   if (positions.length === 0 || positions.length % 3 !== 0) {
     throw new Error('Imported geometry must contain XYZ vertex positions.');
   }
@@ -52,7 +69,8 @@ export function encodePackedGrayboxMesh(
   }
 
   const bounds = positionBounds(positions);
-  const byteLength = HEADER_BYTES + positions.byteLength + indices.byteLength;
+  const normals = computeIndexedNormals(positions, indices);
+  const byteLength = HEADER_BYTES + positions.byteLength + indices.byteLength + normals.byteLength;
   if (byteLength > MAX_PACKED_MESH_BYTES) {
     throw new Error(
       `The texture-free mesh would use ${formatMegabytes(byteLength)}, above the ${formatMegabytes(MAX_PACKED_MESH_BYTES)} safety limit. No geometry was simplified.`,
@@ -71,9 +89,10 @@ export function encodePackedGrayboxMesh(
   bounds.max.forEach((value, index) => view.setFloat32(28 + index * 4, value, true));
   new Float32Array(buffer, HEADER_BYTES, positions.length).set(positions);
   new Uint32Array(buffer, HEADER_BYTES + positions.byteLength, indices.length).set(indices);
+  new Float32Array(buffer, HEADER_BYTES + positions.byteLength + indices.byteLength, normals.length).set(normals);
 
   return {
-    uri: `data:${PANOREF_MESH_MIME};base64,${bytesToBase64(bytes)}`,
+    buffer,
     byteLength,
     vertexCount,
     triangleCount: indices.length / 3,
@@ -167,10 +186,18 @@ function acquireGeometry(asset: ProjectAsset): THREE.BufferGeometry {
 
 function decodeGeometry(asset: ProjectAsset): THREE.BufferGeometry {
   const prefix = `data:${PANOREF_MESH_MIME};base64,`;
-  if (asset.type !== 'model' || !asset.uri.startsWith(prefix)) {
+  if (asset.type !== 'model') {
     throw new Error('Unsupported imported mesh asset encoding.');
   }
-  const bytes = base64ToBytes(asset.uri.slice(prefix.length));
+  const bytes = asset.uri.startsWith(prefix)
+    ? base64ToBytes(asset.uri.slice(prefix.length))
+    : asset.uri.startsWith(MODEL_ASSET_URI_PREFIX)
+      ? (() => {
+        const stored = getRegisteredModelAssetBytes(asset.uri.slice(MODEL_ASSET_URI_PREFIX.length));
+        if (!stored) throw new Error('The binary model asset is unavailable. Reopen the project package or reimport the source model.');
+        return new Uint8Array(stored);
+      })()
+      : (() => { throw new Error('Unsupported imported mesh asset encoding.'); })();
   if (bytes.byteLength < HEADER_BYTES || bytes.byteLength > MAX_PACKED_MESH_BYTES) {
     throw new Error('Imported mesh asset size is invalid.');
   }
@@ -180,7 +207,7 @@ function decodeGeometry(asset: ProjectAsset): THREE.BufferGeometry {
 
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const version = view.getUint16(4, true);
-  if (version !== PANOREF_MESH_VERSION) {
+  if (version !== 1 && version !== PANOREF_MESH_VERSION) {
     throw new Error(`Imported mesh asset version ${version} is not supported.`);
   }
   const vertexCount = view.getUint32(8, true);
@@ -188,31 +215,47 @@ function decodeGeometry(asset: ProjectAsset): THREE.BufferGeometry {
   if (vertexCount === 0 || indexCount === 0 || indexCount % 3 !== 0) {
     throw new Error('Imported mesh asset contains no triangles.');
   }
-  const expectedBytes = HEADER_BYTES + vertexCount * 3 * 4 + indexCount * 4;
+  const positionBytes = vertexCount * 3 * 4;
+  const indexBytes = indexCount * 4;
+  const expectedBytes = HEADER_BYTES + positionBytes + indexBytes + (version >= 2 ? positionBytes : 0);
   if (expectedBytes !== bytes.byteLength) {
     throw new Error('Imported mesh asset payload length is invalid.');
   }
 
-  // Copy the compact payload into aligned arrays owned by THREE.
-  const positions = new Float32Array(vertexCount * 3);
-  const indices = new Uint32Array(indexCount);
-  for (let index = 0; index < positions.length; index += 1) {
-    positions[index] = view.getFloat32(HEADER_BYTES + index * 4, true);
-  }
-  const indexOffset = HEADER_BYTES + positions.byteLength;
+  // Typed-array views share the binary payload; decoding does not duplicate the
+  // complete position and index buffers.
+  const positions = new Float32Array(bytes.buffer, bytes.byteOffset + HEADER_BYTES, vertexCount * 3);
+  const indexOffset = HEADER_BYTES + positionBytes;
+  const indices = new Uint32Array(bytes.buffer, bytes.byteOffset + indexOffset, indexCount);
   for (let index = 0; index < indices.length; index += 1) {
-    const value = view.getUint32(indexOffset + index * 4, true);
+    const value = indices[index];
     if (value >= vertexCount) throw new Error('Imported mesh asset has an out-of-range index.');
-    indices[index] = value;
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-  geometry.computeVertexNormals();
+  if (version >= 2) geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(bytes.buffer, bytes.byteOffset + indexOffset + indexBytes, vertexCount * 3), 3));
+  else geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
+}
+
+function computeIndexedNormals(positions: Float32Array, indices: Uint32Array): Float32Array {
+  const normals = new Float32Array(positions.length);
+  for (let offset = 0; offset < indices.length; offset += 3) {
+    const a = indices[offset] * 3; const b = indices[offset + 1] * 3; const c = indices[offset + 2] * 3;
+    const abx = positions[b] - positions[a]; const aby = positions[b + 1] - positions[a + 1]; const abz = positions[b + 2] - positions[a + 2];
+    const acx = positions[c] - positions[a]; const acy = positions[c + 1] - positions[a + 1]; const acz = positions[c + 2] - positions[a + 2];
+    const nx = aby * acz - abz * acy; const ny = abz * acx - abx * acz; const nz = abx * acy - aby * acx;
+    for (const vertex of [a, b, c]) { normals[vertex] += nx; normals[vertex + 1] += ny; normals[vertex + 2] += nz; }
+  }
+  for (let offset = 0; offset < normals.length; offset += 3) {
+    const length = Math.hypot(normals[offset], normals[offset + 1], normals[offset + 2]) || 1;
+    normals[offset] /= length; normals[offset + 1] /= length; normals[offset + 2] /= length;
+  }
+  return normals;
 }
 
 function createMissingMeshPlaceholder(

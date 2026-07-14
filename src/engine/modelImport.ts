@@ -8,7 +8,16 @@ import {
 } from '../domain/types';
 import { createTransform } from '../domain/defaults';
 import { createId } from '../utils/ids';
-import { encodePackedGrayboxMesh } from './importedMesh';
+import { encodeBinaryGrayboxMesh, MODEL_ASSET_URI_PREFIX } from './importedMesh';
+import { deleteModelAsset, putModelAsset } from './modelAssetStore';
+import {
+  IMPORT_BUDGET_POLICY,
+  ImportBudgetEstimate,
+  detectImportDeviceProfile,
+  estimateModelImportBudget,
+  formatImportBytes,
+} from './modelImportBudget';
+export { formatImportBytes as formatBytes } from './modelImportBudget';
 
 export const DIRECT_MODEL_EXTENSIONS = ['glb', 'gltf', 'obj', 'stl', 'ply', 'fbx'] as const;
 export type DirectModelFormat = typeof DIRECT_MODEL_EXTENSIONS[number];
@@ -21,9 +30,7 @@ export const MODEL_IMPORT_ACCEPT = [
   '.panoscene.zip',
 ].join(',');
 
-export const MAX_SOURCE_MODEL_BYTES = 200 * 1024 * 1024;
-export const MAX_IMPORT_VERTICES = 3_000_000;
-export const MAX_IMPORT_TRIANGLES = 3_000_000;
+export const MAX_SOURCE_MODEL_BYTES = IMPORT_BUDGET_POLICY.maxSourceFileBytes;
 export const IMPORT_WARNING_BYTES = 50 * 1024 * 1024;
 export const IMPORT_WARNING_TRIANGLES = 500_000;
 export const IMPORT_WARNING_OBJECTS = 250;
@@ -71,6 +78,27 @@ export type ModelImportMode = ImportedModelImportMode;
 
 export interface ModelImportOptions {
   mode: ModelImportMode;
+  allowHeavy?: boolean;
+  extremeConfirmation?: string;
+  signal?: AbortSignal;
+  onProgress?: (stage: ModelImportProgress) => void;
+}
+
+export interface ModelImportProgress { stage: 'reading' | 'parsing' | 'analyzing' | 'bounds' | 'converting' | 'writing' | 'creating' | 'finalizing'; message: string; completed?: number; total?: number }
+
+export interface ModelImportAnalysis extends ImportBudgetEstimate {
+  sourceFilename: string;
+  fileSize: number;
+  instancesExpanded: boolean;
+  topMeshes: Array<{ name: string; path: string; vertices: number; triangles: number }>;
+  warnings: string[];
+}
+
+export class ModelImportConsentRequiredError extends Error {
+  constructor(public readonly analysis: ModelImportAnalysis) {
+    super(`${analysis.tier === 'extreme' ? 'Extreme' : 'Heavy'} import confirmation is required.`);
+    this.name = 'ModelImportConsentRequiredError';
+  }
 }
 
 export interface ModelImportResult {
@@ -93,6 +121,7 @@ export interface ModelImportBatchResult {
   items: ModelImportResult[];
   summary: ModelImportSummary;
   warnings: string[];
+  analysis: ModelImportAnalysis;
 }
 
 interface LoadedModel {
@@ -227,13 +256,20 @@ async function importDirectModel(
   sourceSceneName?: string,
   initialWarnings: string[] = [],
 ): Promise<ModelImportBatchResult> {
+  const progress = options.onProgress ?? (() => undefined);
+  const abort = () => { if (options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError'); };
+  progress({ stage: 'reading', message: `Reading ${file.name}` });
+  abort();
   assertSourceFileSize(file);
   const format = directFormatForFile(file);
   if (!format) throw new Error(`Unsupported model format: ${file.name}`);
 
+  progress({ stage: 'parsing', message: `Parsing ${format.toUpperCase()}` });
   const loaded = await loadModel(file, format);
   const sourceImportId = createId('import');
   try {
+    abort();
+    progress({ stage: 'analyzing', message: 'Analyzing geometry' });
     const sourceUnits = collectSourceMeshUnits(loaded.root);
     if (sourceUnits.length === 0) {
       throw new Error('No triangle meshes were found in this file.');
@@ -246,22 +282,35 @@ async function importDirectModel(
       );
     }
 
-    // Validate totals before encoding. Separate mode keeps one packed asset per
-    // source unit; combined mode intentionally waits to encode until after all
-    // units have been merged so it does not retain redundant base64 payloads.
-    let totalVertices = 0;
-    let totalTriangles = 0;
-
-    for (const unit of sourceUnits) {
-      totalVertices += unit.vertexCount;
-      totalTriangles += unit.triangleCount;
-      // total check includes expanded instances
-      if (totalVertices > MAX_IMPORT_VERTICES || totalTriangles > MAX_IMPORT_TRIANGLES) {
-        throw new Error(
-          `Geometry exceeds the safety limit of ${MAX_IMPORT_VERTICES.toLocaleString()} vertices or ${MAX_IMPORT_TRIANGLES.toLocaleString()} triangles. No geometry was simplified.`,
-        );
-      }
+    const totalVertices = sourceUnits.reduce((sum, unit) => sum + unit.vertexCount, 0);
+    const totalTriangles = sourceUnits.reduce((sum, unit) => sum + unit.triangleCount, 0);
+    const outputPositionBytes = totalVertices * 3 * 4;
+    const outputIndexBytes = totalTriangles * 3 * 4;
+    const analysis: ModelImportAnalysis = {
+      sourceFilename: file.name,
+      fileSize: file.size,
+      instancesExpanded: sourceUnits.some((unit) => unit.instanceCount > 1),
+      topMeshes: sourceUnits.map((unit) => ({ name: unit.sourceNodeName ?? 'Unnamed mesh', path: unit.sourceNodePath, vertices: unit.vertexCount, triangles: unit.triangleCount }))
+        .sort((a, b) => b.vertices - a.vertices || b.triangles - a.triangles).slice(0, 10),
+      warnings: sourceUnits.some((unit) => unit.instanceCount > 1) ? ['Source instances are expanded by the current flattened graybox representation.'] : [],
+      ...estimateModelImportBudget({
+        loadedVertexCount: totalVertices,
+        triangleCount: totalTriangles,
+        meshNodeCount: sourceUnits.length,
+        instanceCount: sourceUnits.reduce((sum, unit) => sum + unit.instanceCount, 0),
+        expandedInstanceCount: sourceUnits.reduce((sum, unit) => sum + Math.max(0, unit.instanceCount - 1), 0),
+        uniquePositionBytes: outputPositionBytes + file.size,
+        uniqueIndexBytes: outputIndexBytes,
+        outputPositionBytes,
+        outputIndexBytes,
+        mode: options.mode,
+      }, detectImportDeviceProfile()),
+    };
+    if (analysis.tier === 'reject') {
+      throw new Error(`Import rejected: ${analysis.exceeded.join(', ')}. Estimated peak memory is ${formatImportBytes(analysis.estimatedPeakHeapBytes)}, above the ${formatImportBytes(analysis.safetyBudgetBytes)} safety budget for this device. Loaded geometry contains ${totalVertices.toLocaleString()} vertices and ${totalTriangles.toLocaleString()} triangles.`);
     }
+    if ((analysis.tier === 'heavy' || analysis.tier === 'extreme') && !options.allowHeavy) throw new ModelImportConsentRequiredError(analysis);
+    if (analysis.tier === 'extreme' && options.extremeConfirmation !== 'IMPORT') throw new ModelImportConsentRequiredError(analysis);
 
     // Build warnings summary
     const warnings = uniqueWarnings([
@@ -304,7 +353,7 @@ async function importDirectModel(
     const baseName = fileStem(sourceName);
 
     if (options.mode === 'combined') {
-      return buildCombinedResult({
+      return await buildCombinedResult({
         file,
         format,
         sourceApplication,
@@ -317,11 +366,11 @@ async function importDirectModel(
         totalVertices,
         totalTriangles,
         loaded,
-        warnings,
+        warnings, analysis, options,
       });
     }
 
-    return buildSeparateResult({
+    return await buildSeparateResult({
       file,
       format,
       sourceApplication,
@@ -334,7 +383,7 @@ async function importDirectModel(
       totalVertices,
       totalTriangles,
       loaded,
-      warnings,
+      warnings, analysis, options,
     });
   } finally {
     disposeLoadedRoot(loaded.root);
@@ -355,9 +404,11 @@ interface BuildArgs {
   totalTriangles: number;
   loaded: LoadedModel;
   warnings: string[];
+  analysis: ModelImportAnalysis;
+  options: ModelImportOptions;
 }
 
-function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
+async function buildSeparateResult(args: BuildArgs): Promise<ModelImportBatchResult> {
   const {
     format, sourceApplication, sourceSceneName, sourceName, sourceKind,
     baseName, sourceImportId, sourceUnits, totalVertices, totalTriangles, warnings,
@@ -385,19 +436,29 @@ function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
     return candidate;
   }
 
-  const items: ModelImportResult[] = sourceUnits.map((source) => {
-    const packed = encodePackedGrayboxMesh(source.positions, source.indices);
+  const items: ModelImportResult[] = [];
+  const writtenKeys: string[] = [];
+  try {
+  for (let sourceIndex = 0; sourceIndex < sourceUnits.length; sourceIndex += 1) {
+    if (args.options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
+    const source = sourceUnits[sourceIndex];
+    args.options.onProgress?.({ stage: 'converting', message: `Converting mesh ${sourceIndex + 1} of ${sourceUnits.length}`, completed: sourceIndex, total: sourceUnits.length });
+    const packed = encodeBinaryGrayboxMesh(source.positions, source.indices);
     const rawName = source.sourceNodeName?.trim() || baseName;
     const unique = uniqueName(rawName);
     const now = new Date().toISOString();
     const assetId = createId('model');
+    const binaryKey = `${sourceImportId}/${assetId}`;
+    args.options.onProgress?.({ stage: 'writing', message: `Writing mesh ${sourceIndex + 1} of ${sourceUnits.length}`, completed: sourceIndex, total: sourceUnits.length });
+    try { await putModelAsset(binaryKey, packed.buffer, args.options.signal); } catch (error) { await deleteModelAsset(binaryKey); throw error; }
+    writtenKeys.push(binaryKey);
     const objectId = createId('obj');
 
     const asset: ProjectAsset = {
       id: assetId,
       type: 'model',
       name: `${unique}.panoref-mesh`,
-      uri: packed.uri,
+      uri: `${MODEL_ASSET_URI_PREFIX}${binaryKey}`,
       mimeType: 'application/vnd.panoref.graybox-mesh',
       createdAt: now,
       metadata: {
@@ -450,8 +511,13 @@ function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
       },
     };
 
-    return { asset, object };
-  });
+    items.push({ asset, object });
+    await yieldToBrowser();
+  }
+  } catch (error) {
+    await Promise.all(writtenKeys.map((key) => deleteModelAsset(key)));
+    throw error;
+  }
 
   return {
     items,
@@ -465,11 +531,11 @@ function buildSeparateResult(args: BuildArgs): ModelImportBatchResult {
       sourceNodeCount: sourceUnits.length,
       combined: false,
     },
-    warnings,
+    warnings, analysis: args.analysis,
   };
 }
 
-function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
+async function buildCombinedResult(args: BuildArgs): Promise<ModelImportBatchResult> {
   const { format, sourceApplication, sourceSceneName, sourceName, sourceKind, baseName, sourceImportId, sourceUnits, totalVertices, totalTriangles, warnings } = args;
 
   // Merge all units into one mesh set - world baked already per-unit (positions already centered per unit, but for combined
@@ -479,20 +545,15 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
   // So we reconstruct global positions: unit.positions (centered) + unit.center.
   // Compute global min/max of those global positions, then recenter to global center.
 
-  // First reconstruct world positions
+  args.options.onProgress?.({ stage: 'bounds', message: 'Calculating combined bounds' });
   let globalMin = new THREE.Vector3(Infinity, Infinity, Infinity);
   let globalMax = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-  const worldPositionsPerUnit: Array<{ worldPositions: Float32Array; indices: Uint32Array }> = [];
 
   for (const source of sourceUnits) {
-    const wp = new Float32Array(source.positions.length);
     for (let i = 0; i < source.positions.length; i += 3) {
       const x = source.positions[i] + source.center[0];
       const y = source.positions[i + 1] + source.center[1];
       const z = source.positions[i + 2] + source.center[2];
-      wp[i] = x;
-      wp[i + 1] = y;
-      wp[i + 2] = z;
       if (x < globalMin.x) globalMin.x = x;
       if (y < globalMin.y) globalMin.y = y;
       if (z < globalMin.z) globalMin.z = z;
@@ -500,7 +561,6 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
       if (y > globalMax.y) globalMax.y = y;
       if (z > globalMax.z) globalMax.z = z;
     }
-    worldPositionsPerUnit.push({ worldPositions: wp, indices: source.indices });
   }
 
   const globalCenterVec = globalMin.clone().add(globalMax).multiplyScalar(0.5);
@@ -514,8 +574,8 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
 
   let totalVertexCount = 0;
   let totalIndexCount = 0;
-  for (const unit of worldPositionsPerUnit) {
-    totalVertexCount += unit.worldPositions.length / 3;
+  for (const unit of sourceUnits) {
+    totalVertexCount += unit.positions.length / 3;
     totalIndexCount += unit.indices.length;
   }
 
@@ -524,30 +584,37 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
   let vertexOffset = 0;
   let indexOffset = 0;
 
-  for (const { worldPositions, indices } of worldPositionsPerUnit) {
-    const vCount = worldPositions.length / 3;
-    for (let i = 0; i < worldPositions.length; i += 3) {
+  args.options.onProgress?.({ stage: 'converting', message: 'Writing combined geometry' });
+  for (let unitIndex = 0; unitIndex < sourceUnits.length; unitIndex += 1) {
+    if (args.options.signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
+    const { positions, indices, center } = sourceUnits[unitIndex];
+    const vCount = positions.length / 3;
+    for (let i = 0; i < positions.length; i += 3) {
       const dst = (vertexOffset + i / 3) * 3;
-      combinedPositions[dst] = worldPositions[i] - globalCenterVec.x;
-      combinedPositions[dst + 1] = worldPositions[i + 1] - globalCenterVec.y;
-      combinedPositions[dst + 2] = worldPositions[i + 2] - globalCenterVec.z;
+      combinedPositions[dst] = positions[i] + center[0] - globalCenterVec.x;
+      combinedPositions[dst + 1] = positions[i + 1] + center[1] - globalCenterVec.y;
+      combinedPositions[dst + 2] = positions[i + 2] + center[2] - globalCenterVec.z;
     }
     for (let i = 0; i < indices.length; i += 1) {
       combinedIndices[indexOffset + i] = indices[i] + vertexOffset;
     }
     vertexOffset += vCount;
     indexOffset += indices.length;
+    if (unitIndex % 8 === 7) await yieldToBrowser();
   }
 
-  const packed = encodePackedGrayboxMesh(combinedPositions, combinedIndices);
+  const packed = encodeBinaryGrayboxMesh(combinedPositions, combinedIndices);
 
   const now = new Date().toISOString();
   const assetId = createId('model');
+  const binaryKey = `${sourceImportId}/${assetId}`;
+  args.options.onProgress?.({ stage: 'writing', message: 'Writing binary asset' });
+  try { await putModelAsset(binaryKey, packed.buffer, args.options.signal); } catch (error) { await deleteModelAsset(binaryKey); throw error; }
   const asset: ProjectAsset = {
     id: assetId,
     type: 'model',
     name: `${baseName}.panoref-mesh`,
-    uri: packed.uri,
+    uri: `${MODEL_ASSET_URI_PREFIX}${binaryKey}`,
     mimeType: 'application/vnd.panoref.graybox-mesh',
     createdAt: now,
     metadata: {
@@ -606,8 +673,12 @@ function buildCombinedResult(args: BuildArgs): ModelImportBatchResult {
       sourceNodeCount: sourceUnits.length,
       combined: true,
     },
-    warnings,
+    warnings, analysis: args.analysis,
   };
+}
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 // ------------------------------------------------------------------
@@ -646,8 +717,6 @@ function collectSourceMeshUnits(root: THREE.Object3D): SourceMeshUnit[] {
   const paths = buildDeterministicPaths(candidates);
 
   const units: SourceMeshUnit[] = [];
-  let totalVerticesSoFar = 0;
-  let totalTrianglesSoFar = 0;
 
   for (let ci = 0; ci < candidates.length; ci++) {
     const { mesh } = candidates[ci];
@@ -697,15 +766,6 @@ function collectSourceMeshUnits(root: THREE.Object3D): SourceMeshUnit[] {
           min.min(tmpVertex);
           max.max(tmpVertex);
         }
-      }
-
-      // Safety pre-check
-      totalVerticesSoFar += expandedVertexCount;
-      totalTrianglesSoFar += expandedTriangleCount;
-      if (totalVerticesSoFar > MAX_IMPORT_VERTICES || totalTrianglesSoFar > MAX_IMPORT_TRIANGLES) {
-        throw new Error(
-          `Geometry exceeds the safety limit of ${MAX_IMPORT_VERTICES.toLocaleString()} vertices or ${MAX_IMPORT_TRIANGLES.toLocaleString()} triangles. No geometry was simplified.`,
-        );
       }
 
       const centerVec = min.clone().add(max).multiplyScalar(0.5);
@@ -765,14 +825,6 @@ function collectSourceMeshUnits(root: THREE.Object3D): SourceMeshUnit[] {
       const srcIndex = geometry.index;
       const indexCount = srcIndex?.count ?? srcPosAttr.count;
       const vertexCount = srcPosAttr.count;
-
-      totalVerticesSoFar += vertexCount;
-      totalTrianglesSoFar += indexCount / 3;
-      if (totalVerticesSoFar > MAX_IMPORT_VERTICES || totalTrianglesSoFar > MAX_IMPORT_TRIANGLES) {
-        throw new Error(
-          `Geometry exceeds the safety limit of ${MAX_IMPORT_VERTICES.toLocaleString()} vertices or ${MAX_IMPORT_TRIANGLES.toLocaleString()} triangles. No geometry was simplified.`,
-        );
-      }
 
       const world = mesh.matrixWorld;
       const flipWinding = world.determinant() < 0;

@@ -21,7 +21,7 @@ describe('workflow guidance UI', () => {
     expect(app).toContain('data-project-export-button');
     expect(app).toContain('data-project-name-input');
     expect(app).toContain('downloadProject(project)');
-    expect(app).toContain('accept=".json,application/json"');
+    expect(app).toContain('accept=".json,.zip,.panoref-project,application/json,application/zip"');
     expect(app).toContain('Project opened:');
     expect(app).toContain('Could not open project:');
     expect(app).toContain('data-project-import-status');
