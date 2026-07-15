@@ -11,7 +11,11 @@ import { SceneObject } from '../../domain/types';
 import {
   MODEL_IMPORT_ACCEPT,
   ModelImportMode,
+  ModelImportAnalysis,
+  ModelImportConsentRequiredError,
+  ModelImportJob,
   createModelImportPlan,
+  formatBytes,
   importModelJob,
 } from '../../engine/modelImport';
 import { useContinuityStore } from '../../state/useContinuityStore';
@@ -39,6 +43,10 @@ export function ModelImportDialog({
   const [progress, setProgress] = useState<string>();
   const [report, setReport] = useState<ImportReportItem[]>([]);
   const [mode, setMode] = useState<ModelImportMode>('separate');
+  const [allowHeavy, setAllowHeavy] = useState(false);
+  const [pending, setPending] = useState<{ job: ModelImportJob; analysis: ModelImportAnalysis }>();
+  const [extremeText, setExtremeText] = useState('');
+  const abortRef = useRef<AbortController>();
 
   const selectFiles = () => {
     if (!busy) inputRef.current?.click();
@@ -55,6 +63,7 @@ export function ModelImportDialog({
     }));
     const imported: SceneObject[] = [];
     setBusy(true);
+    abortRef.current = new AbortController();
     setReport(nextReport);
 
     for (let index = 0; index < plan.jobs.length; index += 1) {
@@ -62,7 +71,12 @@ export function ModelImportDialog({
       setProgress(`Converting ${job.file.name} (${index + 1} of ${plan.jobs.length})…`);
       try {
         // Sequential conversion keeps peak memory predictable on low-power devices.
-        const batch = await importModelJob(job, { mode });
+        const batch = await importModelJob(job, {
+          mode,
+          allowHeavy: false,
+          signal: abortRef.current.signal,
+          onProgress: (value) => setProgress(value.message),
+        });
         addImportedModels(batch.items);
         imported.push(...batch.items.map((i) => i.object));
 
@@ -90,6 +104,12 @@ export function ModelImportDialog({
           message: warning,
         }));
       } catch (error) {
+        if (error instanceof ModelImportConsentRequiredError) {
+          setPending({ job, analysis: error.analysis });
+          nextReport.push({ id: `analysis-${job.file.name}`, tone: 'warning', title: job.file.name, message: `${error.analysis.tier.toUpperCase()} scene: ${error.analysis.loadedVertexCount.toLocaleString()} vertices, ${error.analysis.triangleCount.toLocaleString()} triangles, ${formatBytes(error.analysis.estimatedPeakHeapBytes)} estimated peak RAM, ${formatBytes(error.analysis.projectStorageBytes)} project storage.` });
+          setReport([...nextReport]);
+          break;
+        }
         nextReport.push({
           id: `error-${index}-${job.file.name}`,
           tone: 'error',
@@ -106,6 +126,26 @@ export function ModelImportDialog({
     if (imported.length > 0) onImported?.(imported);
   };
 
+  const confirmPending = async () => {
+    if (!pending || !allowHeavy) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setBusy(true);
+    try {
+      const batch = await importModelJob(pending.job, { mode, allowHeavy: true, extremeConfirmation: extremeText, signal: controller.signal, onProgress: (value) => setProgress(value.message) });
+      addImportedModels(batch.items);
+      onImported?.(batch.items.map((item) => item.object));
+      setReport((items) => [...items, { id: `success-${pending.job.file.name}`, tone: 'success', title: pending.job.file.name, message: `Imported ${batch.summary.totalObjects} object${batch.summary.totalObjects === 1 ? '' : 's'} using binary-backed geometry.` }]);
+      setPending(undefined);
+      setExtremeText('');
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setReport((items) => [...items, { id: `confirm-error-${pending.job.file.name}`, tone: 'error', title: pending.job.file.name, message: error instanceof Error ? error.message : 'Could not import this file.' }]);
+    } finally {
+      setBusy(false);
+      setProgress(undefined);
+    }
+  };
+
   return (
     <Modal
       open={open}
@@ -115,6 +155,8 @@ export function ModelImportDialog({
       scrollBody
       footer={(
         <>
+          {busy && <button type="button" onClick={() => abortRef.current?.abort()} className="rounded-lg border border-red-400 px-4 py-2 text-sm text-red-500">Cancel</button>}
+          {pending && !busy && <button type="button" onClick={() => void confirmPending()} disabled={!allowHeavy || (pending.analysis.tier === 'extreme' && extremeText !== 'IMPORT')} className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{pending.analysis.tier === 'extreme' ? 'Import extreme scene' : 'Import heavy scene'}</button>}
           <button
             type="button"
             onClick={onClose}
@@ -202,6 +244,13 @@ export function ModelImportDialog({
           </div>
         </div>
 
+        <label className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
+          <input type="checkbox" checked={allowHeavy} disabled={busy} onChange={(event) => setAllowHeavy(event.target.checked)} className="mt-1" data-allow-heavy-imports />
+          <span><span className="text-sm font-semibold text-primary">Allow heavy imports</span><span className="mt-1 block text-xs leading-relaxed text-secondary">Heavy geometry can increase import time, project size, RAM and GPU use, save/load time, and the chance of a browser-tab crash.</span></span>
+        </label>
+
+        {pending && <ImportAnalysis analysis={pending.analysis} extremeText={extremeText} setExtremeText={setExtremeText} />}
+
         <div className="flex gap-3 rounded-xl border border-subtle px-4 py-3 text-sm text-secondary">
           <FileArchive className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
           <p>
@@ -238,4 +287,14 @@ export function ModelImportDialog({
       </div>
     </Modal>
   );
+}
+
+function ImportAnalysis({ analysis, extremeText, setExtremeText }: { analysis: ModelImportAnalysis; extremeText: string; setExtremeText: (value: string) => void }) {
+  return <div className="space-y-3 rounded-xl border border-amber-500/50 p-4" data-model-import-analysis>
+    <div><p className="font-semibold text-primary">{analysis.tier === 'extreme' ? 'Extreme scene confirmation' : 'Heavy scene confirmation'}</p><p className="mt-1 text-sm text-secondary">{analysis.sourceFilename} · {(analysis.fileSize / 1048576).toFixed(1)} MB source · {analysis.meshNodeCount.toLocaleString()} mesh nodes · {analysis.instanceCount.toLocaleString()} instances</p></div>
+    <div className="grid grid-cols-2 gap-2 text-sm text-secondary"><span>Loaded vertices: {analysis.loadedVertexCount.toLocaleString()}</span><span>Triangles: {analysis.triangleCount.toLocaleString()}</span><span>Peak JS heap: {formatBytes(analysis.estimatedPeakHeapBytes)}</span><span>GPU geometry: {formatBytes(analysis.gpuBytes)}</span><span>Packed asset: {formatBytes(analysis.packedBytes)}</span><span>Project storage: {formatBytes(analysis.projectStorageBytes)}</span></div>
+    {analysis.warnings.map((warning) => <p key={warning} className="text-xs text-amber-600">{warning}</p>)}
+    <div><p className="text-xs font-semibold text-primary">Largest mesh nodes</p><ol className="mt-1 list-decimal pl-5 text-xs text-secondary">{analysis.topMeshes.map((mesh) => <li key={mesh.path}>{mesh.name}: {mesh.vertices.toLocaleString()} vertices, {mesh.triangles.toLocaleString()} triangles</li>)}</ol></div>
+    {analysis.tier === 'extreme' && <label className="block text-sm text-primary">Type <strong>IMPORT</strong> to continue<input value={extremeText} onChange={(event) => setExtremeText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }} className="mt-1 block w-full rounded-lg border border-subtle bg-surface-muted px-3 py-2" data-extreme-import-confirmation /></label>}
+  </div>;
 }

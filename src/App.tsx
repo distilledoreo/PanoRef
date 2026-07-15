@@ -16,7 +16,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { Workspace } from './domain/types';
-import { downloadProject, parseProject, readFileAsText } from './engine/projectIO';
+import { downloadProject, readProjectFile } from './engine/projectIO';
 import { useAppModeStore } from './state/useAppModeStore';
 import { useContinuityStore } from './state/useContinuityStore';
 import { useThemeStore } from './state/useThemeStore';
@@ -83,8 +83,7 @@ export default function App() {
   const importProject = async (file?: File) => {
     if (!file) return;
     try {
-      const text = await readFileAsText(file);
-      const importedProject = parseProject(text);
+      const importedProject = await readProjectFile(file);
       setProject(importedProject);
       setAppMode('continuity');
       setProjectImportStatus({
@@ -283,7 +282,7 @@ export default function App() {
             <input
               ref={fileRef}
               type="file"
-              accept=".json,application/json"
+              accept=".json,.zip,.panoref-project,application/json,application/zip"
               aria-label="Open project JSON"
               data-project-import-input
               className="hidden"
