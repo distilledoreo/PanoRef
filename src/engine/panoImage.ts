@@ -130,9 +130,97 @@ export async function preparePanoImport(
   width: number,
   height: number,
 ): Promise<PanoImageResult & { analysis: EquirectImageAnalysis }> {
-  const analysis = analyzeEquirectImage(width, height);
+  const initialAnalysis = analyzeEquirectImage(width, height);
+  const analysis = initialAnalysis.wasLetterboxed
+    ? initialAnalysis
+    : await detectLetterboxedEquirectImage(dataUrl, initialAnalysis);
   const extracted = await extractEquirectFromContainer(dataUrl, analysis);
   return { ...extracted, analysis };
+}
+
+async function detectLetterboxedEquirectImage(
+  dataUrl: string,
+  analysis: EquirectImageAnalysis,
+): Promise<EquirectImageAnalysis> {
+  if (analysis.width <= 0 || analysis.height <= 0) return analysis;
+
+  const image = await loadImage(dataUrl);
+  const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight));
+  const sampleWidth = Math.max(1, Math.round(image.naturalWidth * scale));
+  const sampleHeight = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = sampleWidth;
+  canvas.height = sampleHeight;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) return analysis;
+  context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+  const pixels = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+  const crop = detectCenteredPaddingCrop(pixels, sampleWidth, sampleHeight);
+  if (!crop) return analysis;
+
+  return {
+    ...analysis,
+    width: Math.round(crop.width / scale),
+    height: Math.round(crop.height / scale),
+    wasLetterboxed: true,
+    crop: {
+      x: Math.round(crop.x / scale),
+      y: Math.round(crop.y / scale),
+      width: Math.round(crop.width / scale),
+      height: Math.round(crop.height / scale),
+    },
+  };
+}
+
+export function detectCenteredPaddingCrop(pixels: Uint8ClampedArray, width: number, height: number): EquirectCropRect | undefined {
+  const top = countFromEdge(Array.from({ length: height }, (_, y) => isUniformEdgeBand(pixels, width, height, y, true, 0)));
+  const bottom = countFromEdge(Array.from({ length: height }, (_, y) => isUniformEdgeBand(pixels, width, height, height - 1 - y, true, height - 1)));
+  const left = countFromEdge(Array.from({ length: width }, (_, x) => isUniformEdgeBand(pixels, width, height, x, false, 0)));
+  const right = countFromEdge(Array.from({ length: width }, (_, x) => isUniformEdgeBand(pixels, width, height, width - 1 - x, false, width - 1)));
+
+  const verticalCrop = { x: 0, y: top, width, height: height - top - bottom };
+  const horizontalCrop = { x: left, y: 0, width: width - left - right, height };
+  const candidates = [verticalCrop, horizontalCrop]
+    .filter((candidate) => candidate.width > 0 && candidate.height > 0)
+    .filter((candidate) => Math.abs(candidate.width / candidate.height - EQUIRECT_ASPECT) <= 0.08)
+    .filter((candidate) => candidate.width * candidate.height < width * height * 0.98)
+    .sort((a, b) => b.width * b.height - a.width * a.height);
+
+  return candidates[0];
+}
+
+function isUniformEdgeBand(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  offset: number,
+  row: boolean,
+  edgeOffset: number,
+) {
+  const length = row ? width : height;
+  const step = Math.max(1, Math.floor(length / 64));
+  const baseIndex = row
+    ? edgeOffset * width * 4
+    : (Math.floor(height / 2) * width + edgeOffset) * 4;
+  const base = [pixels[baseIndex], pixels[baseIndex + 1], pixels[baseIndex + 2]];
+  let matches = 0;
+  let samples = 0;
+  for (let i = 0; i < length; i += step) {
+    const index = row ? (offset * width + i) * 4 : (i * width + offset) * 4;
+    const difference = Math.abs(pixels[index] - base[0]) + Math.abs(pixels[index + 1] - base[1]) + Math.abs(pixels[index + 2] - base[2]);
+    if (difference <= 24) matches += 1;
+    samples += 1;
+  }
+  return matches / Math.max(1, samples) >= 0.94;
+}
+
+function countFromEdge(values: boolean[]) {
+  let count = 0;
+  for (const value of values) {
+    if (!value) break;
+    count += 1;
+  }
+  return count;
 }
 
 export async function preparePanoExportDataUrl(
