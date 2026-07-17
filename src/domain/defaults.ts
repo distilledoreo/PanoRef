@@ -8,6 +8,7 @@ import {
   ProjectAsset,
   SceneObject,
   SceneObjectType,
+  ProjectedStyleSettings,
   ProjectSettings,
   ProjectWorkflow,
   Shot,
@@ -46,6 +47,13 @@ export const DEFAULT_GRAYBOX_PANO_HEIGHT = 2048;
 export const DEFAULT_SHOT_WIDTH = 3840;
 export const DEFAULT_SHOT_HEIGHT = 2160;
 
+export const defaultProjectedStyleSettings: ProjectedStyleSettings = {
+  opacity: 1,
+  exposure: 1,
+  lightingContribution: 0,
+  fallbackMode: 'clay',
+};
+
 export const defaultProjectSettings = {
   defaultShotWidth: DEFAULT_SHOT_WIDTH,
   defaultShotHeight: DEFAULT_SHOT_HEIGHT,
@@ -55,6 +63,7 @@ export const defaultProjectSettings = {
   panoGoodMatchMeters: 1.5,
   panoModerateMatchMeters: 4,
   panoLetterboxExports169: true,
+  projectedStyle: { ...defaultProjectedStyleSettings },
 } satisfies ProjectSettings;
 
 export const defaultProjectWorkflow: ProjectWorkflow = {
@@ -73,11 +82,31 @@ export function normalizeProjectWorkflow(workflow?: Partial<ProjectWorkflow>): P
   };
 }
 
+export function normalizeProjectedStyleSettings(
+  settings?: Partial<ProjectedStyleSettings> | null,
+): ProjectedStyleSettings {
+  const opacity = Number(settings?.opacity);
+  const exposure = Number(settings?.exposure);
+  const lightingContribution = Number(settings?.lightingContribution);
+  return {
+    panoId: typeof settings?.panoId === 'string' && settings.panoId.length > 0 ? settings.panoId : undefined,
+    opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : defaultProjectedStyleSettings.opacity,
+    exposure: Number.isFinite(exposure) ? Math.min(4, Math.max(0.25, exposure)) : defaultProjectedStyleSettings.exposure,
+    lightingContribution: Number.isFinite(lightingContribution)
+      ? Math.min(1, Math.max(0, lightingContribution))
+      : defaultProjectedStyleSettings.lightingContribution,
+    fallbackMode: settings?.fallbackMode === 'neutral' ? 'neutral' : 'clay',
+  };
+}
+
 export function normalizeProjectSettings(settings?: Partial<ProjectSettings>): ProjectSettings {
   return {
     ...defaultProjectSettings,
     ...settings,
     panoLetterboxExports169: settings?.panoLetterboxExports169 ?? defaultProjectSettings.panoLetterboxExports169,
+    projectedStyle: normalizeProjectedStyleSettings(
+      settings?.projectedStyle ?? defaultProjectSettings.projectedStyle,
+    ),
   };
 }
 
@@ -85,6 +114,8 @@ export const defaultShotExportSettings: ShotExportSettings = {
   width: DEFAULT_SHOT_WIDTH,
   height: DEFAULT_SHOT_HEIGHT,
   includeViewport: true,
+  includeProjectedViewport: false,
+  includeProjectedCameraMoveReferenceFrames: false,
   includeAiResultFrame: true,
   includePanoCrop: true,
   includeFullPano: true,

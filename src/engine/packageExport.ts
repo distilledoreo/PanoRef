@@ -17,7 +17,9 @@ import {
   renderPanoPerspectiveCrop,
   renderShotCameraMoveMp4,
   renderShotFrame,
+  renderShotProjectedFrame,
   renderViewportClay,
+  renderViewportProjected,
 } from './renderers';
 
 export { downloadBlob };
@@ -109,6 +111,19 @@ async function appendShotPackageToZip(
     addDataUrl(zip, `${rootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
   }
 
+  if (shot.exportSettings.includeProjectedViewport) {
+    try {
+      const projected = await renderShotProjectedFrame(project, shot);
+      addDataUrl(zip, `${rootFolder}/inputs/viewport_projected.png`, projected.dataUrl);
+    } catch (error) {
+      throw new ShotPackageError(
+        error instanceof Error
+          ? error.message
+          : 'Projected viewport export failed. Import a styled panorama or disable projected export.',
+      );
+    }
+  }
+
   if (shot.exportSettings.includeAiResultFrame && aiResultAssetId) {
     const aiResultAsset = project.assets.assets[aiResultAssetId];
     if (aiResultAsset) {
@@ -150,6 +165,29 @@ async function appendShotPackageToZip(
         shot.exportSettings.height,
       );
       addDataUrl(zip, `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, clay.dataUrl);
+    }
+  }
+
+  const projectedMoveFrames = shot.exportSettings.includeProjectedCameraMoveReferenceFrames
+    ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
+    : [];
+  if (projectedMoveFrames.length > 0) {
+    for (const frame of projectedMoveFrames) {
+      try {
+        const projected = await renderViewportProjected(
+          project,
+          frame.camera,
+          shot.exportSettings.width,
+          shot.exportSettings.height,
+        );
+        addDataUrl(zip, `${rootFolder}/inputs/camera_move/projected_${frame.id}.png`, projected.dataUrl);
+      } catch (error) {
+        throw new ShotPackageError(
+          error instanceof Error
+            ? error.message
+            : 'Projected camera-move frames failed. Disable projected move frames or import a styled panorama.',
+        );
+      }
     }
   }
 

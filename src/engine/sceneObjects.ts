@@ -1,7 +1,18 @@
 import * as THREE from 'three';
-import { AssetRegistry, Landmark, LocationProject, ObjectSurfaceStyle, SceneObject, SceneObjectType } from '../domain/types';
+import {
+  AssetRegistry,
+  Euler,
+  Landmark,
+  LocationProject,
+  ObjectSurfaceStyle,
+  ProjectedStyleSettings,
+  SceneObject,
+  SceneObjectType,
+  Vec3,
+} from '../domain/types';
 import { createHumanMannequinObject } from './humanMannequinModel';
 import { createImportedMeshNode, releaseImportedGeometry } from './importedMesh';
+import { createProjectedStyleMaterial, isProjectedStyleMaterial } from './projectedStyleMaterials';
 import { degreesToRadians } from './sync';
 
 export type SceneVisualTheme = 'light' | 'dark';
@@ -170,6 +181,15 @@ export function resolveSurfaceStyle(object: SceneObject): ObjectSurfaceStyle {
   return 'default';
 }
 
+export interface ProjectedSceneOptions {
+  texture: THREE.Texture;
+  origin: Vec3;
+  rotation: Euler;
+  settings: ProjectedStyleSettings;
+  /** Dispose projected materials with the scene (export / one-shot). */
+  disposableMaterials?: boolean;
+}
+
 export function buildScene(
   project: LocationProject,
   options: {
@@ -184,6 +204,9 @@ export function buildScene(
     theme?: SceneVisualTheme;
     fogDistance?: number;
     fog?: boolean;
+    /** When 'projected' and projected options are valid, style architecture with the pano. */
+    appearance?: 'clay' | 'projected';
+    projected?: ProjectedSceneOptions;
   } = {},
 ) {
   const theme = options.theme ?? 'light';
@@ -235,6 +258,8 @@ export function buildScene(
   grid.position.y = 0.002;
   scene.add(grid);
 
+  const useProjected = options.appearance === 'projected' && Boolean(options.projected?.texture);
+
   for (const object of project.scene.objects) {
     if (!object.visible) continue;
     if (hiddenTypes.has(object.type)) continue;
@@ -245,6 +270,9 @@ export function buildScene(
       project.assets,
     );
     mesh.userData.sceneObjectId = object.id;
+    if (useProjected && options.projected && shouldReceiveProjectedStyle(object)) {
+      applyProjectedStyleToObject(mesh, object, theme, options.projected);
+    }
     scene.add(mesh);
   }
 
@@ -299,6 +327,41 @@ export function resolveObjectMaterial(
   }
   if (object.type === 'floor') return theme === 'dark' ? darkFloorMaterial : lightFloorMaterial;
   return materialByTheme[theme][object.category];
+}
+
+/** Helpers, landmarks, and sun markers keep clay appearance; architecture receives projection. */
+export function shouldReceiveProjectedStyle(object: SceneObject): boolean {
+  if (object.category === 'helper' || object.category === 'landmark') return false;
+  if (object.type === 'sun_marker' || object.type === 'human_dummy') return false;
+  return true;
+}
+
+function applyProjectedStyleToObject(
+  root: THREE.Object3D,
+  object: SceneObject,
+  theme: SceneVisualTheme,
+  projected: ProjectedSceneOptions,
+) {
+  const clay = resolveObjectMaterial(object, theme);
+  const fallbackColor = clay.color?.clone?.() ?? new THREE.Color(0xc8cdc8);
+  const projectedMaterial = createProjectedStyleMaterial({
+    texture: projected.texture,
+    origin: projected.origin,
+    rotation: projected.rotation,
+    settings: projected.settings,
+    fallbackColor: projected.settings.fallbackMode === 'neutral' ? 0xb0b6b2 : fallbackColor,
+    disposable: projected.disposableMaterials ?? true,
+  });
+  // Keep a tiny emissive edge so selection remains readable under projection.
+  if (root.userData?.sceneObjectId && projected.disposableMaterials === false) {
+    projectedMaterial.emissive = new THREE.Color(0x0a2a24);
+    projectedMaterial.emissiveIntensity = 0.04;
+  }
+  root.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.material = projectedMaterial;
+  });
 }
 
 export function createObject3D(
@@ -501,18 +564,24 @@ export function disposePreviewMesh(node: THREE.Object3D) {
 }
 
 export function disposeScene(scene: THREE.Scene) {
+  const disposedMaterials = new Set<THREE.Material>();
   scene.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (mesh.geometry && !releaseImportedGeometry(mesh.geometry)) mesh.geometry.dispose();
-    disposeOwnedMaterials(mesh.material);
+    disposeOwnedMaterials(mesh.material, disposedMaterials);
   });
 }
 
-function disposeOwnedMaterials(material: THREE.Material | THREE.Material[] | undefined) {
+function disposeOwnedMaterials(
+  material: THREE.Material | THREE.Material[] | undefined,
+  disposed: Set<THREE.Material>,
+) {
   if (!material) return;
   const materials = Array.isArray(material) ? material : [material];
   materials.forEach((item) => {
-    if (!SHARED_MATERIALS.has(item)) item.dispose();
+    if (SHARED_MATERIALS.has(item) || disposed.has(item)) return;
+    disposed.add(item);
+    item.dispose();
   });
 }
 

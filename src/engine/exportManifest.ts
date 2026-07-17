@@ -51,6 +51,9 @@ export function createShotPackageManifest(
   if (shot.exportSettings.includeViewport) {
     files.push({ path: `${rootFolder}/inputs/viewport_clay.png`, kind: 'image', required: true });
   }
+  if (shot.exportSettings.includeProjectedViewport) {
+    files.push({ path: `${rootFolder}/inputs/viewport_projected.png`, kind: 'image', required: false });
+  }
   if (shot.exportSettings.includePanoCrop && linkedPano && shot.panoCrop) {
     files.push({ path: `${rootFolder}/inputs/pano_crop.png`, kind: 'image', required: true });
   }
@@ -78,6 +81,12 @@ export function createShotPackageManifest(
   }
   for (const frame of cameraMoveReferenceFrames) {
     files.push({ path: `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, kind: 'image', required: false });
+  }
+  const projectedMoveFrames = shot.exportSettings.includeProjectedCameraMoveReferenceFrames
+    ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
+    : [];
+  for (const frame of projectedMoveFrames) {
+    files.push({ path: `${rootFolder}/inputs/camera_move/projected_${frame.id}.png`, kind: 'image', required: false });
   }
   if (shot.exportSettings.includeMetadata) {
     files.push({ path: `${rootFolder}/metadata/shot.json`, kind: 'json', required: true });

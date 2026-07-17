@@ -23,6 +23,7 @@ import {
   createVideoAsset,
   DEFAULT_GRAYBOX_PANO_HEIGHT,
   DEFAULT_GRAYBOX_PANO_WIDTH,
+  normalizeProjectSettings,
 } from '../domain/defaults';
 import {
   getCanonicalPano,
@@ -326,7 +327,13 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   updateProjectSettings: (updates) => set((state) => ({
     project: touchProject({
       ...state.project,
-      settings: { ...state.project.settings, ...updates },
+      settings: normalizeProjectSettings({
+        ...state.project.settings,
+        ...updates,
+        projectedStyle: updates.projectedStyle !== undefined
+          ? updates.projectedStyle
+          : state.project.settings.projectedStyle,
+      }),
     }),
   })),
   setBuildMode: (buildMode) => set({ buildMode }),

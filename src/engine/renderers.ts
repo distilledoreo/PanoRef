@@ -11,8 +11,17 @@ import {
   DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
   type CameraMoveCubemapFaceId,
 } from './cameraMoveCubemap';
-import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH } from '../domain/defaults';
+import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH, normalizeProjectedStyleSettings } from '../domain/defaults';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
+import {
+  canUseProjectedAppearance,
+  getProjectedStyleAssetUri,
+  resolveProjectedStylePano,
+} from './projectedStyle';
+import {
+  acquireProjectedStyleTexture,
+  releaseProjectedStyleTexture,
+} from './projectedStyleMaterials';
 import { buildScene, disposeScene, type SceneVisualTheme } from './sceneObjects';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 
@@ -382,6 +391,82 @@ export async function renderViewportClay(
   disposeRenderer(renderer);
 
   return { dataUrl, width, height };
+}
+
+/**
+ * Render a camera frame with world-space projected style appearance.
+ * Throws when projected export is requested but no valid projector is available.
+ */
+export async function renderViewportProjected(
+  project: LocationProject,
+  cameraData: CameraData,
+  width: number,
+  height: number,
+): Promise<ImageRenderResult> {
+  if (!canUseProjectedAppearance(project)) {
+    throw new Error(
+      'Projected viewport export requires an importable styled panorama with a valid image asset.',
+    );
+  }
+  const pano = resolveProjectedStylePano(project);
+  const imageUrl = getProjectedStyleAssetUri(project, pano);
+  if (!pano || !imageUrl) {
+    throw new Error('Projected viewport export could not resolve the projector panorama asset.');
+  }
+
+  await ensureHumanMannequinModel();
+  const texture = await acquireProjectedStyleTexture(imageUrl);
+  if (!texture) {
+    throw new Error('Projected viewport export failed to decode the panorama texture.');
+  }
+
+  const renderer = createRenderer(width, height);
+  const scene = buildScene(project, {
+    showHelpers: false,
+    hiddenObjectTypes: ['sun_marker'],
+    appearance: 'projected',
+    projected: {
+      texture,
+      origin: pano.origin,
+      rotation: pano.rotation,
+      settings: normalizeProjectedStyleSettings(project.settings.projectedStyle),
+      disposableMaterials: true,
+    },
+  });
+  const camera = new THREE.PerspectiveCamera(
+    cameraData.fovDegrees,
+    width / height,
+    cameraData.near,
+    cameraData.far,
+  );
+  applyFlyCameraToPerspectiveCamera(
+    camera,
+    flyCameraFromCamera(cameraData),
+    cameraData.fovDegrees,
+    width / height,
+    cameraData.near,
+    cameraData.far,
+  );
+  renderer.render(scene, camera);
+  const dataUrl = renderer.domElement.toDataURL('image/png');
+
+  disposeScene(scene);
+  disposeRenderer(renderer);
+  releaseProjectedStyleTexture(imageUrl);
+
+  return { dataUrl, width, height };
+}
+
+export async function renderShotProjectedFrame(
+  project: LocationProject,
+  shot: Shot,
+): Promise<ImageRenderResult> {
+  return renderViewportProjected(
+    project,
+    shot.camera,
+    shot.exportSettings.width,
+    shot.exportSettings.height,
+  );
 }
 
 export async function renderPanoPerspectiveCrop(

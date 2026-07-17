@@ -41,6 +41,8 @@ import { ShotThumbnail } from '../common/ShotThumbnail';
 import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
+import { canUseProjectedAppearance } from '../../engine/projectedStyle';
+import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { FullBleedLayout } from './WorkspaceShell';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
@@ -116,6 +118,7 @@ export function ShotsWorkspace() {
   const [showCompare, setShowCompare] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [captureMode, setCaptureMode] = useState<CaptureMode>('still');
+  const [appearance, setAppearance] = useState<'clay' | 'projected'>('clay');
   const [landFlash, setLandFlash] = useState(false);
   /** Pending move length — applied when end is captured (and updates existing end if present). */
   const [videoDurationSeconds, setVideoDurationSeconds] = useState(DEFAULT_CAMERA_MOVE_DURATION_SECONDS);
@@ -686,27 +689,37 @@ export function ShotsWorkspace() {
             project={project}
             selectedShotId={selectedShot?.id}
             shotFraming={shotFraming}
+            appearance={appearance}
             minHeightClassName="min-h-0"
           />
         </div>
 
         {/* Top chrome: shot index + settings */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between px-4 pt-[calc(var(--stage-header-safe)+0.35rem)]">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-4 pt-[calc(var(--stage-header-safe)+0.35rem)]">
           <div className="pointer-events-auto rounded-full bg-black/45 px-3 py-1 text-xs font-semibold tabular-nums text-white/90 backdrop-blur-sm">
             {selectedShot
               ? `${selectedIndex + 1} / ${project.shots.length}`
               : 'No shots'}
           </div>
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white shadow-card backdrop-blur-sm transition hover:bg-black/60"
-            aria-label="Camera settings"
-            data-shots-settings-trigger
-            title="Settings (I)"
-          >
-            <Settings2 className="h-4 w-4" />
-          </button>
+          <div className="pointer-events-auto flex items-center gap-2">
+            <AppearanceModeToggle
+              value={appearance}
+              projectedAvailable={canUseProjectedAppearance(project)}
+              onChange={setAppearance}
+              compact
+              className="border-white/15 bg-black/50 text-white [&_button]:text-white/80 [&_button[aria-pressed=true]]:bg-white [&_button[aria-pressed=true]]:text-zinc-900"
+            />
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white shadow-card backdrop-blur-sm transition hover:bg-black/60"
+              aria-label="Camera settings"
+              data-shots-settings-trigger
+              title="Settings (I)"
+            >
+              <Settings2 className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Quiet landed flash */}

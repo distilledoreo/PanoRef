@@ -57,7 +57,9 @@ describe('Build keyboard shortcuts', () => {
     expect(isBuildFreeCameraKey('KeyD')).toBe(true);
     expect(isBuildFreeCameraKey('Space')).toBe(true);
     expect(isBuildFreeCameraKey('ShiftLeft')).toBe(true);
-    expect(isBuildFreeCameraKey('ControlLeft')).toBe(true);
+    // Ctrl is no longer a free-camera sprint modifier (double-tap W instead).
+    expect(isBuildFreeCameraKey('ControlLeft')).toBe(false);
+    expect(isBuildFreeCameraKey('ControlRight')).toBe(false);
     expect(isBuildFreeCameraKey('ArrowUp')).toBe(false);
     expect(isBuildFreeCameraKey('KeyF')).toBe(false);
   });

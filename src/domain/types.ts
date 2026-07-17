@@ -158,6 +158,10 @@ export interface ShotExportSettings {
   width: number;
   height: number;
   includeViewport: boolean;
+  /** Optional projected-style still matching the clay viewport camera. */
+  includeProjectedViewport?: boolean;
+  /** Optional projected clay-style keyframe stills along the camera move. */
+  includeProjectedCameraMoveReferenceFrames?: boolean;
   includeAiResultFrame: boolean;
   includePanoCrop: boolean;
   includeFullPano: boolean;
@@ -166,6 +170,16 @@ export interface ShotExportSettings {
   includeCameraMoveReferenceFrames: boolean;
   includeMetadata: boolean;
   includePrompt: boolean;
+}
+
+/** Project-level projector configuration (no GPU resources). */
+export interface ProjectedStyleSettings {
+  /** Pano reference id to project; omit to auto-pick canonical styled pano. */
+  panoId?: string;
+  opacity: number;
+  exposure: number;
+  lightingContribution: number;
+  fallbackMode: 'clay' | 'neutral';
 }
 
 export interface PromptOverrides {
@@ -234,6 +248,8 @@ export interface ProjectSettings {
   panoGoodMatchMeters: number;
   panoModerateMatchMeters: number;
   panoLetterboxExports169: boolean;
+  /** Optional projected-style appearance configuration. */
+  projectedStyle?: ProjectedStyleSettings;
 }
 
 export interface LocationProject {
