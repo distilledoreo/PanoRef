@@ -1,10 +1,16 @@
-import { LocationProject, PanoReference, SceneObject, Shot } from '../domain/types';
-import { normalizeProjectSettings, normalizeProjectWorkflow } from '../domain/defaults';
+import { Euler, LocationProject, PanoReference, SceneObject, Shot, Vec3 } from '../domain/types';
+import {
+  DEFAULT_CAMERA_HEIGHT_METERS,
+  normalizeProjectSettings,
+  normalizeProjectWorkflow,
+} from '../domain/defaults';
 import JSZip from 'jszip';
 import { MODEL_ASSET_URI_PREFIX } from './importedMesh';
 import { deleteModelAsset, getModelAsset, putModelAsset } from './modelAssetStore';
 
 const PROJECT_MANIFEST = 'project.json';
+const DEFAULT_SCENE_PANO_ORIGIN: Vec3 = [0, DEFAULT_CAMERA_HEIGHT_METERS, 0];
+const DEFAULT_SCENE_PANO_ROTATION: Euler = [0, 0, 0];
 
 export function serializeProject(project: LocationProject): string {
   return JSON.stringify(withoutOrphanedModelAssets(project), null, 2);
@@ -44,6 +50,9 @@ export function parseProject(json: string): LocationProject {
       scene: {
         ...parsed.scene,
         objects: parsed.scene.objects.map(normalizeSceneObject),
+        panoOrigin: normalizeVec3(parsed.scene.panoOrigin, DEFAULT_SCENE_PANO_ORIGIN),
+        // Pre-multi-origin projects omit scene.panoRotation; default identity so origin gizmos work.
+        panoRotation: normalizeEuler(parsed.scene.panoRotation, DEFAULT_SCENE_PANO_ROTATION),
       },
       panoRefs: parsed.panoRefs.map(normalizePanoReference),
       shots: parsed.shots.map(normalizeShot),
@@ -58,6 +67,19 @@ export function parseProject(json: string): LocationProject {
         : 'Invalid project file.',
     );
   }
+}
+
+function normalizeVec3(value: unknown, fallback: Vec3): Vec3 {
+  if (!Array.isArray(value) || value.length < 3) return [...fallback] as Vec3;
+  const x = Number(value[0]);
+  const y = Number(value[1]);
+  const z = Number(value[2]);
+  if (![x, y, z].every(Number.isFinite)) return [...fallback] as Vec3;
+  return [x, y, z];
+}
+
+function normalizeEuler(value: unknown, fallback: Euler): Euler {
+  return normalizeVec3(value, fallback) as Euler;
 }
 
 function normalizeSceneObject(object: SceneObject & { projectionStamp?: unknown }): SceneObject {

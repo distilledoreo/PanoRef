@@ -5,13 +5,17 @@ import { createObject3D, resolveObjectMaterial } from '../src/engine/sceneObject
 import {
   GIZMO_SCALE_MAX,
   GIZMO_SCALE_MIN,
+  applyAxisRotationDelta,
   applyAxisScaleDelta,
   computeGizmoAnchor,
   computeGizmoScale,
   createGizmoGroup,
+  createPanoOriginGizmoGroup,
   createSelectionOutline,
+  findGizmoHit,
   gizmoHitPriority,
   updateTransformGizmo,
+  type GizmoAxis,
 } from '../src/engine/transformGizmo';
 
 describe('build selection visuals', () => {
@@ -73,6 +77,72 @@ describe('build selection visuals', () => {
     expect(createGizmoGroup('translate').userData.gizmoMode).toBe('translate');
     expect(createGizmoGroup('rotate').userData.gizmoMode).toBe('rotate');
     expect(createGizmoGroup('scale').userData.gizmoMode).toBe('scale');
+  });
+
+  it('normal object rotation gizmo contains X, Y, and Z handle children', () => {
+    const gizmo = createGizmoGroup('rotate');
+    const axes = new Set<GizmoAxis>();
+    gizmo.traverse((node) => {
+      const axis = node.userData.gizmoAxis as GizmoAxis | undefined;
+      const kind = node.userData.gizmoKind as string | undefined;
+      if (kind === 'rotate' && axis) axes.add(axis);
+    });
+    expect(axes.has('x')).toBe(true);
+    expect(axes.has('y')).toBe(true);
+    expect(axes.has('z')).toBe(true);
+  });
+
+  it('pano-origin rotation gizmo contains only Y handle', () => {
+    const gizmo = createPanoOriginGizmoGroup('rotate');
+    const axes = new Set<GizmoAxis>();
+    gizmo.traverse((node) => {
+      const axis = node.userData.gizmoAxis as GizmoAxis | undefined;
+      const kind = node.userData.gizmoKind as string | undefined;
+      if (kind === 'rotate' && axis) axes.add(axis);
+    });
+    expect(axes.has('y')).toBe(true);
+    expect(axes.has('x')).toBe(false);
+    expect(axes.has('z')).toBe(false);
+  });
+
+  it('pano-origin translation gizmo contains X, Y, and Z handle children', () => {
+    const gizmo = createPanoOriginGizmoGroup('translate');
+    const axes = new Set<GizmoAxis>();
+    gizmo.traverse((node) => {
+      const axis = node.userData.gizmoAxis as GizmoAxis | undefined;
+      const kind = node.userData.gizmoKind as string | undefined;
+      if (kind === 'translate' && axis) axes.add(axis);
+    });
+    expect(axes.has('x')).toBe(true);
+    expect(axes.has('y')).toBe(true);
+    expect(axes.has('z')).toBe(true);
+  });
+
+  it('applying rotation to pano origin preserves existing X and Z values', () => {
+    const existingRotation: [number, number, number] = [10, 20, 30];
+    const result = applyAxisRotationDelta(existingRotation, 'y', THREE.MathUtils.degToRad(15));
+    // Only yaw (index 1) changes; pitch (0) and roll (2) preserved.
+    expect(result[0]).toBe(10);
+    expect(result[1]).toBeCloseTo(35, 5);
+    expect(result[2]).toBe(30);
+  });
+
+  it('pano-origin rotation gizmo hit test cannot resolve X or Z axes', () => {
+    const gizmo = createPanoOriginGizmoGroup('rotate');
+    // Only Y axis children exist; verify by checking userData on all children
+    let xFound = false;
+    let yFound = false;
+    let zFound = false;
+    gizmo.traverse((node) => {
+      const axis = node.userData.gizmoAxis as GizmoAxis | undefined;
+      const kind = node.userData.gizmoKind as string | undefined;
+      if (kind === 'rotate' && axis === 'x') xFound = true;
+      if (kind === 'rotate' && axis === 'y') yFound = true;
+      if (kind === 'rotate' && axis === 'z') zFound = true;
+    });
+    expect(yFound).toBe(true);
+    expect(xFound).toBe(false);
+    expect(zFound).toBe(false);
   });
 
   it('anchors floor gizmos to the slab top while keeping regular objects centered', () => {

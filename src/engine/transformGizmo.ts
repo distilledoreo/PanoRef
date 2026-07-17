@@ -18,18 +18,20 @@ const GIZMO_COLORS: Record<GizmoAxis, number> = {
   z: 0x3b82f6,
 };
 
-export function createGizmoGroup(mode: GizmoMode): THREE.Group {
+/** Create gizmo group with optional axis filtering (e.g. pano-origin rotation uses only ['y']). */
+export function createGizmoGroup(mode: GizmoMode, axes?: GizmoAxis[]): THREE.Group {
   const group = new THREE.Group();
   group.name = `${mode}Gizmo`;
   group.userData.gizmoMode = mode;
 
+  const axisList = axes ?? (['x', 'y', 'z'] as const);
   if (mode === 'translate') {
-    (['x', 'y', 'z'] as const).forEach((axis) => group.add(createTranslateAxis(axis)));
+    axisList.forEach((axis) => group.add(createTranslateAxis(axis)));
   } else if (mode === 'rotate') {
-    (['x', 'y', 'z'] as const).forEach((axis) => group.add(createRotateAxis(axis)));
+    axisList.forEach((axis) => group.add(createRotateAxis(axis)));
   } else {
     group.add(createUniformScaleHandle());
-    (['x', 'y', 'z'] as const).forEach((axis) => group.add(createScaleAxis(axis)));
+    axisList.forEach((axis) => group.add(createScaleAxis(axis)));
   }
 
   group.traverse((node) => {
@@ -164,6 +166,17 @@ function createUniformScaleHandle(): THREE.Mesh {
   handle.userData.isGizmoHandle = true;
   handle.userData.gizmoHitPriority = 0;
   return handle;
+}
+
+/**
+ * Create a pano-origin gizmo that restricts rotation to yaw only (Y axis).
+ * Projection currently consumes only rotation[1] (yaw) — see multiOriginProjection.ts
+ * and projectedStyleMaterials.ts. X (pitch) and Z (roll) are preserved in stored data
+ * but have no visual effect on projection.
+ */
+export function createPanoOriginGizmoGroup(mode: 'translate' | 'rotate'): THREE.Group {
+  const axes: GizmoAxis[] = mode === 'rotate' ? ['y'] : ['x', 'y', 'z'];
+  return createGizmoGroup(mode, axes);
 }
 
 /** @deprecated Use createGizmoGroup('translate') */
@@ -404,6 +417,12 @@ export function angleOnAxisPlane(
   return Math.atan2(offset.dot(bitangent), offset.dot(tangent));
 }
 
+/**
+ * Apply a rotation delta to a single Euler axis.
+ * For pano-origin rotation the gizmo restricts handles to Y only (see createPanoOriginGizmoGroup),
+ * so only rotation[1] (yaw) is mutated. X (pitch) and Z (roll) are preserved in stored data
+ * but have no visual effect — projection currently consumes yaw only.
+ */
 export function applyAxisRotationDelta(rotation: Euler, axis: GizmoAxis, deltaRadians: number): Euler {
   const next: Euler = [...rotation] as Euler;
   const index = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;

@@ -19,12 +19,12 @@ describe('projected style WebGL compile gate', () => {
     );
     expect(materials).not.toMatch(/material\.specularIntensity\s*\*=/);
     expect(materials).not.toMatch(/#include\s*<lights_physical_fragment>/);
-    expect(materials).toContain('projected-style-v3');
+    expect(materials).toContain('projected-style-v4');
     expect(materials).toContain('#include <aomap_fragment>');
     expect(materials).toContain('#include <color_fragment>');
   });
 
-  it('compiles projected materials under real WebGL for lighting 0 and 0.5', async () => {
+  it('compiles projected materials under real WebGL with single and dual projector modes', async () => {
     mkdirSync(EVIDENCE_DIR, { recursive: true });
     try {
       mkdirSync(LINUX_SCRATCH, { recursive: true });
@@ -79,6 +79,7 @@ describe('projected style WebGL compile gate', () => {
           ok: boolean;
           errors: string[];
           lightingCases: Array<{ lightingContribution: number; ok: boolean; detail?: string }>;
+          dualCases: Array<{ mode: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }>;
         };
       }).__PROJECTED_COMPILE__);
 
@@ -95,6 +96,40 @@ describe('projected style WebGL compile gate', () => {
       }
       expect(result.lightingCases).toHaveLength(2);
       expect(result.lightingCases.every((c) => c.ok)).toBe(true);
+      expect(result.dualCases).toHaveLength(4);
+      expect(result.dualCases.every((c) => c.ok)).toBe(true);
+
+      // Verify pixel readback for each dual mode
+      const primaryOnly = result.dualCases.find((c) => c.mode === 'primary_only');
+      const secondaryOnly = result.dualCases.find((c) => c.mode === 'secondary_only');
+      const primaryDominant = result.dualCases.find((c) => c.mode === 'primary_dominant');
+      const secondaryDominant = result.dualCases.find((c) => c.mode === 'secondary_dominant');
+
+      expect(primaryOnly).toBeDefined();
+      expect(secondaryOnly).toBeDefined();
+      expect(primaryDominant).toBeDefined();
+      expect(secondaryDominant).toBeDefined();
+
+      // In primary_only mode with red primary texture: red channel should clearly exceed blue.
+      if (primaryOnly?.pixelR !== undefined && primaryOnly?.pixelB !== undefined) {
+        expect(primaryOnly.pixelR).toBeGreaterThan(primaryOnly.pixelB + 50);
+      }
+
+      // In secondary_only mode with blue secondary texture: blue should clearly exceed red.
+      if (secondaryOnly?.pixelR !== undefined && secondaryOnly?.pixelB !== undefined) {
+        expect(secondaryOnly.pixelB).toBeGreaterThan(secondaryOnly.pixelR + 50);
+      }
+
+      // In primary_dominant mode near primary origin: red should exceed blue.
+      if (primaryDominant?.pixelR !== undefined && primaryDominant?.pixelB !== undefined) {
+        expect(primaryDominant.pixelR).toBeGreaterThan(primaryDominant.pixelB + 20);
+      }
+
+      // In secondary_dominant mode near secondary origin: blue should exceed red.
+      if (secondaryDominant?.pixelR !== undefined && secondaryDominant?.pixelB !== undefined) {
+        expect(secondaryDominant.pixelB).toBeGreaterThan(secondaryDominant.pixelR + 20);
+      }
+
       expect(pageErrors.filter((e) => /shader|fragment|compile|link/i.test(e))).toEqual([]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -104,5 +139,5 @@ describe('projected style WebGL compile gate', () => {
     } finally {
       await browser?.close();
     }
-  }, 60_000);
+  }, 120_000);
 });

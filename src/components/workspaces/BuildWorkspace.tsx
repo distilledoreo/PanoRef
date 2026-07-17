@@ -34,10 +34,15 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { ObjectSurfaceStyle, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
+import { Euler, ObjectSurfaceStyle, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import type { GizmoMode } from '../../engine/transformGizmo';
 import { objectDisplayName } from '../../domain/defaults';
 import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
+import {
+  countStyledPanoramas,
+  originMoveWarningMessage,
+  shouldWarnOnOriginMove,
+} from '../../engine/multiOriginProjection';
 import {
   CLICK_ONLY_BUILD_PRIMITIVES,
   HOTKEYED_BUILD_PRIMITIVES,
@@ -144,6 +149,7 @@ export function BuildWorkspace() {
     toggleSelectedLocked,
     showAllObjects,
     setPanoOrigin,
+    setPanoRotation,
     renderGrayboxPano,
     isRenderingGraybox,
     beginBuildHistoryBatch,
@@ -156,6 +162,20 @@ export function BuildWorkspace() {
   const canUndo = buildHistoryPast.length > 0;
   const canRedo = buildHistoryFuture.length > 0;
 
+  /**
+   * Warning acknowledgment scoped to current project + styled pano IDs.
+   * Resets when project changes or styled pano set changes.
+   */
+  const originWarningScopeKey = useMemo(() => {
+    const styledPanoIds = project.panoRefs
+      .filter((p) => p.type !== 'graybox_render')
+      .map((p) => p.id)
+      .sort();
+    if (styledPanoIds.length === 0) return '';
+    return `${project.id}:${styledPanoIds.join(',')}`;
+  }, [project.id, project.panoRefs]);
+  const [acknowledgedScopeKey, setAcknowledgedScopeKey] = useState<string>();
+
   const handleRenderGraybox = useCallback(() => {
     if (isRenderingGraybox) return;
     setGrayboxRenderError(undefined);
@@ -165,6 +185,30 @@ export function BuildWorkspace() {
       );
     });
   }, [isRenderingGraybox, renderGrayboxPano]);
+
+  /**
+   * Ask for user consent before editing the capture origin when styled panoramas exist.
+   * Called by the viewport on pointer-down (before drag/history begin).
+   * Acknowledgment is scoped to the current project + styled pano set so switching
+   * projects or adding/removing styled panos re-enables the warning.
+   */
+  const requestOriginEditConsent = useCallback(() => {
+    if (!shouldWarnOnOriginMove(project)) return true;
+    if (!originWarningScopeKey) return true;
+    if (acknowledgedScopeKey === originWarningScopeKey) return true;
+    const ok = window.confirm(originMoveWarningMessage(countStyledPanoramas(project)));
+    if (ok) setAcknowledgedScopeKey(originWarningScopeKey);
+    return ok;
+  }, [project, originWarningScopeKey, acknowledgedScopeKey]);
+
+  const handleMovePanoOrigin = useCallback((origin: Vec3) => {
+    setPanoOrigin(origin);
+  }, [setPanoOrigin]);
+
+  const handleRotatePanoOrigin = useCallback((rotation: Euler) => {
+    // Projection currently consumes only rotation[1] (yaw) — preserve X and Z.
+    setPanoRotation(rotation);
+  }, [setPanoRotation]);
   const selectedObjects = project.scene.objects.filter((object) => selectedObjectIds.includes(object.id));
   const selectedObject = project.scene.objects.find((object) => object.id === selectedObjectIds.at(-1));
   const selectionHasLocked = selectedObjects.some((object) => object.locked);
@@ -404,8 +448,13 @@ export function BuildWorkspace() {
           renderDistance={renderDistance}
           onFreeCameraActiveChange={setFreeCameraActive}
           showSceneGuides={showSceneGuides}
-          showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked && editingChromeVisible)}
-          gizmoMode={gizmoMode}
+          showTransformGizmo={Boolean(
+            editingChromeVisible && (
+              (selectedObject && buildMode === 'select' && !selectionHasLocked)
+              || buildMode === 'pano_origin'
+            ),
+          )}
+          gizmoMode={buildMode === 'pano_origin' && gizmoMode === 'scale' ? 'translate' : gizmoMode}
           snapToGrid={gridSnap}
           onSelectObject={selectObject}
           onPlaceObject={placeObject}
@@ -433,7 +482,9 @@ export function BuildWorkspace() {
               value / Math.max(object.dimensions[index], 0.0001)
             )) as Vec3, { history: 'batch' });
           }}
-          onMovePanoOrigin={setPanoOrigin}
+          onMovePanoOrigin={handleMovePanoOrigin}
+          onRotatePanoOrigin={handleRotatePanoOrigin}
+          onRequestPanoOriginEdit={requestOriginEditConsent}
           onEditBatchStart={beginBuildHistoryBatch}
           onEditBatchEnd={endBuildHistoryBatch}
           frameRequest={frameRequest}
@@ -565,25 +616,25 @@ export function BuildWorkspace() {
           </div>
         </div>
 
-        {selectedObject && buildMode === 'select' && editingChromeVisible && (
+        {((selectedObject && buildMode === 'select') || buildMode === 'pano_origin') && editingChromeVisible && (
           <div
             data-build-drag-guidance
             className="pointer-events-none absolute left-[58%] top-[54%] z-10 -translate-x-1/2"
           >
             <div className="rounded-full border border-subtle/70 bg-surface-overlay/80 px-3 py-1.5 text-center text-xs font-medium text-secondary shadow-soft backdrop-blur-sm">
-              {gizmoMode === 'translate' && (
+              {(gizmoMode === 'translate' || (buildMode === 'pano_origin' && gizmoMode === 'scale')) && (
                 <>
                   <Move3D className="mr-1 inline h-3.5 w-3.5 text-accent" />
-                  Drag arrows to move
+                  {buildMode === 'pano_origin' ? 'Drag arrows to move origin' : 'Drag arrows to move'}
                 </>
               )}
               {gizmoMode === 'rotate' && (
                 <>
                   <RotateCw className="mr-1 inline h-3.5 w-3.5 text-accent" />
-                  Drag rings to rotate
+                  {buildMode === 'pano_origin' ? 'Drag rings to rotate origin' : 'Drag rings to rotate'}
                 </>
               )}
-              {gizmoMode === 'scale' && (
+              {gizmoMode === 'scale' && buildMode === 'select' && (
                 <>
                   <ZoomIn className="mr-1 inline h-3.5 w-3.5 text-accent" />
                   Drag handles to scale
@@ -816,9 +867,47 @@ export function BuildWorkspace() {
             className="pointer-events-none absolute left-5 z-10"
             style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
           >
-            <ContextualPanel className="text-sm text-secondary">
-              <Move3D className="mr-1.5 inline h-4 w-4 text-amber-500" />
-              Drag the origin marker (O to exit)
+            <ContextualPanel className="max-w-sm space-y-1 text-sm text-secondary">
+              <div>
+                <Move3D className="mr-1.5 inline h-4 w-4 text-amber-500" />
+                Origin gizmos: <span className="font-medium text-primary">T</span> move ·{' '}
+                <span className="font-medium text-primary">E</span> rotate ·{' '}
+                <span className="font-medium text-primary">O</span> exit
+              </div>
+              {shouldWarnOnOriginMove(project) && (
+                <p className="text-xs text-amber-800 dark:text-amber-200">
+                  Reference panoramas stay locked to their own origins. Moving this capture origin
+                  starts a new capture point and can make projection look off until you blend
+                  multiple panos in Reference.
+                </p>
+              )}
+            </ContextualPanel>
+          </div>
+        )}
+
+        {buildMode === 'pano_origin' && editingChromeVisible && (
+          <div
+            className="pointer-events-none absolute right-5 z-10"
+            style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+          >
+            <ContextualPanel>
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-semibold text-primary">Capture origin</div>
+                <GizmoModeButton
+                  active={gizmoMode === 'translate' || gizmoMode === 'scale'}
+                  label="Move origin (T)"
+                  onClick={() => setGizmoMode('translate')}
+                >
+                  <Move3D className="h-3.5 w-3.5" />
+                </GizmoModeButton>
+                <GizmoModeButton
+                  active={gizmoMode === 'rotate'}
+                  label="Rotate origin (E)"
+                  onClick={() => setGizmoMode('rotate')}
+                >
+                  <RotateCw className="h-3.5 w-3.5" />
+                </GizmoModeButton>
+              </div>
             </ContextualPanel>
           </div>
         )}

@@ -182,11 +182,16 @@ describe('ui revamp fidelity surfaces', () => {
     expect(viewport).toContain("? 'cursor-grab active:cursor-grabbing'");
     expect(viewport).toContain("verticalPositionClassName={freeCameraActive ? 'bottom-[12rem]' : undefined}");
     expect(build).toContain('const editingChromeVisible = !freeCameraActive && !renderDistanceOpen;');
-    expect(build).toContain("showTransformGizmo={Boolean(selectedObject && buildMode === 'select' && !selectionHasLocked && editingChromeVisible)}");
-    expect(build).toContain("{selectedObject && buildMode === 'select' && editingChromeVisible && (");
+    expect(build).toContain('showTransformGizmo={Boolean(');
+    expect(build).toContain("buildMode === 'pano_origin'");
+    expect(build).toContain('|| buildMode === \'pano_origin\'');
+    expect(build).toContain("editingChromeVisible && (");
     expect(build).toContain('{selectedObjects.length > 0 && editingChromeVisible && (');
     expect(build).toContain('Esc exits');
     expect(build).toContain('tap Free camera to edit');
+    expect(build).toContain('handleMovePanoOrigin');
+    expect(build).toContain('onRotatePanoOrigin');
+    expect(build).toContain('shouldWarnOnOriginMove');
   });
 
   it('surfaces reference alignment yaw/opacity on viewer chrome', () => {
@@ -483,7 +488,8 @@ describe('ui revamp fidelity surfaces', () => {
   it('keeps Build floating controls below the mobile-safe header', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
 
-    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(6);
+    // Capture-origin gizmo chrome adds one more safe-header floating panel.
+    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(7);
     expect(build).not.toContain('top-20');
   });
 

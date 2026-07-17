@@ -9,6 +9,37 @@ import { length, subtract } from './sync';
 export type ViewportAppearanceMode = 'clay' | 'projected';
 export { normalizeProjectedStyleSettings };
 
+/**
+ * Pure projected-appearance state computation.
+ * projectedActive depends only on primary readiness; secondary failure
+ * degrades to primary-only instead of falling back to clay.
+ */
+export function computeProjectedAppearanceState(params: {
+  appearance: ViewportAppearanceMode;
+  primaryTextureReady: boolean;
+  primaryReadyUrl: string;
+  primaryAssetKey: string;
+  primaryPanoExists: boolean;
+  blendMode: string;
+  secondaryPanoIdExists: boolean;
+  secondaryTextureReady: boolean;
+  secondaryReadyUrl: string;
+  secondaryAssetKey: string;
+}): { projectedActive: boolean; dualActive: boolean } {
+  const projectedActive = params.appearance === 'projected'
+    && params.primaryTextureReady
+    && params.primaryReadyUrl === params.primaryAssetKey
+    && params.primaryPanoExists;
+
+  const dualActive = projectedActive
+    && params.blendMode !== 'primary_only'
+    && params.secondaryPanoIdExists
+    && params.secondaryTextureReady
+    && params.secondaryReadyUrl === params.secondaryAssetKey;
+
+  return { projectedActive, dualActive };
+}
+
 /** Styled / imported panos preferred for projection (not the graybox render by default). */
 export function isEligibleProjectedStylePano(pano: PanoReference): boolean {
   return pano.type !== 'graybox_render';
