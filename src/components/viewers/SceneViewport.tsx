@@ -21,7 +21,10 @@ import {
 } from '../../engine/projectedStyle';
 import {
   acquireProjectedStyleTexture,
-  releaseProjectedStyleTexture,
+  disposeProjectedTextureOwnership,
+  prepareProjectedTextureRequest,
+  resolveProjectedTextureRequest,
+  type ProjectedTextureOwnership,
 } from '../../engine/projectedStyleMaterials';
 import { buildScene, computeBuildFogRange, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
 import {
@@ -235,8 +238,9 @@ export function SceneViewport({
   const flyBoundsRef = useRef(computeSceneFlyBounds(project.scene));
   const lastFrameTimeRef = useRef(performance.now());
   const flyDirtyRef = useRef(false);
-  const projectedTextureUrlRef = useRef<string | undefined>();
-  const projectedSecondaryUrlRef = useRef<string | undefined>();
+  /** Requested vs owned URL ownership — prevents A→B→C leaks (see prepareProjectedTextureRequest). */
+  const primaryOwnershipRef = useRef<ProjectedTextureOwnership>({});
+  const secondaryOwnershipRef = useRef<ProjectedTextureOwnership>({});
 
   const [projectedTexture, setProjectedTexture] = useState<THREE.Texture | null>(null);
   const [projectedSecondaryTexture, setProjectedSecondaryTexture] = useState<THREE.Texture | null>(null);
@@ -1302,34 +1306,34 @@ export function SceneViewport({
     ?? 'primary_only';
 
   // Load / release primary projected-style texture when appearance or projector changes.
+  // Ownership: release currently *owned* URL immediately on change; never release a
+  // captured previousUrl from the completion callback (A→B→C leak / double-release).
   useEffect(() => {
     let cancelled = false;
     const url = projectedAssetKey || undefined;
-    if (!url) {
-      const previousUrl = projectedTextureUrlRef.current;
-      projectedTextureUrlRef.current = undefined;
+    const ownership = primaryOwnershipRef.current;
+    const { clearedOwned } = prepareProjectedTextureRequest(ownership, url);
+    if (clearedOwned) {
       setProjectedTexture(null);
       setProjectedTextureReadyUrl(undefined);
-      releaseProjectedStyleTexture(previousUrl);
+    }
+    if (!url) {
       return () => {
         cancelled = true;
       };
     }
-    if (projectedTextureUrlRef.current === url) {
+    // Already holding this texture — keep it (effect may re-run after unmount cleanup only).
+    if (ownership.ownedUrl === url) {
       return () => {
         cancelled = true;
       };
     }
-    const previousUrl = projectedTextureUrlRef.current;
-    projectedTextureUrlRef.current = url;
     void acquireProjectedStyleTexture(url).then((texture) => {
-      if (cancelled || projectedTextureUrlRef.current !== url || !texture) {
-        if (texture) releaseProjectedStyleTexture(url);
-        return;
+      const result = resolveProjectedTextureRequest(ownership, url, texture, cancelled);
+      if (result === 'accept') {
+        setProjectedTexture(texture);
+        setProjectedTextureReadyUrl(url);
       }
-      setProjectedTexture(texture);
-      setProjectedTextureReadyUrl(url);
-      if (previousUrl && previousUrl !== url) releaseProjectedStyleTexture(previousUrl);
     });
     return () => {
       cancelled = true;
@@ -1340,34 +1344,37 @@ export function SceneViewport({
   useEffect(() => {
     let cancelled = false;
     const url = projectedSecondaryAssetKey || undefined;
-    if (!url) {
-      const previousUrl = projectedSecondaryUrlRef.current;
-      projectedSecondaryUrlRef.current = undefined;
+    const ownership = secondaryOwnershipRef.current;
+    const { clearedOwned } = prepareProjectedTextureRequest(ownership, url);
+    if (clearedOwned) {
       setProjectedSecondaryTexture(null);
       setProjectedSecondaryReadyUrl(undefined);
       setSecondaryLoadError(false);
-      releaseProjectedStyleTexture(previousUrl);
+    }
+    if (!url) {
+      setSecondaryLoadError(false);
       return () => {
         cancelled = true;
       };
     }
-    const previousUrl = projectedSecondaryUrlRef.current;
-    projectedSecondaryUrlRef.current = url;
+    if (ownership.ownedUrl === url) {
+      return () => {
+        cancelled = true;
+      };
+    }
     setSecondaryLoadError(false);
     void acquireProjectedStyleTexture(url).then((texture) => {
-      if (cancelled || projectedSecondaryUrlRef.current !== url) {
-        if (texture) releaseProjectedStyleTexture(url);
+      const result = resolveProjectedTextureRequest(ownership, url, texture, cancelled);
+      if (result === 'accept') {
+        setProjectedSecondaryTexture(texture);
+        setProjectedSecondaryReadyUrl(url);
+        setSecondaryLoadError(false);
         return;
       }
-      if (!texture) {
+      // Still the requested URL but load failed → surface error (do not leave prior dual active).
+      if (!cancelled && ownership.requestedUrl === url && !texture) {
         setSecondaryLoadError(true);
-        if (previousUrl && previousUrl !== url) releaseProjectedStyleTexture(previousUrl);
-        return;
       }
-      setProjectedSecondaryTexture(texture);
-      setProjectedSecondaryReadyUrl(url);
-      setSecondaryLoadError(false);
-      if (previousUrl && previousUrl !== url) releaseProjectedStyleTexture(previousUrl);
     });
     return () => {
       cancelled = true;
@@ -1375,10 +1382,8 @@ export function SceneViewport({
   }, [projectedSecondaryAssetKey]);
 
   useEffect(() => () => {
-    releaseProjectedStyleTexture(projectedTextureUrlRef.current);
-    releaseProjectedStyleTexture(projectedSecondaryUrlRef.current);
-    projectedTextureUrlRef.current = undefined;
-    projectedSecondaryUrlRef.current = undefined;
+    disposeProjectedTextureOwnership(primaryOwnershipRef.current);
+    disposeProjectedTextureOwnership(secondaryOwnershipRef.current);
   }, []);
 
   useEffect(() => {

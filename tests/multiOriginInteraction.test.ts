@@ -20,8 +20,13 @@ import {
 } from '../src/engine/projectedStyleMath';
 import {
   acquireProjectedStyleTexture,
+  disposeProjectedTextureOwnership,
+  prepareProjectedTextureRequest,
   projectedStyleTextureCacheSize,
+  projectedStyleTextureRefCount,
   releaseProjectedStyleTexture,
+  resolveProjectedTextureRequest,
+  type ProjectedTextureOwnership,
 } from '../src/engine/projectedStyleMaterials';
 import { degreesToRadians } from '../src/engine/sync';
 import { readFileSync } from 'node:fs';
@@ -429,78 +434,131 @@ describe('projected style texture lifecycle', () => {
     expect(() => releaseProjectedStyleTexture('')).not.toThrow();
   });
 
-  it('rapid secondary switch discards stale A when B loads before A resolves', async () => {
-    // Step 1: start loading A (simulating first secondary selection).
+  it('ownership: accepted A → pending B → pending C releases A immediately (no previousUrl leak)', async () => {
+    // Drive the SHIPPED prepare/resolve helpers — same path SceneViewport uses.
+    const ownership: ProjectedTextureOwnership = {};
+
+    // Accept A.
+    prepareProjectedTextureRequest(ownership, 'url-a');
     const loadA = acquireProjectedStyleTexture('url-a');
-    expect(pendingLoads.has('url-a')).toBe(true);
-
-    // Step 2: before A resolves, user switches to B.
-    // In the real effect this triggers A's cleanup (cancelled=true)
-    // and B's effect runs with the new URL.
-    const currentUrlRef = { current: 'url-b' };
-    const loadB = acquireProjectedStyleTexture('url-b');
-    expect(pendingLoads.has('url-b')).toBe(true);
-
-    // Step 3: A's texture finally arrives — stale because current URL is now B.
     const texA = fakeTexture();
     pendingLoads.get('url-a')!.onLoad(texA);
     const gotA = await loadA;
-    expect(gotA).toBe(texA);
+    expect(resolveProjectedTextureRequest(ownership, 'url-a', gotA, false)).toBe('accept');
+    expect(ownership.ownedUrl).toBe('url-a');
+    expect(projectedStyleTextureRefCount('url-a')).toBe(1);
 
-    // Effect guard: stale URL → release.
-    if (currentUrlRef.current !== 'url-a') {
-      releaseProjectedStyleTexture('url-a');
-    }
+    // Switch to B: prepare immediately releases owned A (do not wait for B's completion).
+    const prepB = prepareProjectedTextureRequest(ownership, 'url-b');
+    expect(prepB.clearedOwned).toBe(true);
+    expect(ownership.ownedUrl).toBeUndefined();
+    expect(ownership.requestedUrl).toBe('url-b');
+    expect(projectedStyleTextureRefCount('url-a')).toBe(0);
+    expect(projectedStyleTextureCacheSize()).toBe(0);
 
-    // Step 4: B's texture arrives — should be accepted.
+    const loadB = acquireProjectedStyleTexture('url-b');
+    // B cancelled flag for its effect instance — user already left for C.
+    let bCancelled = false;
+
+    // Switch to C before B finishes. Owned is empty (A already released); C does not double-release.
+    bCancelled = true;
+    const prepC = prepareProjectedTextureRequest(ownership, 'url-c');
+    expect(prepC.clearedOwned).toBe(false);
+    expect(ownership.requestedUrl).toBe('url-c');
+    const loadC = acquireProjectedStyleTexture('url-c');
+
+    // B resolves stale → releases its own acquisition only.
     const texB = fakeTexture();
     pendingLoads.get('url-b')!.onLoad(texB);
     const gotB = await loadB;
-    expect(gotB).toBe(texB);
+    expect(resolveProjectedTextureRequest(ownership, 'url-b', gotB, bCancelled)).toBe('discard');
+    expect(projectedStyleTextureRefCount('url-b')).toBe(0);
 
-    // Cleanup B's ref.
-    releaseProjectedStyleTexture('url-b');
+    // C resolves current → owns C.
+    const texC = fakeTexture();
+    pendingLoads.get('url-c')!.onLoad(texC);
+    const gotC = await loadC;
+    expect(resolveProjectedTextureRequest(ownership, 'url-c', gotC, false)).toBe('accept');
+    expect(ownership.ownedUrl).toBe('url-c');
+    expect(projectedStyleTextureRefCount('url-c')).toBe(1);
+    expect(projectedStyleTextureRefCount('url-a')).toBe(0);
+    expect(projectedStyleTextureRefCount('url-b')).toBe(0);
+
+    disposeProjectedTextureOwnership(ownership);
+    expect(projectedStyleTextureRefCount('url-c')).toBe(0);
   });
 
-  it('rapid secondary switch: A resolves first, then B, then another stale A still releases', async () => {
-    // Load A then B (order as above).
+  it('ownership: stale in-flight A is discarded without touching later owned B', async () => {
+    const ownership: ProjectedTextureOwnership = {};
+
+    prepareProjectedTextureRequest(ownership, 'url-a');
     const loadA = acquireProjectedStyleTexture('url-a');
-    const currentUrlRef = { current: 'url-b' };
+    let aCancelled = false;
+
+    // Switch to B before A resolves.
+    aCancelled = true;
+    prepareProjectedTextureRequest(ownership, 'url-b');
     const loadB = acquireProjectedStyleTexture('url-b');
 
-    // A resolves first (stale).
+    // A resolves stale.
     const texA = fakeTexture();
     pendingLoads.get('url-a')!.onLoad(texA);
     const gotA = await loadA;
-    expect(gotA).toBe(texA);
-    if (currentUrlRef.current !== 'url-a') {
-      releaseProjectedStyleTexture('url-a');
-    }
+    expect(resolveProjectedTextureRequest(ownership, 'url-a', gotA, aCancelled)).toBe('discard');
+    expect(ownership.ownedUrl).toBeUndefined();
+    expect(projectedStyleTextureRefCount('url-a')).toBe(0);
 
-    // B resolves.
+    // B accepts.
     const texB = fakeTexture();
     pendingLoads.get('url-b')!.onLoad(texB);
     const gotB = await loadB;
-    expect(gotB).toBe(texB);
+    expect(resolveProjectedTextureRequest(ownership, 'url-b', gotB, false)).toBe('accept');
+    expect(ownership.ownedUrl).toBe('url-b');
+    expect(projectedStyleTextureRefCount('url-b')).toBe(1);
 
-    // Step 3: user switches back to A (simulating another selection change).
-    currentUrlRef.current = 'url-a';
-    const loadAagain = acquireProjectedStyleTexture('url-a');
-    expect(pendingLoads.has('url-a')).toBe(true);
+    disposeProjectedTextureOwnership(ownership);
+  });
 
-    // B is now stale — discard.
-    if (currentUrlRef.current !== 'url-b') {
-      releaseProjectedStyleTexture('url-b');
-    }
+  it('ownership: shared URL — secondary prepare releases only its own ref; primary keeps A', async () => {
+    // Two consumers share the same URL (e.g. primary and secondary both A).
+    const primary: ProjectedTextureOwnership = {};
+    const secondary: ProjectedTextureOwnership = {};
 
-    // A resolves fresh.
-    const texA2 = fakeTexture();
-    pendingLoads.get('url-a')!.onLoad(texA2);
-    const gotA2 = await loadAagain;
-    expect(gotA2).toBe(texA2);
+    prepareProjectedTextureRequest(primary, 'url-a');
+    prepareProjectedTextureRequest(secondary, 'url-a');
+    const load = acquireProjectedStyleTexture('url-a');
+    // Second acquire while loading waits on same promise.
+    const load2 = acquireProjectedStyleTexture('url-a');
+    const tex = fakeTexture();
+    pendingLoads.get('url-a')!.onLoad(tex);
+    const t1 = await load;
+    const t2 = await load2;
+    expect(t1).toBe(t2);
+    expect(resolveProjectedTextureRequest(primary, 'url-a', t1, false)).toBe('accept');
+    expect(resolveProjectedTextureRequest(secondary, 'url-a', t2, false)).toBe('accept');
+    expect(projectedStyleTextureRefCount('url-a')).toBe(2);
 
-    // Cleanup.
-    releaseProjectedStyleTexture('url-a');
+    // Secondary switches away — prepare releases only secondary's owned ref.
+    // Completing callback must NOT also release previousUrl (old leak / double-release).
+    prepareProjectedTextureRequest(secondary, 'url-b');
+    expect(projectedStyleTextureRefCount('url-a')).toBe(1);
+    expect(primary.ownedUrl).toBe('url-a');
+    expect(secondary.ownedUrl).toBeUndefined();
+    expect(secondary.requestedUrl).toBe('url-b');
+
+    // Success path for B does not touch A (no previousUrl release in resolve).
+    const loadB = acquireProjectedStyleTexture('url-b');
+    const texB = fakeTexture();
+    pendingLoads.get('url-b')!.onLoad(texB);
+    const gotB = await loadB;
+    expect(resolveProjectedTextureRequest(secondary, 'url-b', gotB, false)).toBe('accept');
+    expect(projectedStyleTextureRefCount('url-a')).toBe(1);
+    expect(projectedStyleTextureRefCount('url-b')).toBe(1);
+
+    disposeProjectedTextureOwnership(primary);
+    disposeProjectedTextureOwnership(secondary);
+    expect(projectedStyleTextureRefCount('url-a')).toBe(0);
+    expect(projectedStyleTextureRefCount('url-b')).toBe(0);
   });
 
   it('interleaved acquire+release cycles balance refCount correctly', async () => {
@@ -536,5 +594,19 @@ describe('projected style texture lifecycle', () => {
     expect(t4).not.toBe(t1);
 
     releaseProjectedStyleTexture('url-a');
+  });
+
+  it('SceneViewport wires prepare/resolve ownership helpers (not previousUrl-in-then)', () => {
+    const viewport = readFileSync(
+      new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(viewport).toContain('prepareProjectedTextureRequest');
+    expect(viewport).toContain('resolveProjectedTextureRequest');
+    expect(viewport).toContain('disposeProjectedTextureOwnership');
+    expect(viewport).toContain('primaryOwnershipRef');
+    expect(viewport).toContain('secondaryOwnershipRef');
+    // Old leaky pattern: release previousUrl from the completion callback.
+    expect(viewport).not.toMatch(/previousUrl && previousUrl !== url\) releaseProjectedStyleTexture\(previousUrl\)/);
   });
 });

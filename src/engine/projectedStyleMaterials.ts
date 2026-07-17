@@ -85,6 +85,67 @@ export function releaseProjectedStyleTexture(imageUrl: string | undefined) {
   }
 }
 
+/**
+ * Viewport ownership for a single projector slot (primary or secondary).
+ * Separates "currently requested URL" from "accepted/owned texture URL" so rapid
+ * A→B→C switches always release the accepted texture immediately, never wait for
+ * a stale completion callback that captured a previousUrl.
+ */
+export interface ProjectedTextureOwnership {
+  requestedUrl?: string;
+  ownedUrl?: string;
+}
+
+/**
+ * Begin a load for `nextUrl`. Releases the currently owned texture immediately when
+ * the desired URL changes (including to undefined). Does not release in-flight
+ * acquires — those release themselves when they finish stale.
+ */
+export function prepareProjectedTextureRequest(
+  ownership: ProjectedTextureOwnership,
+  nextUrl: string | undefined,
+  release: (url: string | undefined) => void = releaseProjectedStyleTexture,
+): { clearedOwned: boolean } {
+  let clearedOwned = false;
+  const owned = ownership.ownedUrl;
+  if (owned && owned !== nextUrl) {
+    release(owned);
+    ownership.ownedUrl = undefined;
+    clearedOwned = true;
+  }
+  ownership.requestedUrl = nextUrl;
+  return { clearedOwned };
+}
+
+/**
+ * Complete an acquire. Accept only when still current; otherwise release this
+ * acquisition. Never releases a captured previous URL (that is prepare's job).
+ */
+export function resolveProjectedTextureRequest(
+  ownership: ProjectedTextureOwnership,
+  url: string,
+  texture: THREE.Texture | null,
+  cancelled: boolean,
+  release: (url: string | undefined) => void = releaseProjectedStyleTexture,
+): 'accept' | 'discard' {
+  if (cancelled || ownership.requestedUrl !== url || !texture) {
+    if (texture) release(url);
+    return 'discard';
+  }
+  ownership.ownedUrl = url;
+  return 'accept';
+}
+
+/** Unmount / hard reset: release owned texture and clear both slots. */
+export function disposeProjectedTextureOwnership(
+  ownership: ProjectedTextureOwnership,
+  release: (url: string | undefined) => void = releaseProjectedStyleTexture,
+) {
+  release(ownership.ownedUrl);
+  ownership.ownedUrl = undefined;
+  ownership.requestedUrl = undefined;
+}
+
 /** Test helper — clear all cached textures. */
 export function disposeAllProjectedStyleTextures() {
   for (const [url, entry] of textureCache) {
@@ -95,6 +156,11 @@ export function disposeAllProjectedStyleTextures() {
 
 export function projectedStyleTextureCacheSize(): number {
   return textureCache.size;
+}
+
+/** Test helper — current refCount for a URL (0 if absent). */
+export function projectedStyleTextureRefCount(imageUrl: string): number {
+  return textureCache.get(imageUrl)?.refCount ?? 0;
 }
 
 export interface ProjectedMaterialParams {
