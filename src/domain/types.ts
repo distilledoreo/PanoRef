@@ -162,6 +162,8 @@ export interface ShotExportSettings {
   includeProjectedViewport?: boolean;
   /** Optional projected clay-style keyframe stills along the camera move. */
   includeProjectedCameraMoveReferenceFrames?: boolean;
+  /** Optional projected-style camera-move MP4 alongside clay motion. */
+  includeProjectedCameraMoveVideo?: boolean;
   includeAiResultFrame: boolean;
   includePanoCrop: boolean;
   includeFullPano: boolean;

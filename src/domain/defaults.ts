@@ -117,6 +117,7 @@ export const defaultShotExportSettings: ShotExportSettings = {
   /** Include projected stills alongside clay when a styled pano is available. */
   includeProjectedViewport: true,
   includeProjectedCameraMoveReferenceFrames: true,
+  includeProjectedCameraMoveVideo: true,
   includeAiResultFrame: true,
   includePanoCrop: true,
   includeFullPano: true,

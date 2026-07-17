@@ -149,9 +149,36 @@ async function appendShotPackageToZip(
       const video = await renderShotCameraMoveMp4(project, shot, {
         mimeType,
         frameRate: 30,
-        timeoutMs: 90_000,
+        appearance: 'clay',
       });
       zip.file(`${rootFolder}/inputs/viewport_clay_motion.mp4`, video.blob);
+    }
+  }
+
+  if (
+    shot.exportSettings.includeProjectedCameraMoveVideo
+    && canUseProjectedAppearance(project)
+    && hasRenderableCameraMove(shot.cameraKeyframes)
+  ) {
+    const mimeType = getSupportedCameraMoveMp4MimeType();
+    if (!mimeType) {
+      throw new ShotPackageError(
+        'Projected camera-move MP4 export is not supported in this browser. Try Chrome or Edge, or disable projected motion in export settings.',
+      );
+    }
+    try {
+      const video = await renderShotCameraMoveMp4(project, shot, {
+        mimeType,
+        frameRate: 30,
+        appearance: 'projected',
+      });
+      zip.file(`${rootFolder}/inputs/viewport_projected_motion.mp4`, video.blob);
+    } catch (error) {
+      throw new ShotPackageError(
+        error instanceof Error
+          ? error.message
+          : 'Projected camera-move MP4 failed. Import a styled panorama or disable projected motion.',
+      );
     }
   }
 

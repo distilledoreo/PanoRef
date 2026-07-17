@@ -61,8 +61,9 @@ const STATUS_LABELS: Record<ShotStatus, string> = {
   rejected: 'Rejected',
 };
 
-/** Quick picks shown on the camera chrome while recording a move. */
-const VIDEO_DURATION_PRESETS_SECONDS = [1, 2, 3, 5, 8] as const;
+/** Compact chrome slider range: 1–20s in whole-second steps. */
+const VIDEO_DURATION_UI_MIN_SECONDS = 1;
+const VIDEO_DURATION_UI_MAX_SECONDS = 20;
 
 type CaptureMode = 'still' | 'video';
 
@@ -79,6 +80,15 @@ function clampVideoDuration(seconds: number): number {
   return Math.min(
     MAX_CAMERA_MOVE_DURATION_SECONDS,
     Math.max(MIN_CAMERA_MOVE_DURATION_SECONDS, seconds),
+  );
+}
+
+/** Round to whole seconds for the chrome slider (1–20). */
+function clampVideoDurationUiSeconds(seconds: number): number {
+  const rounded = Math.round(clampVideoDuration(seconds));
+  return Math.min(
+    VIDEO_DURATION_UI_MAX_SECONDS,
+    Math.max(VIDEO_DURATION_UI_MIN_SECONDS, rounded),
   );
 }
 
@@ -271,13 +281,17 @@ export function ShotsWorkspace() {
     setCameraMoveError(undefined);
 
     try {
+      // Progress splits: clay motion 0–55%, projected motion 55–100% when dual.
+      const dualProjectedVideo = canUseProjectedAppearance(project);
       const video = await renderShotCameraMoveMp4(project, selectedShot, {
         mimeType,
         frameRate: 30,
-        timeoutMs: 90_000,
+        appearance: 'clay',
         signal: abortController.signal,
         onProgress: (progress) => {
-          if (!cameraMoveAbortRef.current.cancelled) setCameraMoveProgress(progress);
+          if (!cameraMoveAbortRef.current.cancelled) {
+            setCameraMoveProgress(dualProjectedVideo ? progress * 0.55 : progress);
+          }
         },
       });
       if (cameraMoveAbortRef.current.cancelled) return;
@@ -293,9 +307,24 @@ export function ShotsWorkspace() {
       setCameraMovePreviewUrl(asset.uri);
       // Download from the MediaRecorder blob — multi‑MB data: URLs fail as anchor hrefs.
       downloadBlob(video.blob, asset.name || cameraMoveFileName);
-      // Companion projected keyframe stills when a styled pano is available.
-      if (canUseProjectedAppearance(project) && !cameraMoveAbortRef.current.cancelled) {
+
+      if (dualProjectedVideo && !cameraMoveAbortRef.current.cancelled) {
         try {
+          const projectedVideo = await renderShotCameraMoveMp4(project, selectedShot, {
+            mimeType,
+            frameRate: 30,
+            appearance: 'projected',
+            signal: abortController.signal,
+            onProgress: (progress) => {
+              if (!cameraMoveAbortRef.current.cancelled) {
+                setCameraMoveProgress(0.55 + progress * 0.45);
+              }
+            },
+          });
+          if (cameraMoveAbortRef.current.cancelled) return;
+          const projectedName = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '_projected.mp4');
+          downloadBlob(projectedVideo.blob, projectedName);
+          // Optional still contact sheet companions.
           const frames = getCameraMoveReferenceFrames(selectedShot.cameraKeyframes);
           const base = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '');
           for (const frame of frames) {
@@ -307,6 +336,7 @@ export function ShotsWorkspace() {
             );
             downloadDataUrl(projected.dataUrl, `${base}_projected_${frame.id}.png`);
           }
+          setCameraMoveProgress(1);
         } catch {
           // Soft-fail projected companions; clay MP4 already succeeded.
         }
@@ -772,8 +802,8 @@ export function ShotsWorkspace() {
             </div>
             <p className="max-w-[14rem] text-right text-[10px] font-medium text-white/55" data-shots-dual-output-hint>
               {canUseProjectedAppearance(project)
-                ? 'View mode only · captures include clay + projected'
-                : 'View mode only · captures save clay frames'}
+                ? 'View mode only · exports include clay + projected'
+                : 'View mode only · exports save clay frames'}
             </p>
           </div>
         </div>
@@ -942,31 +972,29 @@ export function ShotsWorkspace() {
               </div>
               <div
                 data-shots-video-duration
-                className="flex flex-wrap items-center justify-center gap-1.5 rounded-full bg-black/45 px-2 py-1.5 backdrop-blur-md"
+                className="flex w-full max-w-sm items-center gap-3 rounded-full bg-black/45 px-3 py-2 backdrop-blur-md"
                 role="group"
                 aria-label="Video duration"
               >
-                <span className="px-1.5 text-[10px] font-semibold uppercase tracking-wide text-white/55">
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white/55">
                   Length
                 </span>
-                {VIDEO_DURATION_PRESETS_SECONDS.map((seconds) => {
-                  const active = Math.abs(videoDurationSeconds - seconds) < 0.05;
-                  return (
-                    <button
-                      key={seconds}
-                      type="button"
-                      onClick={() => changeCameraMoveDuration(seconds)}
-                      className={`min-h-11 min-w-[2.75rem] rounded-full px-3 py-2 text-xs font-bold tabular-nums transition ${
-                        active
-                          ? 'bg-white text-zinc-900 shadow-sm'
-                          : 'text-white/80 hover:bg-white/10 hover:text-white'
-                      }`}
-                      aria-pressed={active}
-                    >
-                      {seconds}s
-                    </button>
-                  );
-                })}
+                <input
+                  type="range"
+                  min={VIDEO_DURATION_UI_MIN_SECONDS}
+                  max={VIDEO_DURATION_UI_MAX_SECONDS}
+                  step={1}
+                  value={clampVideoDurationUiSeconds(videoDurationSeconds)}
+                  onChange={(event) => changeCameraMoveDuration(Number(event.target.value))}
+                  className="h-2 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-white/20 accent-red-500 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                  aria-valuemin={VIDEO_DURATION_UI_MIN_SECONDS}
+                  aria-valuemax={VIDEO_DURATION_UI_MAX_SECONDS}
+                  aria-valuenow={clampVideoDurationUiSeconds(videoDurationSeconds)}
+                  aria-valuetext={`${clampVideoDurationUiSeconds(videoDurationSeconds)} seconds`}
+                />
+                <span className="min-w-[2.75rem] shrink-0 text-center text-sm font-bold tabular-nums text-white">
+                  {clampVideoDurationUiSeconds(videoDurationSeconds)}s
+                </span>
               </div>
               {videoPhase === 'export' && !isExportingCameraMove && (
                 <button

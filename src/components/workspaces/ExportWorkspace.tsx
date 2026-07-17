@@ -334,9 +334,10 @@ export function ExportWorkspace() {
               ['includePanoCrop', 'Pano crop'],
               ['includeFullPano', 'Styled reference pano'],
               ['includeGrayboxPano', 'Graybox pano'],
-              ['includeCameraMoveVideo', 'Camera move MP4'],
+              ['includeCameraMoveVideo', 'Camera move clay MP4'],
+              ['includeProjectedCameraMoveVideo', 'Camera move projected MP4'],
               ['includeCameraMoveReferenceFrames', 'Camera move clay frames'],
-              ['includeProjectedCameraMoveReferenceFrames', 'Camera move projected frames (with clay)'],
+              ['includeProjectedCameraMoveReferenceFrames', 'Camera move projected frames'],
               ['includeMetadata', 'Metadata JSON'],
               ['includePrompt', 'Prompts'],
             ] as const).map(([key, label]) => (

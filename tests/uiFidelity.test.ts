@@ -70,7 +70,9 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('MP4 export is not supported in this browser. Try Chrome or Edge.');
     expect(shots).toContain('data-shots-settings-trigger');
     expect(shots).toContain('data-shots-video-duration');
-    expect(shots).toContain('VIDEO_DURATION_PRESETS_SECONDS');
+    expect(shots).toContain('VIDEO_DURATION_UI_MIN_SECONDS');
+    expect(shots).toContain('VIDEO_DURATION_UI_MAX_SECONDS');
+    expect(shots).toContain('type="range"');
     expect(shots).toContain('landShotFraming');
     expect(shots).toContain('keepFlying: true');
     expect(shots).toContain('captureStill');
@@ -104,7 +106,10 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shortcuts).not.toContain("'ControlRight'");
     expect(reference).toContain('ProjectedStylePanel');
     expect(exportWorkspace).toContain('includeProjectedViewport');
+    expect(exportWorkspace).toContain('includeProjectedCameraMoveVideo');
     expect(packageExport).toContain('viewport_projected.png');
+    expect(packageExport).toContain('viewport_projected_motion.mp4');
+    expect(packageExport).toContain("appearance: 'projected'");
     expect(help).toContain('Projected Style');
     expect(help).toContain('double-tap W');
   });

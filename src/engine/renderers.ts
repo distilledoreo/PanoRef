@@ -56,6 +56,11 @@ export interface CameraMoveVideoOptions {
   signal?: AbortSignal;
   /** Wall-clock timeout in ms (default 90s). */
   timeoutMs?: number;
+  /**
+   * Scene appearance for the encoded move.
+   * `projected` requires a valid styled panorama projector.
+   */
+  appearance?: 'clay' | 'projected';
 }
 
 const MP4_MIME_CANDIDATES = [
@@ -187,13 +192,48 @@ export async function renderShotCameraMoveMp4(
     throw new Error('MP4 camera move export is not supported in this browser.');
   }
 
+  const appearance = options.appearance ?? 'clay';
+  let projectorImageUrl: string | undefined;
+  let projectorTexture: THREE.Texture | null = null;
+
+  if (appearance === 'projected') {
+    if (!canUseProjectedAppearance(project)) {
+      throw new Error(
+        'Projected camera-move MP4 requires an importable styled panorama with a valid image asset.',
+      );
+    }
+    const pano = resolveProjectedStylePano(project);
+    projectorImageUrl = getProjectedStyleAssetUri(project, pano);
+    if (!pano || !projectorImageUrl) {
+      throw new Error('Projected camera-move MP4 could not resolve the projector panorama asset.');
+    }
+    projectorTexture = await acquireProjectedStyleTexture(projectorImageUrl);
+    if (!projectorTexture) {
+      throw new Error('Projected camera-move MP4 failed to decode the panorama texture.');
+    }
+  }
+
   const frameRate = options.frameRate ?? 30;
   const durationSeconds = getCameraMoveDurationSeconds(keyframes);
   const width = shot.exportSettings.width;
   const height = shot.exportSettings.height;
   await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
-  const scene = buildScene(project, { showHelpers: false, hiddenObjectTypes: ['sun_marker'] });
+  const pano = appearance === 'projected' ? resolveProjectedStylePano(project) : undefined;
+  const scene = buildScene(project, {
+    showHelpers: false,
+    hiddenObjectTypes: ['sun_marker'],
+    appearance: appearance === 'projected' && projectorTexture && pano ? 'projected' : 'clay',
+    projected: appearance === 'projected' && projectorTexture && pano
+      ? {
+        texture: projectorTexture,
+        origin: pano.origin,
+        rotation: pano.rotation,
+        settings: normalizeProjectedStyleSettings(project.settings.projectedStyle),
+        disposableMaterials: true,
+      }
+      : undefined,
+  });
   const camera = new THREE.PerspectiveCamera(
     shot.camera.fovDegrees,
     width / height,
@@ -205,12 +245,14 @@ export async function renderShotCameraMoveMp4(
   if (!captureStream) {
     disposeScene(scene);
     disposeRenderer(renderer);
+    releaseProjectedStyleTexture(projectorImageUrl);
     throw new Error('Canvas video capture is not supported in this browser.');
   }
 
   const stream = captureStream(frameRate);
   const chunks: Blob[] = [];
-  const timeoutMs = options.timeoutMs ?? 90_000;
+  // Longer moves need more wall time (esp. 4K projected).
+  const timeoutMs = options.timeoutMs ?? Math.max(90_000, Math.ceil(durationSeconds * 12_000));
   const externalSignal = options.signal;
 
   try {
@@ -300,6 +342,7 @@ export async function renderShotCameraMoveMp4(
     stream.getTracks().forEach((track) => track.stop());
     disposeScene(scene);
     disposeRenderer(renderer);
+    releaseProjectedStyleTexture(projectorImageUrl);
   }
 
   const blob = new Blob(chunks, { type: mimeType });

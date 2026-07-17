@@ -81,6 +81,13 @@ export function createShotPackageManifest(
   ) {
     files.push({ path: `${rootFolder}/inputs/viewport_clay_motion.mp4`, kind: 'video', required: false });
   }
+  if (
+    shot.exportSettings.includeProjectedCameraMoveVideo
+    && canUseProjectedAppearance(project)
+    && hasRenderableCameraMove(shot.cameraKeyframes)
+  ) {
+    files.push({ path: `${rootFolder}/inputs/viewport_projected_motion.mp4`, kind: 'video', required: false });
+  }
   for (const frame of cameraMoveReferenceFrames) {
     files.push({ path: `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, kind: 'image', required: false });
   }
