@@ -39,12 +39,16 @@ export const DEFAULT_CAMERA_LENS_MM = 35;
 export const DEFAULT_CAMERA_FOV_DEGREES = 54.4;
 export const DEFAULT_CAMERA_HEIGHT_METERS = 1.65;
 export const DEFAULT_CAMERA_ASPECT_RATIO = 16 / 9;
+/** 4K equirectangular (2:1) — graybox / canonical 360 panoramas. */
 export const DEFAULT_GRAYBOX_PANO_WIDTH = 4096;
 export const DEFAULT_GRAYBOX_PANO_HEIGHT = 2048;
+/** 4K UHD 16:9 — shot stills, camera-move video, letterboxed pano exports. */
+export const DEFAULT_SHOT_WIDTH = 3840;
+export const DEFAULT_SHOT_HEIGHT = 2160;
 
 export const defaultProjectSettings = {
-  defaultShotWidth: 1920,
-  defaultShotHeight: 1080,
+  defaultShotWidth: DEFAULT_SHOT_WIDTH,
+  defaultShotHeight: DEFAULT_SHOT_HEIGHT,
   defaultShotFovDegrees: DEFAULT_CAMERA_FOV_DEGREES,
   defaultCameraLensMm: DEFAULT_CAMERA_LENS_MM,
   defaultCameraHeightMeters: DEFAULT_CAMERA_HEIGHT_METERS,
@@ -78,8 +82,8 @@ export function normalizeProjectSettings(settings?: Partial<ProjectSettings>): P
 }
 
 export const defaultShotExportSettings: ShotExportSettings = {
-  width: 1920,
-  height: 1080,
+  width: DEFAULT_SHOT_WIDTH,
+  height: DEFAULT_SHOT_HEIGHT,
   includeViewport: true,
   includeAiResultFrame: true,
   includePanoCrop: true,

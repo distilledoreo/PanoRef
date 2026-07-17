@@ -8,8 +8,8 @@ import { PrimaryCTA } from '../common/PrimaryCTA';
 import { PanoViewer } from '../viewers/PanoViewer';
 import { FullBleedLayout } from './WorkspaceShell';
 
-const DEFAULT_DOWNLOAD_WIDTH = 1920;
-const DEFAULT_DOWNLOAD_HEIGHT = 1080;
+const DEFAULT_DOWNLOAD_WIDTH = 3840;
+const DEFAULT_DOWNLOAD_HEIGHT = 2160;
 const DEFAULT_VIEW: PanoViewState = { yawDegrees: 0, pitchDegrees: 0, fovDegrees: 75 };
 const IDENTITY_ROTATION: Euler = [0, 0, 0];
 

@@ -216,7 +216,7 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
               ['Free camera', 'The viewport defaults to orbit/select. Toggle Free camera to drag-look and walk with WASD; Space/Shift move vertically and Ctrl sprints. Esc exits without changing the scene, and selected-object controls return when you exit. On phones, use the on-screen pad and Up/Dn controls to move.'],
               ['Visibility distance', 'Open the adjacent Visibility distance control in Build to adjust both how far the viewport draws and where the fog/shroud obscures the set. It changes the Build viewport only, not shot or export cameras.'],
               ['Scene guides', 'The eye control reveals helpers and camera frustums without including them in renders.'],
-              ['Render 360', 'Create a native 4096×2048 graybox panorama for alignment and export.'],
+              ['Render 360', 'Create a native 4K (4096×2048) graybox panorama for alignment and export.'],
             ]} />
           </DocSection>
 
@@ -235,8 +235,8 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
           <DocSection id="shots" visible={visibleIds.has('shots')} title="Shots workspace" eyebrow="Choose cameras and motion">
             <p className="doc-lead">Treat Shots like a live phone camera inside the graybox. The viewfinder stays live after capture so you can move directly to the next composition.</p>
             <FeatureGrid items={[
-              ['Still mode', 'Fly the camera, set the FOV, and press Capture. A persisted thumbnail is added to the library.'],
-              ['Video mode', 'Press record for the start keyframe, fly to the end, press stop, then export the graybox MP4.'],
+              ['Still mode', 'Fly the camera, set the FOV, and press Capture at 4K (3840×2160) by default. A persisted thumbnail is added to the library.'],
+              ['Video mode', 'Press record for the start keyframe, fly to the end, press stop, then export the 4K graybox MP4.'],
               ['Shot library', 'Open the bottom-left thumbnail to review, rename, duplicate, or delete captured shots.'],
               ['Camera settings', 'Fine-tune FOV, duration, keyframes, preview downloads, and pano matching.'],
             ]} />
