@@ -107,35 +107,53 @@ export interface ProjectedMaterialParams {
   fallbackColor: THREE.ColorRepresentation;
   /** When true, materials mark themselves disposable (export path). */
   disposable?: boolean;
+  /** Optional secondary projector for multi-origin blend. */
+  secondaryTexture?: THREE.Texture;
+  secondaryOrigin?: Vec3;
+  secondaryRotation?: Euler;
 }
 
 /**
  * World-space equirect projection material.
- * Matches app pano convention: yaw 0 faces +Z; u = atan(x,z)/(2π)+0.5.
- * Applies inverse pano yaw so Reference calibration aligns with geometry.
+ * Dual-projector blend uses distance-based weights (not true occlusion).
  */
 export function createProjectedStyleMaterial(params: ProjectedMaterialParams): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     roughness: 1,
     metalness: 0,
-    // Unlit-leaning: baked pano lighting dominates; lightingContribution scales real lights.
     emissive: 0x000000,
     emissiveIntensity: 0,
   });
 
   const origin = new THREE.Vector3(...params.origin);
   const panoYaw = degreesToRadians(params.rotation[1] ?? 0);
+  const hasSecondary = Boolean(params.secondaryTexture && params.secondaryOrigin);
+  const secondaryOrigin = new THREE.Vector3(...(params.secondaryOrigin ?? params.origin));
+  const secondaryYaw = degreesToRadians(params.secondaryRotation?.[1] ?? 0);
   const fallback = new THREE.Color(params.fallbackColor);
   const opacity = params.settings.opacity;
   const exposure = params.settings.exposure;
   const lightingContribution = params.settings.lightingContribution;
   const useNeutralFallback = params.settings.fallbackMode === 'neutral';
+  const blendMode = params.settings.blendMode ?? 'primary_only';
+  const blendModeId = blendMode === 'secondary_only'
+    ? 1
+    : blendMode === 'primary_dominant'
+      ? 2
+      : blendMode === 'secondary_dominant'
+        ? 3
+        : 0;
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.projectedPanoMap = { value: params.texture };
     shader.uniforms.projectedPanoOrigin = { value: origin };
     shader.uniforms.projectedPanoYaw = { value: panoYaw };
+    shader.uniforms.projectedPanoMapB = { value: params.secondaryTexture ?? params.texture };
+    shader.uniforms.projectedPanoOriginB = { value: secondaryOrigin };
+    shader.uniforms.projectedPanoYawB = { value: secondaryYaw };
+    shader.uniforms.projectedHasSecondary = { value: hasSecondary ? 1 : 0 };
+    shader.uniforms.projectedBlendMode = { value: blendModeId };
     shader.uniforms.projectedOpacity = { value: opacity };
     shader.uniforms.projectedExposure = { value: exposure };
     shader.uniforms.projectedLighting = { value: lightingContribution };
@@ -161,6 +179,11 @@ vProjectedWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
 uniform sampler2D projectedPanoMap;
 uniform vec3 projectedPanoOrigin;
 uniform float projectedPanoYaw;
+uniform sampler2D projectedPanoMapB;
+uniform vec3 projectedPanoOriginB;
+uniform float projectedPanoYawB;
+uniform int projectedHasSecondary;
+uniform int projectedBlendMode;
 uniform float projectedOpacity;
 uniform float projectedExposure;
 uniform float projectedLighting;
@@ -168,32 +191,57 @@ uniform vec3 projectedFallbackColor;
 uniform int projectedUseNeutralFallback;
 varying vec3 vProjectedWorldPos;
 const float PROJECTED_PI = 3.141592653589793;
+const float PROJECTED_FALLOFF = 6.0;
 
 ${PROJECTED_STYLE_GLSL.applyInversePanoYaw}
 
 ${PROJECTED_STYLE_GLSL.equirectUvFromDirection}
+
+float projectedConfidence(vec3 worldPos, vec3 origin) {
+  float dist = length(worldPos - origin);
+  return PROJECTED_FALLOFF / (PROJECTED_FALLOFF + dist);
+}
+
+vec3 sampleProjectedPano(sampler2D map, vec3 origin, float yaw, vec3 worldPos) {
+  vec3 offset = worldPos - origin;
+  float distSq = dot(offset, offset);
+  if (distSq < 1e-8) {
+    return projectedUseNeutralFallback == 1 ? projectedFallbackColor : vec3(-1.0);
+  }
+  vec3 direction = applyInversePanoYaw(normalize(offset), yaw);
+  vec2 panoUv = equirectUvFromDirection(direction);
+  panoUv.x = fract(panoUv.x);
+  panoUv.y = clamp(panoUv.y, 0.0, 1.0);
+  return texture2D(map, panoUv).rgb * projectedExposure;
+}
 `,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
 {
-  vec3 offset = vProjectedWorldPos - projectedPanoOrigin;
-  float distSq = dot(offset, offset);
-  vec3 sampleColor;
-  if (distSq < 1e-8) {
-    sampleColor = projectedUseNeutralFallback == 1
-      ? projectedFallbackColor
-      : diffuseColor.rgb;
-  } else {
-    vec3 direction = applyInversePanoYaw(normalize(offset), projectedPanoYaw);
-    vec2 panoUv = equirectUvFromDirection(direction);
-    panoUv.x = fract(panoUv.x);
-    panoUv.y = clamp(panoUv.y, 0.0, 1.0);
-    vec4 panoSample = texture2D(projectedPanoMap, panoUv);
-    sampleColor = panoSample.rgb * projectedExposure;
+  vec3 sampleA = sampleProjectedPano(projectedPanoMap, projectedPanoOrigin, projectedPanoYaw, vProjectedWorldPos);
+  vec3 sampleColor = sampleA;
+  if (sampleA.x < 0.0) {
+    sampleColor = projectedUseNeutralFallback == 1 ? projectedFallbackColor : diffuseColor.rgb;
+  } else if (projectedHasSecondary == 1 && projectedBlendMode != 0) {
+    vec3 sampleB = sampleProjectedPano(projectedPanoMapB, projectedPanoOriginB, projectedPanoYawB, vProjectedWorldPos);
+    if (sampleB.x >= 0.0) {
+      float confA = projectedConfidence(vProjectedWorldPos, projectedPanoOrigin);
+      float confB = projectedConfidence(vProjectedWorldPos, projectedPanoOriginB);
+      float wA = 1.0;
+      if (projectedBlendMode == 1) {
+        wA = 0.0;
+      } else if (projectedBlendMode == 2) {
+        float total = confA + confB;
+        wA = total <= 1e-8 ? 1.0 : (confA >= confB ? min(1.0, 0.55 + confA * 0.55) : confA / total);
+      } else if (projectedBlendMode == 3) {
+        float total = confA + confB;
+        wA = total <= 1e-8 ? 0.0 : (confB >= confA ? max(0.0, 0.45 - confB * 0.45) : confA / total);
+      }
+      sampleColor = mix(sampleB, sampleA, clamp(wA, 0.0, 1.0));
+    }
   }
-  // Opacity blends projected appearance over clay/neutral fallback albedo.
   vec3 fallbackAlbedo = projectedUseNeutralFallback == 1
     ? projectedFallbackColor
     : diffuseColor.rgb;
@@ -201,20 +249,15 @@ ${PROJECTED_STYLE_GLSL.equirectUvFromDirection}
 }
 `,
       )
-      // Lighting contract is ONLY post-aomap mixing of reflectedLight.
-      // Do not edit r184 PhysicalMaterial fields (no specular intensity symbol).
-      // Do not wrap lights_fragment_begin — it declares geometry*/irradiance for later chunks.
       .replace(
         '#include <aomap_fragment>',
         `#include <aomap_fragment>
 if (projectedLighting <= 0.001) {
-  // Unlit path: pano albedo as the full outgoing diffuse, no scene lights.
   reflectedLight.directDiffuse = vec3(0.0);
   reflectedLight.directSpecular = vec3(0.0);
   reflectedLight.indirectDiffuse = diffuseColor.rgb;
   reflectedLight.indirectSpecular = vec3(0.0);
 } else {
-  // Mild light contribution: keep most of the baked pano, fold in a fraction of lit result.
   reflectedLight.directDiffuse *= projectedLighting;
   reflectedLight.directSpecular *= projectedLighting;
   reflectedLight.indirectDiffuse = mix(diffuseColor.rgb, reflectedLight.indirectDiffuse, projectedLighting);
@@ -225,10 +268,9 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v3:${params.settings.fallbackMode}:${params.disposable ? 'd' : 's'}`
+    `projected-style-v4:${params.settings.fallbackMode}:${hasSecondary ? 'dual' : 'single'}:${params.disposable ? 'd' : 's'}`
   );
 
-  // Mark for disposal on export-only clones.
   (material as THREE.MeshStandardMaterial & { userData: Record<string, unknown> }).userData.projectedStyle = true;
   (material as THREE.MeshStandardMaterial & { userData: Record<string, unknown> }).userData.disposableProjected = Boolean(params.disposable);
 

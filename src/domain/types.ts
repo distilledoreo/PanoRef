@@ -174,10 +174,24 @@ export interface ShotExportSettings {
   includePrompt: boolean;
 }
 
+/**
+ * Multi-origin blend when two projectors are active.
+ * Dominant modes fill weak regions of the dominant pano with the secondary (distance-based, not true occlusion).
+ */
+export type ProjectorBlendMode =
+  | 'primary_only'
+  | 'secondary_only'
+  | 'primary_dominant'
+  | 'secondary_dominant';
+
 /** Project-level projector configuration (no GPU resources). */
 export interface ProjectedStyleSettings {
-  /** Pano reference id to project; omit to auto-pick canonical styled pano. */
+  /** Primary pano reference id; omit to auto-pick canonical styled pano. */
   panoId?: string;
+  /** Secondary pano for dual-origin blend modes. */
+  secondaryPanoId?: string;
+  /** How to combine primary/secondary projectors. */
+  blendMode?: ProjectorBlendMode;
   opacity: number;
   exposure: number;
   lightingContribution: number;

@@ -11,19 +11,46 @@ import {
   DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
   type CameraMoveCubemapFaceId,
 } from './cameraMoveCubemap';
-import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH, normalizeProjectedStyleSettings } from '../domain/defaults';
+import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH } from '../domain/defaults';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
+import { resolveProjectedProjectorAssets } from './multiOriginProjection';
 import {
   canUseProjectedAppearance,
-  getProjectedStyleAssetUri,
-  resolveProjectedStylePano,
 } from './projectedStyle';
 import {
   acquireProjectedStyleTexture,
   releaseProjectedStyleTexture,
 } from './projectedStyleMaterials';
-import { buildScene, disposeScene, type SceneVisualTheme } from './sceneObjects';
+import { buildScene, disposeScene, type ProjectedSceneOptions, type SceneVisualTheme } from './sceneObjects';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
+
+/** Load primary (+ optional secondary) textures for projected export/render. */
+async function loadProjectedSceneOptions(
+  project: LocationProject,
+): Promise<{ options: ProjectedSceneOptions; primaryUrl: string; secondaryUrl?: string } | undefined> {
+  const assets = resolveProjectedProjectorAssets(project);
+  if (!assets) return undefined;
+  const texture = await acquireProjectedStyleTexture(assets.primaryUrl);
+  if (!texture) return undefined;
+  let secondaryTexture: THREE.Texture | undefined;
+  if (assets.secondaryUrl) {
+    secondaryTexture = (await acquireProjectedStyleTexture(assets.secondaryUrl)) ?? undefined;
+  }
+  return {
+    primaryUrl: assets.primaryUrl,
+    secondaryUrl: secondaryTexture ? assets.secondaryUrl : undefined,
+    options: {
+      texture,
+      origin: assets.primary.origin,
+      rotation: assets.primary.rotation,
+      settings: assets.settings,
+      disposableMaterials: true,
+      secondaryTexture,
+      secondaryOrigin: secondaryTexture && assets.secondary ? assets.secondary.origin : undefined,
+      secondaryRotation: secondaryTexture && assets.secondary ? assets.secondary.rotation : undefined,
+    },
+  };
+}
 
 export interface ImageRenderResult {
   dataUrl: string;
@@ -95,6 +122,26 @@ export function computeGrayboxPanoFarPlane(scene: THREE.Scene, panoOrigin: Vec3,
   return Math.max(near + 1, farthestDistance * 1.01 + 1);
 }
 
+/**
+ * Bake capture-origin yaw into the equirect so stamping scene.panoRotation on the
+ * graybox ref matches Projected Style sampling (inverse yaw on world directions).
+ * CubeCamera is always world-aligned; yaw is applied when remapping cube → equirect.
+ */
+export function grayboxCubeSampleDirection(
+  equirectLocalDirection: Vec3,
+  panoYawRadians: number,
+): Vec3 {
+  const s = Math.sin(panoYawRadians);
+  const c = Math.cos(panoYawRadians);
+  const [x, y, z] = equirectLocalDirection;
+  // Inverse of applyInversePanoYaw: local (pano) → world for textureCube lookup.
+  return [
+    x * c + z * s,
+    y,
+    -x * s + z * c,
+  ];
+}
+
 export async function renderGrayboxEquirectangularPano(
   project: LocationProject,
   width = DEFAULT_GRAYBOX_PANO_WIDTH,
@@ -123,11 +170,15 @@ export async function renderGrayboxEquirectangularPano(
   cubeCamera.position.fromArray(project.scene.panoOrigin);
   cubeCamera.update(renderer, scene);
 
+  // Degrees → radians; yaw is Euler[1], matching createPanoReference / projected materials.
+  const panoYawRadians = degreesToRadians(project.scene.panoRotation?.[1] ?? 0);
+
   const panoScene = new THREE.Scene();
   const panoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const material = new THREE.ShaderMaterial({
     uniforms: {
       cubeMap: { value: cubeRenderTarget.texture },
+      panoYaw: { value: panoYawRadians },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -138,17 +189,27 @@ export async function renderGrayboxEquirectangularPano(
     `,
     fragmentShader: `
       uniform samplerCube cubeMap;
+      uniform float panoYaw;
       varying vec2 vUv;
       const float PI = 3.141592653589793;
       void main() {
         float theta = vUv.x * 2.0 * PI - PI;
         float phi = vUv.y * PI - PI * 0.5;
-        vec3 direction = normalize(vec3(
+        // Equirect UV → direction in pano-local frame (same as projection sampling).
+        vec3 localDir = normalize(vec3(
           sin(theta) * cos(phi),
           sin(phi),
           cos(theta) * cos(phi)
         ));
-        gl_FragColor = textureCube(cubeMap, direction);
+        // Rotate local → world so CubeCamera (world-aligned) samples the correct face.
+        float s = sin(panoYaw);
+        float c = cos(panoYaw);
+        vec3 worldDir = normalize(vec3(
+          localDir.x * c + localDir.z * s,
+          localDir.y,
+          -localDir.x * s + localDir.z * c
+        ));
+        gl_FragColor = textureCube(cubeMap, worldDir);
       }
     `,
   });
@@ -193,8 +254,7 @@ export async function renderShotCameraMoveMp4(
   }
 
   const appearance = options.appearance ?? 'clay';
-  let projectorImageUrl: string | undefined;
-  let projectorTexture: THREE.Texture | null = null;
+  let projectedLoad: Awaited<ReturnType<typeof loadProjectedSceneOptions>>;
 
   if (appearance === 'projected') {
     if (!canUseProjectedAppearance(project)) {
@@ -202,14 +262,9 @@ export async function renderShotCameraMoveMp4(
         'Projected camera-move MP4 requires an importable styled panorama with a valid image asset.',
       );
     }
-    const pano = resolveProjectedStylePano(project);
-    projectorImageUrl = getProjectedStyleAssetUri(project, pano);
-    if (!pano || !projectorImageUrl) {
+    projectedLoad = await loadProjectedSceneOptions(project);
+    if (!projectedLoad) {
       throw new Error('Projected camera-move MP4 could not resolve the projector panorama asset.');
-    }
-    projectorTexture = await acquireProjectedStyleTexture(projectorImageUrl);
-    if (!projectorTexture) {
-      throw new Error('Projected camera-move MP4 failed to decode the panorama texture.');
     }
   }
 
@@ -219,20 +274,11 @@ export async function renderShotCameraMoveMp4(
   const height = shot.exportSettings.height;
   await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
-  const pano = appearance === 'projected' ? resolveProjectedStylePano(project) : undefined;
   const scene = buildScene(project, {
     showHelpers: false,
     hiddenObjectTypes: ['sun_marker'],
-    appearance: appearance === 'projected' && projectorTexture && pano ? 'projected' : 'clay',
-    projected: appearance === 'projected' && projectorTexture && pano
-      ? {
-        texture: projectorTexture,
-        origin: pano.origin,
-        rotation: pano.rotation,
-        settings: normalizeProjectedStyleSettings(project.settings.projectedStyle),
-        disposableMaterials: true,
-      }
-      : undefined,
+    appearance: appearance === 'projected' && projectedLoad ? 'projected' : 'clay',
+    projected: appearance === 'projected' && projectedLoad ? projectedLoad.options : undefined,
   });
   const camera = new THREE.PerspectiveCamera(
     shot.camera.fovDegrees,
@@ -245,7 +291,10 @@ export async function renderShotCameraMoveMp4(
   if (!captureStream) {
     disposeScene(scene);
     disposeRenderer(renderer);
-    releaseProjectedStyleTexture(projectorImageUrl);
+    if (projectedLoad) {
+      releaseProjectedStyleTexture(projectedLoad.primaryUrl);
+      releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
+    }
     throw new Error('Canvas video capture is not supported in this browser.');
   }
 
@@ -342,7 +391,10 @@ export async function renderShotCameraMoveMp4(
     stream.getTracks().forEach((track) => track.stop());
     disposeScene(scene);
     disposeRenderer(renderer);
-    releaseProjectedStyleTexture(projectorImageUrl);
+    if (projectedLoad) {
+      releaseProjectedStyleTexture(projectedLoad.primaryUrl);
+      releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
+    }
   }
 
   const blob = new Blob(chunks, { type: mimeType });
@@ -451,30 +503,18 @@ export async function renderViewportProjected(
       'Projected viewport export requires an importable styled panorama with a valid image asset.',
     );
   }
-  const pano = resolveProjectedStylePano(project);
-  const imageUrl = getProjectedStyleAssetUri(project, pano);
-  if (!pano || !imageUrl) {
+  const projectedLoad = await loadProjectedSceneOptions(project);
+  if (!projectedLoad) {
     throw new Error('Projected viewport export could not resolve the projector panorama asset.');
   }
 
   await ensureHumanMannequinModel();
-  const texture = await acquireProjectedStyleTexture(imageUrl);
-  if (!texture) {
-    throw new Error('Projected viewport export failed to decode the panorama texture.');
-  }
-
   const renderer = createRenderer(width, height);
   const scene = buildScene(project, {
     showHelpers: false,
     hiddenObjectTypes: ['sun_marker'],
     appearance: 'projected',
-    projected: {
-      texture,
-      origin: pano.origin,
-      rotation: pano.rotation,
-      settings: normalizeProjectedStyleSettings(project.settings.projectedStyle),
-      disposableMaterials: true,
-    },
+    projected: projectedLoad.options,
   });
   const camera = new THREE.PerspectiveCamera(
     cameraData.fovDegrees,
@@ -495,7 +535,8 @@ export async function renderViewportProjected(
 
   disposeScene(scene);
   disposeRenderer(renderer);
-  releaseProjectedStyleTexture(imageUrl);
+  releaseProjectedStyleTexture(projectedLoad.primaryUrl);
+  releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
 
   return { dataUrl, width, height };
 }

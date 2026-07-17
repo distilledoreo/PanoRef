@@ -19,6 +19,9 @@ describe('projected style settings', () => {
   it('normalizes missing and out-of-range fields', () => {
     expect(normalizeProjectedStyleSettings(undefined)).toEqual(defaultProjectedStyleSettings);
     expect(normalizeProjectedStyleSettings({ opacity: 2, exposure: 0.1, lightingContribution: -1 })).toEqual({
+      panoId: undefined,
+      secondaryPanoId: undefined,
+      blendMode: 'primary_only',
       opacity: 1,
       exposure: 0.25,
       lightingContribution: 0,

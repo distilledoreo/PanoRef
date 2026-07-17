@@ -1,8 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createDefaultProject } from '../src/domain/defaults';
-import { computeGrayboxPanoFarPlane } from '../src/engine/renderers';
+import {
+  computeGrayboxPanoFarPlane,
+  grayboxCubeSampleDirection,
+} from '../src/engine/renderers';
+import { applyInversePanoYaw } from '../src/engine/projectedStyleMath';
 import { buildScene, disposeScene } from '../src/engine/sceneObjects';
+import { degreesToRadians } from '../src/engine/sync';
 
 describe('rendered shot output', () => {
   it('does not synthesize final AI frames inside the app renderer', () => {
@@ -78,6 +83,35 @@ describe('rendered shot output', () => {
     expect(computeGrayboxPanoFarPlane(scene, project.scene.panoOrigin)).toBeGreaterThan(500);
 
     disposeScene(scene);
+  });
+
+  it('bakes scene.panoRotation yaw into graybox equirect so stamped projector pose matches projection', () => {
+    const source = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
+    const storeSource = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
+
+    // Capture path stamps scene rotation on the graybox ref.
+    expect(storeSource).toMatch(
+      /type:\s*'graybox_render'[\s\S]*?rotation:\s*state\.project\.scene\.panoRotation/,
+    );
+    // Equirect stitch must honor that yaw (CubeCamera alone is world-aligned).
+    expect(source).toContain('panoYaw: { value: panoYawRadians }');
+    expect(source).toContain('project.scene.panoRotation');
+    expect(source).toContain('localDir.x * c + localDir.z * s');
+    expect(source).toContain('-localDir.x * s + localDir.z * c');
+
+    // Pure inverse consistency: world → local (projection) → world (cube sample).
+    const yaw = degreesToRadians(37);
+    const world: [number, number, number] = [0.4, 0.2, 0.9];
+    const len = Math.hypot(...world);
+    const unitWorld: [number, number, number] = [world[0] / len, world[1] / len, world[2] / len];
+    const local = applyInversePanoYaw(unitWorld, yaw);
+    const recovered = grayboxCubeSampleDirection(local, yaw);
+    expect(recovered[0]).toBeCloseTo(unitWorld[0], 6);
+    expect(recovered[1]).toBeCloseTo(unitWorld[1], 6);
+    expect(recovered[2]).toBeCloseTo(unitWorld[2], 6);
+
+    // Zero yaw is identity (legacy path).
+    expect(grayboxCubeSampleDirection([0, 0, 1], 0)).toEqual([0, 0, 1]);
   });
 
   it('applies linked pano rotation to local reference exports', () => {

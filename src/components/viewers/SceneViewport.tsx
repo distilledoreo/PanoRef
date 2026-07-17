@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { objectDisplayName } from '../../domain/defaults';
-import { CameraData, LocationProject, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
+import { CameraData, Euler, LocationProject, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import { isBuildFreeCameraKey } from '../../engine/buildShortcuts';
 import {
   createForwardSprintState,
@@ -9,13 +9,13 @@ import {
   reduceForwardSprint,
   type ForwardSprintState,
 } from '../../engine/forwardSprint';
-import { createPlacedSceneObject, resolveStampPoint, snapBuildPoint } from '../../engine/sandbox';
+import { BUILD_GRID_SIZE, createPlacedSceneObject, resolveStampPoint } from '../../engine/sandbox';
 import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
 import {
-  canUseProjectedAppearance,
-  getProjectedStyleAssetUri,
+  resolveProjectedProjectorAssets,
+} from '../../engine/multiOriginProjection';
+import {
   normalizeProjectedStyleSettings,
-  resolveProjectedStylePano,
   type ViewportAppearanceMode,
 } from '../../engine/projectedStyle';
 import {
@@ -63,7 +63,17 @@ import {
 import { useThemeStore } from '../../state/useThemeStore';
 import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 
-type DragKind = 'idle' | 'orbit' | 'gizmo_translate' | 'gizmo_rotate' | 'gizmo_scale' | 'pano_origin' | 'place' | 'shot_framing' | 'free_camera';
+type DragKind =
+  | 'idle'
+  | 'orbit'
+  | 'gizmo_translate'
+  | 'gizmo_rotate'
+  | 'gizmo_scale'
+  | 'origin_gizmo_translate'
+  | 'origin_gizmo_rotate'
+  | 'place'
+  | 'shot_framing'
+  | 'free_camera';
 
 const FLY_SPEED = 6;
 const FLY_SPRINT_MULTIPLIER = 2.4;
@@ -120,6 +130,7 @@ export function SceneViewport({
   onRotateObject,
   onScaleObject,
   onMovePanoOrigin,
+  onRotatePanoOrigin,
   onEditBatchStart,
   onEditBatchEnd,
   frameRequest = 0,
@@ -158,6 +169,8 @@ export function SceneViewport({
   onRotateObject?: (id: string, rotation: Vec3) => void;
   onScaleObject?: (id: string, dimensions: Vec3) => void;
   onMovePanoOrigin?: (origin: Vec3) => void;
+  /** Capture-origin rotation (degrees Euler) while Origin mode gizmo is used. */
+  onRotatePanoOrigin?: (rotation: Euler) => void;
   /** Wrap continuous gizmo / origin drags so undo records one step per gesture. */
   onEditBatchStart?: () => void;
   onEditBatchEnd?: () => void;
@@ -189,6 +202,7 @@ export function SceneViewport({
     onRotateObject,
     onScaleObject,
     onMovePanoOrigin,
+    onRotatePanoOrigin,
     onEditBatchStart,
     onEditBatchEnd,
     onFreeCameraActiveChange,
@@ -212,8 +226,11 @@ export function SceneViewport({
   const lastFrameTimeRef = useRef(performance.now());
   const flyDirtyRef = useRef(false);
   const projectedTextureUrlRef = useRef<string | undefined>();
+  const projectedSecondaryUrlRef = useRef<string | undefined>();
   const [projectedTexture, setProjectedTexture] = useState<THREE.Texture | null>(null);
+  const [projectedSecondaryTexture, setProjectedSecondaryTexture] = useState<THREE.Texture | null>(null);
   const [projectedTextureReadyUrl, setProjectedTextureReadyUrl] = useState<string | undefined>();
+  const [projectedSecondaryReadyUrl, setProjectedSecondaryReadyUrl] = useState<string | undefined>();
   const gizmoRef = useRef<THREE.Group | null>(null);
   const selectionOutlineRefs = useRef<THREE.BoxHelper[]>([]);
   const showSceneGuidesRef = useRef(showSceneGuides);
@@ -241,6 +258,7 @@ export function SceneViewport({
     onRotateObject,
     onScaleObject,
     onMovePanoOrigin,
+    onRotatePanoOrigin,
     onEditBatchStart,
     onEditBatchEnd,
     onFreeCameraActiveChange,
@@ -259,8 +277,43 @@ export function SceneViewport({
 
   const syncTransformGizmo = useCallback(() => {
     const scene = sceneRef.current;
+    if (!scene || shotFramingRef.current || !showTransformGizmoRef.current) {
+      clearTransformGizmo();
+      return;
+    }
+
+    // Capture-origin gizmos: translate / rotate only (scale is not meaningful for a point origin).
+    if (originPlacementActiveRef.current) {
+      const originMode: GizmoMode = gizmoModeRef.current === 'rotate' ? 'rotate' : 'translate';
+      const origin = projectRef.current.scene.panoOrigin;
+      const needsNewGizmo = !gizmoRef.current
+        || gizmoRef.current.userData.gizmoMode !== originMode
+        || gizmoRef.current.userData.originGizmo !== true;
+      if (needsNewGizmo) {
+        if (gizmoRef.current) {
+          scene.remove(gizmoRef.current);
+          disposeGizmoNodes([gizmoRef.current]);
+        }
+        selectionOutlineRefs.current.forEach((outline) => {
+          scene.remove(outline);
+        });
+        disposeGizmoNodes(selectionOutlineRefs.current);
+        selectionOutlineRefs.current = [];
+        gizmoRef.current = createGizmoGroup(originMode);
+        gizmoRef.current.userData.originGizmo = true;
+        scene.add(gizmoRef.current);
+      }
+      if (gizmoRef.current) {
+        gizmoRef.current.position.fromArray(origin);
+        gizmoRef.current.scale.setScalar(0.95);
+        gizmoRef.current.rotation.set(0, 0, 0);
+        gizmoRef.current.visible = true;
+      }
+      return;
+    }
+
     const selectedIds = selectedObjectIdsRef.current;
-    if (!scene || shotFramingRef.current || !showTransformGizmoRef.current || selectedIds.length === 0) {
+    if (selectedIds.length === 0) {
       clearTransformGizmo();
       return;
     }
@@ -273,13 +326,16 @@ export function SceneViewport({
       return;
     }
 
-    const needsNewGizmo = !gizmoRef.current || gizmoRef.current.userData.gizmoMode !== gizmoModeRef.current;
+    const needsNewGizmo = !gizmoRef.current
+      || gizmoRef.current.userData.gizmoMode !== gizmoModeRef.current
+      || gizmoRef.current.userData.originGizmo === true;
     if (needsNewGizmo) {
       if (gizmoRef.current) {
         scene.remove(gizmoRef.current);
         disposeGizmoNodes([gizmoRef.current]);
       }
       gizmoRef.current = createGizmoGroup(gizmoModeRef.current);
+      gizmoRef.current.userData.originGizmo = false;
       scene.add(gizmoRef.current);
     }
 
@@ -495,6 +551,64 @@ export function SceneViewport({
       callbacksRef.current.onEditBatchEnd?.();
     };
 
+    const beginOriginGizmoDrag = (
+      gizmoHit: GizmoHit,
+      pointer: ReturnType<typeof getPointerState>,
+      event: PointerEvent,
+    ) => {
+      const { onMovePanoOrigin, onRotatePanoOrigin } = callbacksRef.current;
+      const gizmo = gizmoRef.current;
+      const camera = cameraRef.current;
+      if (!gizmo || !camera || !pointer) return false;
+      const origin = projectRef.current.scene.panoOrigin;
+      const rotation = projectRef.current.scene.panoRotation;
+
+      if (gizmoHit.kind === 'translate' && onMovePanoOrigin) {
+        const axisOrigin = getGizmoWorldPosition(gizmo);
+        const axisDirection = axisWorldVector(gizmoHit.axis, gizmo);
+        const axisStartPoint = intersectAxisDragPlane(
+          pointer.raycaster,
+          axisOrigin,
+          axisDirection,
+          camera,
+        );
+        if (!axisStartPoint) return false;
+        startEditBatch();
+        dragRef.current = {
+          kind: 'origin_gizmo_translate',
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          gizmoAxis: gizmoHit.axis,
+          gizmoStartPosition: [...origin] as Vec3,
+          gizmoAxisStartPoint: axisStartPoint,
+        };
+        canvas.setPointerCapture(event.pointerId);
+        return true;
+      }
+
+      if (gizmoHit.kind === 'rotate' && onRotatePanoOrigin) {
+        const axisOrigin = getGizmoWorldPosition(gizmo);
+        const axisDirection = axisWorldVector(gizmoHit.axis, gizmo);
+        const startAngle = angleInAxisPlane(pointer.raycaster, axisOrigin, axisDirection);
+        if (startAngle === undefined) return false;
+        startEditBatch();
+        dragRef.current = {
+          kind: 'origin_gizmo_rotate',
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          gizmoAxis: gizmoHit.axis,
+          gizmoStartRotation: [...rotation] as Vec3,
+          gizmoRotateStartAngle: startAngle,
+        };
+        canvas.setPointerCapture(event.pointerId);
+        return true;
+      }
+
+      return false;
+    };
+
     const beginGizmoDrag = (
       gizmoHit: GizmoHit,
       object: SceneObject,
@@ -658,18 +772,14 @@ export function SceneViewport({
         return;
       }
 
-      if (originPlacement && floorPoint && onMovePanoOrigin) {
-        startEditBatch();
-        onMovePanoOrigin(getOriginPoint(floorPoint, activeProject.scene.panoOrigin[1], activeSnapToGrid));
-        dragRef.current = { kind: 'pano_origin', x: event.clientX, y: event.clientY, moved: false };
-        canvas.setPointerCapture(event.pointerId);
-        return;
-      }
-
-      if (hit?.isPanoOrigin && floorPoint && onMovePanoOrigin) {
-        startEditBatch();
-        dragRef.current = { kind: 'pano_origin', x: event.clientX, y: event.clientY, moved: false };
-        canvas.setPointerCapture(event.pointerId);
+      // Origin mode: translate / rotate gizmos at the capture origin (no floor-click reposition).
+      if (originPlacement && showTransformGizmoRef.current && gizmoRef.current && cameraRef.current) {
+        const originMode: GizmoMode = gizmoModeRef.current === 'rotate' ? 'rotate' : 'translate';
+        const originGizmoHit = findGizmoHit(pointer.raycaster, gizmoRef.current, originMode);
+        if (originGizmoHit && beginOriginGizmoDrag(originGizmoHit, pointer, event)) {
+          return;
+        }
+        beginOrbitDrag(event);
         return;
       }
 
@@ -703,10 +813,12 @@ export function SceneViewport({
       const placementPreviewActive = Boolean(placementTypeRef.current);
       if (drag.kind === 'idle' && !placementPreviewActive) return;
 
-      const needsFloorPoint = placementPreviewActive || drag.kind === 'pano_origin';
+      const needsFloorPoint = placementPreviewActive;
       const needsRaycaster = needsFloorPoint
         || drag.kind === 'gizmo_translate'
-        || drag.kind === 'gizmo_rotate';
+        || drag.kind === 'gizmo_rotate'
+        || drag.kind === 'origin_gizmo_translate'
+        || drag.kind === 'origin_gizmo_rotate';
       const pointer = needsRaycaster
         ? getPointerState(
             event,
@@ -730,14 +842,12 @@ export function SceneViewport({
       drag.x = event.clientX;
       drag.y = event.clientY;
 
-      const { onMovePanoOrigin } = callbacksRef.current;
-      const activeProject = projectRef.current;
-      const activeSnapToGrid = snapToGridRef.current;
-
       const {
         onMoveObjectInSpace,
         onRotateObject,
         onScaleObject,
+        onMovePanoOrigin,
+        onRotatePanoOrigin,
       } = callbacksRef.current;
 
       if (
@@ -838,8 +948,65 @@ export function SceneViewport({
         return;
       }
 
-      if (drag.kind === 'pano_origin' && pointer?.floorPoint && onMovePanoOrigin) {
-        onMovePanoOrigin(getOriginPoint(pointer.floorPoint, activeProject.scene.panoOrigin[1], activeSnapToGrid));
+      if (
+        drag.kind === 'origin_gizmo_translate'
+        && drag.gizmoAxis
+        && drag.gizmoStartPosition
+        && drag.gizmoAxisStartPoint
+        && gizmoRef.current
+        && pointer
+        && onMovePanoOrigin
+        && cameraRef.current
+      ) {
+        const axisOrigin = getGizmoWorldPosition(gizmoRef.current);
+        const axisDirection = axisWorldVector(drag.gizmoAxis, gizmoRef.current);
+        const intersection = intersectAxisDragPlane(
+          pointer.raycaster,
+          axisOrigin,
+          axisDirection,
+          cameraRef.current,
+        );
+        if (intersection) {
+          const delta = intersection.clone().sub(drag.gizmoAxisStartPoint);
+          const projected = axisDirection.clone().multiplyScalar(delta.dot(axisDirection));
+          const next = new THREE.Vector3().fromArray(drag.gizmoStartPosition).add(projected);
+          if (snapToGridRef.current) {
+            next.x = Math.round(next.x / BUILD_GRID_SIZE) * BUILD_GRID_SIZE;
+            next.z = Math.round(next.z / BUILD_GRID_SIZE) * BUILD_GRID_SIZE;
+          }
+          onMovePanoOrigin([
+            Number(next.x.toFixed(3)),
+            Number(next.y.toFixed(3)),
+            Number(next.z.toFixed(3)),
+          ]);
+          syncTransformGizmo();
+        }
+        return;
+      }
+
+      if (
+        drag.kind === 'origin_gizmo_rotate'
+        && drag.gizmoAxis
+        && drag.gizmoStartRotation
+        && drag.gizmoRotateStartAngle !== undefined
+        && gizmoRef.current
+        && pointer
+        && onRotatePanoOrigin
+      ) {
+        const axisOrigin = getGizmoWorldPosition(gizmoRef.current);
+        const axisDirection = axisWorldVector(drag.gizmoAxis, gizmoRef.current);
+        const currentAngle = angleInAxisPlane(
+          pointer.raycaster,
+          axisOrigin,
+          axisDirection,
+        );
+        if (currentAngle !== undefined) {
+          const delta = currentAngle - drag.gizmoRotateStartAngle;
+          onRotatePanoOrigin(
+            applyAxisRotationDelta(drag.gizmoStartRotation, drag.gizmoAxis, delta),
+          );
+          syncTransformGizmo();
+        }
         return;
       }
 
@@ -907,7 +1074,8 @@ export function SceneViewport({
       const wasEditDrag = drag.kind === 'gizmo_translate'
         || drag.kind === 'gizmo_rotate'
         || drag.kind === 'gizmo_scale'
-        || drag.kind === 'pano_origin';
+        || drag.kind === 'origin_gizmo_translate'
+        || drag.kind === 'origin_gizmo_rotate';
       dragRef.current = { kind: 'idle', x: 0, y: 0, moved: false };
       if (wasEditDrag) endEditBatch();
       if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
@@ -1102,14 +1270,19 @@ export function SceneViewport({
     };
   }, []);
 
-  const projectedPanoId = project.settings.projectedStyle?.panoId;
-  const projectedAssetKey = (() => {
-    if (appearance !== 'projected') return '';
-    const pano = resolveProjectedStylePano(project);
-    return getProjectedStyleAssetUri(project, pano) ?? '';
-  })();
+  const projectedProjectors = appearance === 'projected'
+    ? resolveProjectedProjectorAssets(project)
+    : undefined;
+  const projectedAssetKey = projectedProjectors?.primaryUrl ?? '';
+  const projectedSecondaryAssetKey = projectedProjectors?.secondaryUrl ?? '';
+  const projectedPanoId = projectedProjectors?.primary.id
+    ?? project.settings.projectedStyle?.panoId;
+  const projectedSecondaryPanoId = projectedProjectors?.secondary?.id;
+  const projectedBlendMode = projectedProjectors?.settings.blendMode
+    ?? project.settings.projectedStyle?.blendMode
+    ?? 'primary_only';
 
-  // Load / release shared projected-style texture when appearance or projector changes.
+  // Load / release primary projected-style texture when appearance or projector changes.
   useEffect(() => {
     let cancelled = false;
     const url = projectedAssetKey || undefined;
@@ -1144,9 +1317,46 @@ export function SceneViewport({
     };
   }, [projectedAssetKey]);
 
+  // Load / release optional secondary projector for multi-origin blend.
+  useEffect(() => {
+    let cancelled = false;
+    const url = projectedSecondaryAssetKey || undefined;
+    if (!url) {
+      const previousUrl = projectedSecondaryUrlRef.current;
+      projectedSecondaryUrlRef.current = undefined;
+      setProjectedSecondaryTexture(null);
+      setProjectedSecondaryReadyUrl(undefined);
+      releaseProjectedStyleTexture(previousUrl);
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (projectedSecondaryUrlRef.current === url) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const previousUrl = projectedSecondaryUrlRef.current;
+    projectedSecondaryUrlRef.current = url;
+    void acquireProjectedStyleTexture(url).then((texture) => {
+      if (cancelled || !texture) {
+        if (texture) releaseProjectedStyleTexture(url);
+        return;
+      }
+      setProjectedSecondaryTexture(texture);
+      setProjectedSecondaryReadyUrl(url);
+      if (previousUrl && previousUrl !== url) releaseProjectedStyleTexture(previousUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectedSecondaryAssetKey]);
+
   useEffect(() => () => {
     releaseProjectedStyleTexture(projectedTextureUrlRef.current);
+    releaseProjectedStyleTexture(projectedSecondaryUrlRef.current);
     projectedTextureUrlRef.current = undefined;
+    projectedSecondaryUrlRef.current = undefined;
   }, []);
 
   useEffect(() => {
@@ -1178,17 +1388,31 @@ export function SceneViewport({
     Boolean(shotFraming),
   ]);
 
-  const projectedPano = resolveProjectedStylePano(project);
-  const projectedSettings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const projectedSettings = projectedProjectors?.settings
+    ?? normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const projectedPano = projectedProjectors?.primary;
+  const projectedSecondary = projectedProjectors?.secondary;
+  const secondaryReady = !projectedSecondaryAssetKey
+    || (
+      Boolean(projectedSecondaryTexture)
+      && projectedSecondaryReadyUrl === projectedSecondaryAssetKey
+    );
   const projectedActive = appearance === 'projected'
     && Boolean(projectedTexture)
     && projectedTextureReadyUrl === projectedAssetKey
-    && Boolean(projectedPano);
+    && Boolean(projectedPano)
+    && secondaryReady;
 
   useEffect(() => {
     previewMeshRef.current = null;
     if (sceneRef.current) disposeScene(sceneRef.current);
     clearTransformGizmo();
+    const dualActive = Boolean(
+      projectedActive
+      && projectedSecondaryTexture
+      && projectedSecondary
+      && projectedBlendMode !== 'primary_only',
+    );
     sceneRef.current = buildScene(project, {
       selectedShotId,
       hideShotFrustums: Boolean(shotFraming) || !showSceneGuides,
@@ -1205,6 +1429,9 @@ export function SceneViewport({
           rotation: projectedPano.rotation,
           settings: projectedSettings,
           disposableMaterials: true,
+          secondaryTexture: dualActive ? projectedSecondaryTexture ?? undefined : undefined,
+          secondaryOrigin: dualActive ? projectedSecondary?.origin : undefined,
+          secondaryRotation: dualActive ? projectedSecondary?.rotation : undefined,
         }
         : undefined,
     });
@@ -1217,8 +1444,12 @@ export function SceneViewport({
     originPlacementActive,
     project,
     projectedActive,
+    projectedBlendMode,
     projectedPano?.id,
     projectedPanoId,
+    projectedSecondary?.id,
+    projectedSecondaryPanoId,
+    projectedSecondaryTexture,
     projectedSettings.exposure,
     projectedSettings.fallbackMode,
     projectedSettings.lightingContribution,
@@ -1470,11 +1701,6 @@ function getSceneHit(raycaster: THREE.Raycaster, scene: THREE.Scene | null) {
     if (objectId) return { isPanoOrigin: false, objectId };
   }
   return undefined;
-}
-
-function getOriginPoint(point: Vec3, originY: number, snapToGrid: boolean): Vec3 {
-  const snapped = snapBuildPoint([point[0], originY, point[2]], snapToGrid);
-  return [snapped[0], originY, snapped[2]];
 }
 
 function findSceneObjectId(object: THREE.Object3D): string | undefined {

@@ -52,6 +52,7 @@ export const defaultProjectedStyleSettings: ProjectedStyleSettings = {
   exposure: 1,
   lightingContribution: 0,
   fallbackMode: 'clay',
+  blendMode: 'primary_only',
 };
 
 export const defaultProjectSettings = {
@@ -88,8 +89,23 @@ export function normalizeProjectedStyleSettings(
   const opacity = Number(settings?.opacity);
   const exposure = Number(settings?.exposure);
   const lightingContribution = Number(settings?.lightingContribution);
+  const blendModes = new Set(['primary_only', 'secondary_only', 'primary_dominant', 'secondary_dominant']);
+  const blendMode = settings?.blendMode && blendModes.has(settings.blendMode)
+    ? settings.blendMode
+    : defaultProjectedStyleSettings.blendMode;
+  const panoId = typeof settings?.panoId === 'string' && settings.panoId.length > 0
+    ? settings.panoId
+    : undefined;
+  let secondaryPanoId = typeof settings?.secondaryPanoId === 'string' && settings.secondaryPanoId.length > 0
+    ? settings.secondaryPanoId
+    : undefined;
+  if (secondaryPanoId && panoId && secondaryPanoId === panoId) {
+    secondaryPanoId = undefined;
+  }
   return {
-    panoId: typeof settings?.panoId === 'string' && settings.panoId.length > 0 ? settings.panoId : undefined,
+    panoId,
+    secondaryPanoId,
+    blendMode,
     opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : defaultProjectedStyleSettings.opacity,
     exposure: Number.isFinite(exposure) ? Math.min(4, Math.max(0.25, exposure)) : defaultProjectedStyleSettings.exposure,
     lightingContribution: Number.isFinite(lightingContribution)

@@ -113,6 +113,38 @@ describe('project workflow logic', () => {
     expect(parsed.panoRefs[0].rotation).toEqual([0, 0, 0]);
   });
 
+  it('defaults scene.panoRotation and multi-origin projectedStyle fields for pre-feature projects', () => {
+    const project = createDefaultProject();
+    // Simulate a project JSON saved before scene.panoRotation / blend modes existed.
+    const raw = JSON.parse(serializeProject(project)) as Record<string, unknown>;
+    const scene = { ...(raw.scene as Record<string, unknown>) };
+    delete scene.panoRotation;
+    raw.scene = scene;
+    const settings = { ...(raw.settings as Record<string, unknown>) };
+    // Legacy projectedStyle with only the original four knobs (no blend/secondary).
+    settings.projectedStyle = {
+      opacity: 0.8,
+      exposure: 1.1,
+      lightingContribution: 0.2,
+      fallbackMode: 'neutral',
+    };
+    raw.settings = settings;
+
+    const parsed = parseProject(JSON.stringify(raw));
+    expect(parsed.scene.panoRotation).toEqual([0, 0, 0]);
+    expect(Array.isArray(parsed.scene.panoOrigin)).toBe(true);
+    expect(parsed.scene.panoOrigin).toHaveLength(3);
+    expect(parsed.settings.projectedStyle.blendMode).toBe('primary_only');
+    expect(parsed.settings.projectedStyle.secondaryPanoId).toBeUndefined();
+    expect(parsed.settings.projectedStyle.panoId).toBeUndefined();
+    expect(parsed.settings.projectedStyle.opacity).toBe(0.8);
+    expect(parsed.settings.projectedStyle.fallbackMode).toBe('neutral');
+
+    // Origin rotate path must be able to read Euler components without throwing.
+    const [rx, ry, rz] = parsed.scene.panoRotation;
+    expect([rx, ry, rz].every(Number.isFinite)).toBe(true);
+  });
+
   it('drops legacy object-level projection stamps during parse', () => {
     const project = createDefaultProject();
     const asset = createPanoAsset({

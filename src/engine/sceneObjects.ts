@@ -188,6 +188,10 @@ export interface ProjectedSceneOptions {
   settings: ProjectedStyleSettings;
   /** Dispose projected materials with the scene (export / one-shot). */
   disposableMaterials?: boolean;
+  /** Optional secondary projector for multi-origin blend. */
+  secondaryTexture?: THREE.Texture;
+  secondaryOrigin?: Vec3;
+  secondaryRotation?: Euler;
 }
 
 export function buildScene(
@@ -351,6 +355,9 @@ function applyProjectedStyleToObject(
     settings: projected.settings,
     fallbackColor: projected.settings.fallbackMode === 'neutral' ? 0xb0b6b2 : fallbackColor,
     disposable: projected.disposableMaterials ?? true,
+    secondaryTexture: projected.secondaryTexture,
+    secondaryOrigin: projected.secondaryOrigin,
+    secondaryRotation: projected.secondaryRotation,
   });
   // Keep a tiny emissive edge so selection remains readable under projection.
   if (root.userData?.sceneObjectId && projected.disposableMaterials === false) {

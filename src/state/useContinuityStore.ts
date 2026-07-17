@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import {
   CameraData,
+  Euler,
   Landmark,
   LocationProject,
   PanoReference,
@@ -143,6 +144,8 @@ interface ContinuityStore {
   toggleObjectLocked: (id: string) => void;
   removeObject: (id: string) => void;
   setPanoOrigin: (origin: Vec3) => void;
+  /** Capture-origin yaw/orientation for new graybox captures (does not rewrite existing panos). */
+  setPanoRotation: (rotation: Euler) => void;
   renderGrayboxPano: () => Promise<PanoReference>;
   importCanonicalPano: (params: { name: string; dataUrl: string; width?: number; height?: number; importNote?: string }) => void;
   removePanoReference: (id: string) => void;
@@ -650,8 +653,27 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   }),
   setPanoOrigin: (origin) => set((state) => {
     if (vec3NearlyEqual(state.project.scene.panoOrigin, origin)) return state;
+    // Scene capture origin only — never rewrite existing pano projector poses.
     return applyBuildSceneChange(state, {
       panoOrigin: origin,
+      history: 'step',
+    });
+  }),
+  setPanoRotation: (rotation) => set((state) => {
+    const current = state.project.scene.panoRotation;
+    if (
+      Math.abs(current[0] - rotation[0]) < 1e-6
+      && Math.abs(current[1] - rotation[1]) < 1e-6
+      && Math.abs(current[2] - rotation[2]) < 1e-6
+    ) {
+      return state;
+    }
+    return applyBuildSceneChange(state, {
+      panoRotation: [
+        rotation[0],
+        rotation[1],
+        rotation[2],
+      ] as Euler,
       history: 'step',
     });
   }),
