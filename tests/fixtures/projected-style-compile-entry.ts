@@ -86,14 +86,13 @@ function tryDualBlend(
   const primaryTex = makeSolidDataTexture(255, 0, 0);
   const secondaryTex = makeSolidDataTexture(0, 0, 255);
 
-  const blendModeId = mode === 'secondary_only' ? 1
-    : mode === 'primary_dominant' ? 2
-    : mode === 'secondary_dominant' ? 3
-    : 0;
+  const hasSecondary = mode !== 'primary_only';
+  const primaryOrigin: [number, number, number] = [0, 1.6, 0];
+  const secondaryOrigin: [number, number, number] = [10, 1.6, 0];
 
   const material = createProjectedStyleMaterial({
     texture: primaryTex,
-    origin: [0, 1.6, 0],
+    origin: primaryOrigin,
     rotation: [0, 0, 0],
     settings: {
       ...defaultProjectedStyleSettings,
@@ -102,18 +101,23 @@ function tryDualBlend(
     },
     fallbackColor: 0x888888,
     disposable: true,
-    secondaryTexture: blendModeId !== 0 ? secondaryTex : undefined,
-    secondaryOrigin: blendModeId !== 0 ? [5, 1.6, 0] : undefined,
+    secondaryTexture: hasSecondary ? secondaryTex : undefined,
+    secondaryOrigin: hasSecondary ? secondaryOrigin : undefined,
     secondaryRotation: [0, 0, 0],
   });
 
-  // Place box near primary origin so primary should dominate in dominant modes.
-  const result = renderAndReadPixel(
-    renderer,
-    material,
-    [0, 1.6, 2],
-    [0, 1.6, 6],
-  );
+  // Place box near the dominant origin so channel readback is unambiguous:
+  //   primary_only / primary_dominant → near primary → red dominates
+  //   secondary_only / secondary_dominant → near secondary → blue dominates
+  const nearPrimary = mode === 'primary_only' || mode === 'primary_dominant';
+  const boxPos: [number, number, number] = nearPrimary
+    ? [0.5, 1.6, 0.5]
+    : [10, 1.6, 0.5];
+  const camPos: [number, number, number] = nearPrimary
+    ? [-2, 2.6, 5]
+    : [7, 2.6, 5];
+
+  const result = renderAndReadPixel(renderer, material, boxPos, camPos);
 
   primaryTex.dispose();
   secondaryTex.dispose();

@@ -125,11 +125,9 @@ describe('projected style WebGL compile gate', () => {
         expect(primaryDominant.pixelR).toBeGreaterThan(primaryDominant.pixelB + 20);
       }
 
-      // In secondary_dominant mode near secondary origin: blue may dominate, but at minimum
-      // the pixel should have mixed content (not all one color).
+      // In secondary_dominant mode near secondary origin: blue should exceed red.
       if (secondaryDominant?.pixelR !== undefined && secondaryDominant?.pixelB !== undefined) {
-        // Near primary origin but secondary dominant, so colors should be mixed
-        expect(secondaryDominant.pixelB).toBeGreaterThan(0);
+        expect(secondaryDominant.pixelB).toBeGreaterThan(secondaryDominant.pixelR + 20);
       }
 
       expect(pageErrors.filter((e) => /shader|fragment|compile|link/i.test(e))).toEqual([]);

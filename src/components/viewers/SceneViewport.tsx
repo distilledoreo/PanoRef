@@ -15,6 +15,7 @@ import {
   resolveProjectedProjectorAssets,
 } from '../../engine/multiOriginProjection';
 import {
+  computeProjectedAppearanceState,
   normalizeProjectedStyleSettings,
   type ViewportAppearanceMode,
 } from '../../engine/projectedStyle';
@@ -236,6 +237,7 @@ export function SceneViewport({
   const flyDirtyRef = useRef(false);
   const projectedTextureUrlRef = useRef<string | undefined>();
   const projectedSecondaryUrlRef = useRef<string | undefined>();
+  const projectedSecondaryLoadingRef = useRef(false);
   const [projectedTexture, setProjectedTexture] = useState<THREE.Texture | null>(null);
   const [projectedSecondaryTexture, setProjectedSecondaryTexture] = useState<THREE.Texture | null>(null);
   const [projectedTextureReadyUrl, setProjectedTextureReadyUrl] = useState<string | undefined>();
@@ -791,7 +793,9 @@ export function SceneViewport({
       if (originPlacement && showTransformGizmoRef.current && gizmoRef.current && cameraRef.current) {
         const originMode: GizmoMode = gizmoModeRef.current === 'rotate' ? 'rotate' : 'translate';
         const originGizmoHit = findGizmoHit(pointer.raycaster, gizmoRef.current, originMode);
-        if (originGizmoHit && beginOriginGizmoDrag(originGizmoHit, pointer, event)) {
+        if (originGizmoHit) {
+          // Always consume the hit — even if consent is denied, do not fall through to orbit.
+          beginOriginGizmoDrag(originGizmoHit, pointer, event);
           return;
         }
         beginOrbitDrag(event);
@@ -1347,18 +1351,22 @@ export function SceneViewport({
         cancelled = true;
       };
     }
-    if (projectedSecondaryUrlRef.current === url) {
-      return () => {
-        cancelled = true;
-      };
+    if (projectedSecondaryLoadingRef.current) {
+      return () => { cancelled = true; };
     }
     const previousUrl = projectedSecondaryUrlRef.current;
     projectedSecondaryUrlRef.current = url;
+    projectedSecondaryLoadingRef.current = true;
     setSecondaryLoadError(false);
     void acquireProjectedStyleTexture(url).then((texture) => {
-      if (cancelled) return;
+      projectedSecondaryLoadingRef.current = false;
+      if (cancelled) {
+        if (texture) releaseProjectedStyleTexture(url);
+        return;
+      }
       if (!texture) {
         setSecondaryLoadError(true);
+        if (previousUrl && previousUrl !== url) releaseProjectedStyleTexture(previousUrl);
         return;
       }
       setProjectedSecondaryTexture(texture);
@@ -1411,30 +1419,19 @@ export function SceneViewport({
     ?? normalizeProjectedStyleSettings(project.settings.projectedStyle);
   const projectedPano = projectedProjectors?.primary;
   const projectedSecondary = projectedProjectors?.secondary;
-  /**
-   * projectedActive: true when primary projection is viable.
-   * Does NOT depend on secondary readiness — secondary absence or failure
-   * degrades to primary-only instead of falling back to clay.
-   */
-  const projectedActive = appearance === 'projected'
-    && Boolean(projectedTexture)
-    && projectedTextureReadyUrl === projectedAssetKey
-    && Boolean(projectedPano);
-
-  /**
-   * dualActive: true only when both projectors are ready and the blend mode
-   * actually uses the secondary.
-   */
-  const secondaryReady = !projectedSecondaryAssetKey
-    || (
-      Boolean(projectedSecondaryTexture)
-      && projectedSecondaryReadyUrl === projectedSecondaryAssetKey
-    );
-  const dualActive = projectedActive
-    && projectedBlendMode !== 'primary_only'
-    && Boolean(projectedSecondaryPanoId)
-    && Boolean(projectedSecondaryTexture)
-    && projectedSecondaryReadyUrl === projectedSecondaryAssetKey;
+  const projectedState = computeProjectedAppearanceState({
+    appearance,
+    primaryTextureReady: Boolean(projectedTexture),
+    primaryReadyUrl: projectedTextureReadyUrl ?? '',
+    primaryAssetKey: projectedAssetKey,
+    primaryPanoExists: Boolean(projectedPano),
+    blendMode: projectedBlendMode,
+    secondaryPanoIdExists: Boolean(projectedSecondaryPanoId),
+    secondaryTextureReady: Boolean(projectedSecondaryTexture),
+    secondaryReadyUrl: projectedSecondaryReadyUrl ?? '',
+    secondaryAssetKey: projectedSecondaryAssetKey,
+  });
+  const { projectedActive, dualActive } = projectedState;
 
   useEffect(() => {
     previewMeshRef.current = null;
