@@ -11,8 +11,17 @@ import {
   DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
   type CameraMoveCubemapFaceId,
 } from './cameraMoveCubemap';
-import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH } from '../domain/defaults';
+import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH, normalizeProjectedStyleSettings } from '../domain/defaults';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
+import {
+  canUseProjectedAppearance,
+  getProjectedStyleAssetUri,
+  resolveProjectedStylePano,
+} from './projectedStyle';
+import {
+  acquireProjectedStyleTexture,
+  releaseProjectedStyleTexture,
+} from './projectedStyleMaterials';
 import { buildScene, disposeScene, type SceneVisualTheme } from './sceneObjects';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 
@@ -47,6 +56,11 @@ export interface CameraMoveVideoOptions {
   signal?: AbortSignal;
   /** Wall-clock timeout in ms (default 90s). */
   timeoutMs?: number;
+  /**
+   * Scene appearance for the encoded move.
+   * `projected` requires a valid styled panorama projector.
+   */
+  appearance?: 'clay' | 'projected';
 }
 
 const MP4_MIME_CANDIDATES = [
@@ -178,13 +192,48 @@ export async function renderShotCameraMoveMp4(
     throw new Error('MP4 camera move export is not supported in this browser.');
   }
 
+  const appearance = options.appearance ?? 'clay';
+  let projectorImageUrl: string | undefined;
+  let projectorTexture: THREE.Texture | null = null;
+
+  if (appearance === 'projected') {
+    if (!canUseProjectedAppearance(project)) {
+      throw new Error(
+        'Projected camera-move MP4 requires an importable styled panorama with a valid image asset.',
+      );
+    }
+    const pano = resolveProjectedStylePano(project);
+    projectorImageUrl = getProjectedStyleAssetUri(project, pano);
+    if (!pano || !projectorImageUrl) {
+      throw new Error('Projected camera-move MP4 could not resolve the projector panorama asset.');
+    }
+    projectorTexture = await acquireProjectedStyleTexture(projectorImageUrl);
+    if (!projectorTexture) {
+      throw new Error('Projected camera-move MP4 failed to decode the panorama texture.');
+    }
+  }
+
   const frameRate = options.frameRate ?? 30;
   const durationSeconds = getCameraMoveDurationSeconds(keyframes);
   const width = shot.exportSettings.width;
   const height = shot.exportSettings.height;
   await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
-  const scene = buildScene(project, { showHelpers: false, hiddenObjectTypes: ['sun_marker'] });
+  const pano = appearance === 'projected' ? resolveProjectedStylePano(project) : undefined;
+  const scene = buildScene(project, {
+    showHelpers: false,
+    hiddenObjectTypes: ['sun_marker'],
+    appearance: appearance === 'projected' && projectorTexture && pano ? 'projected' : 'clay',
+    projected: appearance === 'projected' && projectorTexture && pano
+      ? {
+        texture: projectorTexture,
+        origin: pano.origin,
+        rotation: pano.rotation,
+        settings: normalizeProjectedStyleSettings(project.settings.projectedStyle),
+        disposableMaterials: true,
+      }
+      : undefined,
+  });
   const camera = new THREE.PerspectiveCamera(
     shot.camera.fovDegrees,
     width / height,
@@ -196,12 +245,14 @@ export async function renderShotCameraMoveMp4(
   if (!captureStream) {
     disposeScene(scene);
     disposeRenderer(renderer);
+    releaseProjectedStyleTexture(projectorImageUrl);
     throw new Error('Canvas video capture is not supported in this browser.');
   }
 
   const stream = captureStream(frameRate);
   const chunks: Blob[] = [];
-  const timeoutMs = options.timeoutMs ?? 90_000;
+  // Longer moves need more wall time (esp. 4K projected).
+  const timeoutMs = options.timeoutMs ?? Math.max(90_000, Math.ceil(durationSeconds * 12_000));
   const externalSignal = options.signal;
 
   try {
@@ -291,6 +342,7 @@ export async function renderShotCameraMoveMp4(
     stream.getTracks().forEach((track) => track.stop());
     disposeScene(scene);
     disposeRenderer(renderer);
+    releaseProjectedStyleTexture(projectorImageUrl);
   }
 
   const blob = new Blob(chunks, { type: mimeType });
@@ -382,6 +434,82 @@ export async function renderViewportClay(
   disposeRenderer(renderer);
 
   return { dataUrl, width, height };
+}
+
+/**
+ * Render a camera frame with world-space projected style appearance.
+ * Throws when projected export is requested but no valid projector is available.
+ */
+export async function renderViewportProjected(
+  project: LocationProject,
+  cameraData: CameraData,
+  width: number,
+  height: number,
+): Promise<ImageRenderResult> {
+  if (!canUseProjectedAppearance(project)) {
+    throw new Error(
+      'Projected viewport export requires an importable styled panorama with a valid image asset.',
+    );
+  }
+  const pano = resolveProjectedStylePano(project);
+  const imageUrl = getProjectedStyleAssetUri(project, pano);
+  if (!pano || !imageUrl) {
+    throw new Error('Projected viewport export could not resolve the projector panorama asset.');
+  }
+
+  await ensureHumanMannequinModel();
+  const texture = await acquireProjectedStyleTexture(imageUrl);
+  if (!texture) {
+    throw new Error('Projected viewport export failed to decode the panorama texture.');
+  }
+
+  const renderer = createRenderer(width, height);
+  const scene = buildScene(project, {
+    showHelpers: false,
+    hiddenObjectTypes: ['sun_marker'],
+    appearance: 'projected',
+    projected: {
+      texture,
+      origin: pano.origin,
+      rotation: pano.rotation,
+      settings: normalizeProjectedStyleSettings(project.settings.projectedStyle),
+      disposableMaterials: true,
+    },
+  });
+  const camera = new THREE.PerspectiveCamera(
+    cameraData.fovDegrees,
+    width / height,
+    cameraData.near,
+    cameraData.far,
+  );
+  applyFlyCameraToPerspectiveCamera(
+    camera,
+    flyCameraFromCamera(cameraData),
+    cameraData.fovDegrees,
+    width / height,
+    cameraData.near,
+    cameraData.far,
+  );
+  renderer.render(scene, camera);
+  const dataUrl = renderer.domElement.toDataURL('image/png');
+
+  disposeScene(scene);
+  disposeRenderer(renderer);
+  releaseProjectedStyleTexture(imageUrl);
+
+  return { dataUrl, width, height };
+}
+
+export async function renderShotProjectedFrame(
+  project: LocationProject,
+  shot: Shot,
+): Promise<ImageRenderResult> {
+  return renderViewportProjected(
+    project,
+    shot.camera,
+    shot.exportSettings.width,
+    shot.exportSettings.height,
+  );
 }
 
 export async function renderPanoPerspectiveCrop(

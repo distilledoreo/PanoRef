@@ -329,19 +329,22 @@ export function ExportWorkspace() {
             </div>
             {([
               ['includeViewport', 'Viewport clay render'],
+              ['includeProjectedViewport', 'Viewport projected render (with clay when available)'],
               ['includeAiResultFrame', 'AI result frame (if already attached)'],
               ['includePanoCrop', 'Pano crop'],
               ['includeFullPano', 'Styled reference pano'],
               ['includeGrayboxPano', 'Graybox pano'],
-              ['includeCameraMoveVideo', 'Camera move MP4'],
+              ['includeCameraMoveVideo', 'Camera move clay MP4'],
+              ['includeProjectedCameraMoveVideo', 'Camera move projected MP4'],
               ['includeCameraMoveReferenceFrames', 'Camera move clay frames'],
+              ['includeProjectedCameraMoveReferenceFrames', 'Camera move projected frames'],
               ['includeMetadata', 'Metadata JSON'],
               ['includePrompt', 'Prompts'],
             ] as const).map(([key, label]) => (
               <label key={key} className="flex items-center gap-2 rounded-lg border border-subtle px-3 py-2 text-sm text-secondary">
                 <input
                   type="checkbox"
-                  checked={selectedShot.exportSettings[key]}
+                  checked={Boolean(selectedShot.exportSettings[key])}
                   onChange={(event) => updateShot(selectedShot.id, {
                     exportSettings: { ...selectedShot.exportSettings, [key]: event.target.checked },
                   })}

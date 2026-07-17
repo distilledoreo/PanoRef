@@ -70,16 +70,48 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('MP4 export is not supported in this browser. Try Chrome or Edge.');
     expect(shots).toContain('data-shots-settings-trigger');
     expect(shots).toContain('data-shots-video-duration');
-    expect(shots).toContain('VIDEO_DURATION_PRESETS_SECONDS');
+    expect(shots).toContain('VIDEO_DURATION_UI_MIN_SECONDS');
+    expect(shots).toContain('VIDEO_DURATION_UI_MAX_SECONDS');
+    expect(shots).toContain('type="range"');
     expect(shots).toContain('landShotFraming');
     expect(shots).toContain('keepFlying: true');
     expect(shots).toContain('captureStill');
     expect(shots).toContain("captureMode === 'still'");
     expect(shots).toContain("captureMode === 'video'");
     expect(shots).toContain('viewfinder stays live');
+    expect(shots).toContain('AppearanceModeToggle');
+    expect(shots).toContain('data-shots-dual-output-hint');
+    expect(shots).toContain('renderShotProjectedFrame');
     expect(shots).not.toContain('data-shots-action-dock');
     expect(shots).not.toContain('data-shots-land-fork');
     expect(shots).not.toContain('ShotInfoCard');
+  });
+
+  it('exposes clay/projected appearance controls and double-tap W sprint', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
+    const shortcuts = readFileSync(new URL('../src/engine/buildShortcuts.ts', import.meta.url), 'utf8');
+    const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
+    const exportWorkspace = readFileSync(new URL('../src/components/workspaces/ExportWorkspace.tsx', import.meta.url), 'utf8');
+    const packageExport = readFileSync(new URL('../src/engine/packageExport.ts', import.meta.url), 'utf8');
+    const help = readFileSync(new URL('../src/components/workspaces/HelpWorkspace.tsx', import.meta.url), 'utf8');
+
+    expect(build).toContain('AppearanceModeToggle');
+    expect(build).toContain('double-tap W to sprint');
+    expect(build).not.toContain('Ctrl sprint');
+    expect(viewport).toContain('reduceForwardSprint');
+    expect(viewport).toContain("event.code === 'KeyW'");
+    expect(viewport).not.toContain("keys.has('ControlLeft')");
+    expect(shortcuts).not.toContain("'ControlLeft'");
+    expect(shortcuts).not.toContain("'ControlRight'");
+    expect(reference).toContain('ProjectedStylePanel');
+    expect(exportWorkspace).toContain('includeProjectedViewport');
+    expect(exportWorkspace).toContain('includeProjectedCameraMoveVideo');
+    expect(packageExport).toContain('viewport_projected.png');
+    expect(packageExport).toContain('viewport_projected_motion.mp4');
+    expect(packageExport).toContain("appearance: 'projected'");
+    expect(help).toContain('Projected Style');
+    expect(help).toContain('double-tap W');
   });
 
   it('pauses automatic shot frame preview renders while fly camera is active', () => {
@@ -451,7 +483,7 @@ describe('ui revamp fidelity surfaces', () => {
   it('keeps Build floating controls below the mobile-safe header', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
 
-    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(5);
+    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(6);
     expect(build).not.toContain('top-20');
   });
 

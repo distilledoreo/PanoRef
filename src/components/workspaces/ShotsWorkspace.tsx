@@ -31,7 +31,14 @@ import {
   updateCameraMoveDuration,
 } from '../../engine/cameraKeyframes';
 import { downloadBlob, downloadDataUrl } from '../../engine/projectIO';
-import { getSupportedCameraMoveMp4MimeType, renderShotCameraMoveMp4, renderShotFrame } from '../../engine/renderers';
+import {
+  getSupportedCameraMoveMp4MimeType,
+  renderShotCameraMoveMp4,
+  renderShotFrame,
+  renderShotProjectedFrame,
+  renderViewportProjected,
+} from '../../engine/renderers';
+import { getCameraMoveReferenceFrames } from '../../engine/cameraKeyframes';
 import { isShotFramingAccepted } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
 import { useContinuityStore } from '../../state/useContinuityStore';
@@ -41,6 +48,8 @@ import { ShotThumbnail } from '../common/ShotThumbnail';
 import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
+import { canUseProjectedAppearance } from '../../engine/projectedStyle';
+import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { FullBleedLayout } from './WorkspaceShell';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
@@ -52,8 +61,9 @@ const STATUS_LABELS: Record<ShotStatus, string> = {
   rejected: 'Rejected',
 };
 
-/** Quick picks shown on the camera chrome while recording a move. */
-const VIDEO_DURATION_PRESETS_SECONDS = [1, 2, 3, 5, 8] as const;
+/** Compact chrome slider range: 1–20s in whole-second steps. */
+const VIDEO_DURATION_UI_MIN_SECONDS = 1;
+const VIDEO_DURATION_UI_MAX_SECONDS = 20;
 
 type CaptureMode = 'still' | 'video';
 
@@ -70,6 +80,15 @@ function clampVideoDuration(seconds: number): number {
   return Math.min(
     MAX_CAMERA_MOVE_DURATION_SECONDS,
     Math.max(MIN_CAMERA_MOVE_DURATION_SECONDS, seconds),
+  );
+}
+
+/** Round to whole seconds for the chrome slider (1–20). */
+function clampVideoDurationUiSeconds(seconds: number): number {
+  const rounded = Math.round(clampVideoDuration(seconds));
+  return Math.min(
+    VIDEO_DURATION_UI_MAX_SECONDS,
+    Math.max(VIDEO_DURATION_UI_MIN_SECONDS, rounded),
   );
 }
 
@@ -116,6 +135,7 @@ export function ShotsWorkspace() {
   const [showCompare, setShowCompare] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [captureMode, setCaptureMode] = useState<CaptureMode>('still');
+  const [appearance, setAppearance] = useState<'clay' | 'projected'>('clay');
   const [landFlash, setLandFlash] = useState(false);
   /** Pending move length — applied when end is captured (and updates existing end if present). */
   const [videoDurationSeconds, setVideoDurationSeconds] = useState(DEFAULT_CAMERA_MOVE_DURATION_SECONDS);
@@ -175,6 +195,7 @@ export function ShotsWorkspace() {
     if (!previewShot) return;
     setIsExportingFrame(true);
     try {
+      // Clay remains the shot-attached geometric control frame.
       const frame = await renderShotFrame(project, previewShot);
       setShotFramePreview(previewShot.id, frame.dataUrl);
       attachViewportRenderToShot(previewShot.id, {
@@ -184,6 +205,16 @@ export function ShotsWorkspace() {
         height: frame.height,
       });
       downloadDataUrl(frame.dataUrl, exportFrameFileName);
+      // Also download a projected still when a styled pano is available (dual output).
+      if (canUseProjectedAppearance(project)) {
+        try {
+          const projected = await renderShotProjectedFrame(project, previewShot);
+          const projectedName = exportFrameFileName.replace(/\.png$/i, '_projected.png');
+          downloadDataUrl(projected.dataUrl, projectedName);
+        } catch {
+          // Soft-fail projected companion; clay already succeeded.
+        }
+      }
       if (!shotCameraFlying) {
         updateShot(previewShot.id, { status: 'exported' });
       }
@@ -250,13 +281,17 @@ export function ShotsWorkspace() {
     setCameraMoveError(undefined);
 
     try {
+      // Progress splits: clay motion 0–55%, projected motion 55–100% when dual.
+      const dualProjectedVideo = canUseProjectedAppearance(project);
       const video = await renderShotCameraMoveMp4(project, selectedShot, {
         mimeType,
         frameRate: 30,
-        timeoutMs: 90_000,
+        appearance: 'clay',
         signal: abortController.signal,
         onProgress: (progress) => {
-          if (!cameraMoveAbortRef.current.cancelled) setCameraMoveProgress(progress);
+          if (!cameraMoveAbortRef.current.cancelled) {
+            setCameraMoveProgress(dualProjectedVideo ? progress * 0.55 : progress);
+          }
         },
       });
       if (cameraMoveAbortRef.current.cancelled) return;
@@ -272,6 +307,40 @@ export function ShotsWorkspace() {
       setCameraMovePreviewUrl(asset.uri);
       // Download from the MediaRecorder blob — multi‑MB data: URLs fail as anchor hrefs.
       downloadBlob(video.blob, asset.name || cameraMoveFileName);
+
+      if (dualProjectedVideo && !cameraMoveAbortRef.current.cancelled) {
+        try {
+          const projectedVideo = await renderShotCameraMoveMp4(project, selectedShot, {
+            mimeType,
+            frameRate: 30,
+            appearance: 'projected',
+            signal: abortController.signal,
+            onProgress: (progress) => {
+              if (!cameraMoveAbortRef.current.cancelled) {
+                setCameraMoveProgress(0.55 + progress * 0.45);
+              }
+            },
+          });
+          if (cameraMoveAbortRef.current.cancelled) return;
+          const projectedName = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '_projected.mp4');
+          downloadBlob(projectedVideo.blob, projectedName);
+          // Optional still contact sheet companions.
+          const frames = getCameraMoveReferenceFrames(selectedShot.cameraKeyframes);
+          const base = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '');
+          for (const frame of frames) {
+            const projected = await renderViewportProjected(
+              project,
+              frame.camera,
+              selectedShot.exportSettings.width,
+              selectedShot.exportSettings.height,
+            );
+            downloadDataUrl(projected.dataUrl, `${base}_projected_${frame.id}.png`);
+          }
+          setCameraMoveProgress(1);
+        } catch {
+          // Soft-fail projected companions; clay MP4 already succeeded.
+        }
+      }
     } catch (error) {
       if (!cameraMoveAbortRef.current.cancelled) {
         setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
@@ -372,15 +441,28 @@ export function ShotsWorkspace() {
       },
     };
     setSnapshotError(undefined);
+    const baseName = `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}`;
     void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number])
-      .then((frame) => {
+      .then(async (frame) => {
         setShotFramePreview(shot.id, frame.dataUrl);
         useContinuityStore.getState().attachViewportRenderToShot(shot.id, {
-          name: `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}_viewport.png`,
+          name: `${baseName}_viewport.png`,
           dataUrl: frame.dataUrl,
           width: frame.width,
           height: frame.height,
         });
+        // Dual download: clay control frame is attached; projected companion downloads when available.
+        if (canUseProjectedAppearance(latestProject)) {
+          try {
+            const projected = await renderShotProjectedFrame(
+              latestProject,
+              previewShot as typeof latestProject.shots[number],
+            );
+            downloadDataUrl(projected.dataUrl, `${baseName}_viewport_projected.png`);
+          } catch {
+            // Soft-fail projected companion.
+          }
+        }
       })
       .catch(() => {
         setSnapshotError('Could not save the shot preview. Try Capture again.');
@@ -686,27 +768,44 @@ export function ShotsWorkspace() {
             project={project}
             selectedShotId={selectedShot?.id}
             shotFraming={shotFraming}
+            appearance={appearance}
             minHeightClassName="min-h-0"
           />
         </div>
 
         {/* Top chrome: shot index + settings */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between px-4 pt-[calc(var(--stage-header-safe)+0.35rem)]">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-4 pt-[calc(var(--stage-header-safe)+0.35rem)]">
           <div className="pointer-events-auto rounded-full bg-black/45 px-3 py-1 text-xs font-semibold tabular-nums text-white/90 backdrop-blur-sm">
             {selectedShot
               ? `${selectedIndex + 1} / ${project.shots.length}`
               : 'No shots'}
           </div>
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white shadow-card backdrop-blur-sm transition hover:bg-black/60"
-            aria-label="Camera settings"
-            data-shots-settings-trigger
-            title="Settings (I)"
-          >
-            <Settings2 className="h-4 w-4" />
-          </button>
+          <div className="pointer-events-auto flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              <AppearanceModeToggle
+                value={appearance}
+                projectedAvailable={canUseProjectedAppearance(project)}
+                onChange={setAppearance}
+                compact
+                className="border-white/15 bg-black/50 text-white [&_button]:text-white/80 [&_button[aria-pressed=true]]:bg-white [&_button[aria-pressed=true]]:text-zinc-900"
+              />
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white shadow-card backdrop-blur-sm transition hover:bg-black/60"
+                aria-label="Camera settings"
+                data-shots-settings-trigger
+                title="Settings (I)"
+              >
+                <Settings2 className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="max-w-[14rem] text-right text-[10px] font-medium text-white/55" data-shots-dual-output-hint>
+              {canUseProjectedAppearance(project)
+                ? 'View mode only · exports include clay + projected'
+                : 'View mode only · exports save clay frames'}
+            </p>
+          </div>
         </div>
 
         {/* Quiet landed flash */}
@@ -873,31 +972,29 @@ export function ShotsWorkspace() {
               </div>
               <div
                 data-shots-video-duration
-                className="flex flex-wrap items-center justify-center gap-1.5 rounded-full bg-black/45 px-2 py-1.5 backdrop-blur-md"
+                className="flex w-full max-w-sm items-center gap-3 rounded-full bg-black/45 px-3 py-2 backdrop-blur-md"
                 role="group"
                 aria-label="Video duration"
               >
-                <span className="px-1.5 text-[10px] font-semibold uppercase tracking-wide text-white/55">
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white/55">
                   Length
                 </span>
-                {VIDEO_DURATION_PRESETS_SECONDS.map((seconds) => {
-                  const active = Math.abs(videoDurationSeconds - seconds) < 0.05;
-                  return (
-                    <button
-                      key={seconds}
-                      type="button"
-                      onClick={() => changeCameraMoveDuration(seconds)}
-                      className={`min-h-11 min-w-[2.75rem] rounded-full px-3 py-2 text-xs font-bold tabular-nums transition ${
-                        active
-                          ? 'bg-white text-zinc-900 shadow-sm'
-                          : 'text-white/80 hover:bg-white/10 hover:text-white'
-                      }`}
-                      aria-pressed={active}
-                    >
-                      {seconds}s
-                    </button>
-                  );
-                })}
+                <input
+                  type="range"
+                  min={VIDEO_DURATION_UI_MIN_SECONDS}
+                  max={VIDEO_DURATION_UI_MAX_SECONDS}
+                  step={1}
+                  value={clampVideoDurationUiSeconds(videoDurationSeconds)}
+                  onChange={(event) => changeCameraMoveDuration(Number(event.target.value))}
+                  className="h-2 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-white/20 accent-red-500 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                  aria-valuemin={VIDEO_DURATION_UI_MIN_SECONDS}
+                  aria-valuemax={VIDEO_DURATION_UI_MAX_SECONDS}
+                  aria-valuenow={clampVideoDurationUiSeconds(videoDurationSeconds)}
+                  aria-valuetext={`${clampVideoDurationUiSeconds(videoDurationSeconds)} seconds`}
+                />
+                <span className="min-w-[2.75rem] shrink-0 text-center text-sm font-bold tabular-nums text-white">
+                  {clampVideoDurationUiSeconds(videoDurationSeconds)}s
+                </span>
               </div>
               {videoPhase === 'export' && !isExportingCameraMove && (
                 <button

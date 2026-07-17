@@ -72,6 +72,8 @@ import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
 import { ModelImportDialog } from '../common/ModelImportDialog';
 import { Vec3Input } from '../common/Vec3Input';
+import { canUseProjectedAppearance } from '../../engine/projectedStyle';
+import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { FullBleedLayout } from './WorkspaceShell';
 
@@ -110,6 +112,7 @@ export function BuildWorkspace() {
   const [frameRequest, setFrameRequest] = useState(0);
   const [frameObjectIds, setFrameObjectIds] = useState<string[]>([]);
   const [freeCameraActive, setFreeCameraActive] = useState(false);
+  const [appearance, setAppearance] = useState<'clay' | 'projected'>('clay');
   const [renderDistanceOpen, setRenderDistanceOpen] = useState(false);
   const [renderDistance, setRenderDistance] = useState(DEFAULT_BUILD_RENDER_DISTANCE);
   const {
@@ -397,6 +400,7 @@ export function BuildWorkspace() {
           placementLabel={primitiveLabel(activePrimitive)}
           originPlacementActive={buildMode === 'pano_origin'}
           freeCameraActive={freeCameraActive}
+          appearance={appearance}
           renderDistance={renderDistance}
           onFreeCameraActiveChange={setFreeCameraActive}
           showSceneGuides={showSceneGuides}
@@ -589,16 +593,29 @@ export function BuildWorkspace() {
           </div>
         )}
 
+        <div
+          className="pointer-events-auto absolute left-5 z-10"
+          style={{ top: freeCameraActive
+            ? (renderDistanceOpen ? 'calc(var(--stage-header-safe) + 11rem)' : 'calc(var(--stage-header-safe) + 4rem)')
+            : 'calc(var(--stage-header-safe) + 0.35rem)' }}
+        >
+          <AppearanceModeToggle
+            value={appearance}
+            projectedAvailable={canUseProjectedAppearance(project)}
+            onChange={setAppearance}
+          />
+        </div>
+
         {freeCameraActive && (
           <div
             data-build-free-camera-guidance
             className="pointer-events-none absolute left-5 z-10"
-            style={{ top: renderDistanceOpen ? 'calc(var(--stage-header-safe) + 11rem)' : 'calc(var(--stage-header-safe) + 4rem)' }}
+            style={{ top: renderDistanceOpen ? 'calc(var(--stage-header-safe) + 14.5rem)' : 'calc(var(--stage-header-safe) + 7.5rem)' }}
             role="status"
           >
             <ContextualPanel className="max-w-[calc(100vw-2.5rem)] text-sm text-secondary">
               <Navigation className="mr-1.5 inline h-4 w-4 text-accent" />
-              <span className="hidden md:inline">Free camera: drag to look · WASD move · Space/Shift up/down · Ctrl sprint · Esc exits</span>
+              <span className="hidden md:inline">Free camera: drag to look · WASD move · Space/Shift up/down · double-tap W to sprint · Esc exits</span>
               <span className="md:hidden">Free camera: drag to look · use the pad to move · tap Free camera to edit</span>
             </ContextualPanel>
           </div>

@@ -28,8 +28,6 @@ export const BUILD_FREE_CAMERA_KEY_CODES = [
   'Space',
   'ShiftLeft',
   'ShiftRight',
-  'ControlLeft',
-  'ControlRight',
 ] as const;
 
 export function isBuildFreeCameraKey(code: string): boolean {

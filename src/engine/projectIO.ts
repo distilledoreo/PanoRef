@@ -96,6 +96,9 @@ function normalizeShot(shot: Shot): Shot {
     includeSkinnedFrame?: boolean;
     includeCameraMoveVideo?: boolean;
     includeCameraMoveReferenceFrames?: boolean;
+    includeProjectedViewport?: boolean;
+    includeProjectedCameraMoveReferenceFrames?: boolean;
+    includeProjectedCameraMoveVideo?: boolean;
   };
   const legacyAssets = shot.assets as Shot['assets'] & { skinnedFrameAssetId?: string };
   const { includeContinuityControlView: _ignored, includeSkinnedFrame: _ignoredSkinned, ...exportSettings } = legacyExportSettings;
@@ -107,6 +110,11 @@ function normalizeShot(shot: Shot): Shot {
       includeAiResultFrame: legacyExportSettings.includeAiResultFrame ?? legacyExportSettings.includeSkinnedFrame ?? true,
       includeCameraMoveVideo: legacyExportSettings.includeCameraMoveVideo ?? true,
       includeCameraMoveReferenceFrames: legacyExportSettings.includeCameraMoveReferenceFrames ?? true,
+      includeProjectedViewport: legacyExportSettings.includeProjectedViewport ?? true,
+      includeProjectedCameraMoveReferenceFrames:
+        legacyExportSettings.includeProjectedCameraMoveReferenceFrames ?? true,
+      includeProjectedCameraMoveVideo:
+        legacyExportSettings.includeProjectedCameraMoveVideo ?? true,
     },
     assets: {
       ...shot.assets,

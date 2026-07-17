@@ -3,8 +3,25 @@ import * as THREE from 'three';
 import { objectDisplayName } from '../../domain/defaults';
 import { CameraData, LocationProject, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import { isBuildFreeCameraKey } from '../../engine/buildShortcuts';
+import {
+  createForwardSprintState,
+  isForwardSprinting,
+  reduceForwardSprint,
+  type ForwardSprintState,
+} from '../../engine/forwardSprint';
 import { createPlacedSceneObject, resolveStampPoint, snapBuildPoint } from '../../engine/sandbox';
 import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
+import {
+  canUseProjectedAppearance,
+  getProjectedStyleAssetUri,
+  normalizeProjectedStyleSettings,
+  resolveProjectedStylePano,
+  type ViewportAppearanceMode,
+} from '../../engine/projectedStyle';
+import {
+  acquireProjectedStyleTexture,
+  releaseProjectedStyleTexture,
+} from '../../engine/projectedStyleMaterials';
 import { buildScene, computeBuildFogRange, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
 import {
   angleInAxisPlane,
@@ -93,6 +110,7 @@ export function SceneViewport({
   snapToGrid = true,
   freeCameraActive = false,
   renderDistance = DEFAULT_BUILD_RENDER_DISTANCE,
+  appearance = 'clay',
   onFreeCameraActiveChange,
   shotFraming,
   onSelectObject,
@@ -122,6 +140,8 @@ export function SceneViewport({
   freeCameraActive?: boolean;
   /** Build viewport far clipping distance in meters; shot framing keeps its own camera data. */
   renderDistance?: number;
+  /** Clay keeps existing materials; Projected applies world-space equirect styling when available. */
+  appearance?: ViewportAppearanceMode;
   onFreeCameraActiveChange?: (active: boolean) => void;
   shotFraming?: {
     camera: CameraData;
@@ -185,11 +205,15 @@ export function SceneViewport({
     pitchDegrees: 0,
   });
   const flyKeysRef = useRef(new Set<string>());
+  const forwardSprintRef = useRef<ForwardSprintState>(createForwardSprintState());
   /** Continuous axes from touch pad: forward/back, strafe, up/down in [-1, 1]. */
   const flyAxesRef = useRef({ forward: 0, strafe: 0, vertical: 0 });
   const flyBoundsRef = useRef(computeSceneFlyBounds(project.scene));
   const lastFrameTimeRef = useRef(performance.now());
   const flyDirtyRef = useRef(false);
+  const projectedTextureUrlRef = useRef<string | undefined>();
+  const [projectedTexture, setProjectedTexture] = useState<THREE.Texture | null>(null);
+  const [projectedTextureReadyUrl, setProjectedTextureReadyUrl] = useState<string | undefined>();
   const gizmoRef = useRef<THREE.Group | null>(null);
   const selectionOutlineRefs = useRef<THREE.BoxHelper[]>([]);
   const showSceneGuidesRef = useRef(showSceneGuides);
@@ -388,7 +412,7 @@ export function SceneViewport({
       const moveZ = forward[2] * axisForward + right[2] * axisStrafe;
       const length = Math.hypot(moveX, moveY, moveZ);
       if (length === 0) return;
-      const sprinting = keys.has('ControlLeft') || keys.has('ControlRight');
+      const sprinting = isForwardSprinting(forwardSprintRef.current);
       const speed = FLY_SPEED * (sprinting ? FLY_SPRINT_MULTIPLIER : 1);
       const step = (speed * deltaSeconds) / length;
       fly.position = clampFlyCameraPosition(
@@ -921,18 +945,35 @@ export function SceneViewport({
         return;
       }
       if (event.target && (event.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      // Ctrl is not a camera command — never intercept Ctrl+W or Control keys.
+      if (event.code === 'ControlLeft' || event.code === 'ControlRight') return;
+      if (event.ctrlKey || event.metaKey) return;
       if (!isBuildFreeCameraKey(event.code)) return;
+      if (event.code === 'KeyW') {
+        forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, {
+          type: 'keydown',
+          timestamp: performance.now(),
+          repeat: event.repeat,
+        });
+      }
       flyKeysRef.current.add(event.code);
       event.preventDefault();
       event.stopImmediatePropagation();
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'KeyW') {
+        forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, {
+          type: 'keyup',
+          timestamp: performance.now(),
+        });
+      }
       flyKeysRef.current.delete(event.code);
     };
     const clearFlyInput = () => {
       flyKeysRef.current.clear();
       flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
+      forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, { type: 'reset' });
     };
     const onVisibilityChange = () => { if (document.hidden) clearFlyInput(); };
 
@@ -988,6 +1029,7 @@ export function SceneViewport({
 
     flyKeysRef.current.clear();
     flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
+    forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, { type: 'reset' });
     flyDirtyRef.current = false;
 
     if (freeCameraActive) {
@@ -1048,6 +1090,7 @@ export function SceneViewport({
     if (!shotFraming?.flyActive && !freeCameraActive) {
       flyKeysRef.current.clear();
       flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
+      forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, { type: 'reset' });
     }
   }, [freeCameraActive, shotFraming?.flyActive]);
 
@@ -1057,6 +1100,53 @@ export function SceneViewport({
       strafe: clampUnit(axes.strafe),
       vertical: clampUnit(axes.vertical ?? 0),
     };
+  }, []);
+
+  const projectedPanoId = project.settings.projectedStyle?.panoId;
+  const projectedAssetKey = (() => {
+    if (appearance !== 'projected') return '';
+    const pano = resolveProjectedStylePano(project);
+    return getProjectedStyleAssetUri(project, pano) ?? '';
+  })();
+
+  // Load / release shared projected-style texture when appearance or projector changes.
+  useEffect(() => {
+    let cancelled = false;
+    const url = projectedAssetKey || undefined;
+    if (!url) {
+      const previousUrl = projectedTextureUrlRef.current;
+      projectedTextureUrlRef.current = undefined;
+      setProjectedTexture(null);
+      setProjectedTextureReadyUrl(undefined);
+      releaseProjectedStyleTexture(previousUrl);
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (projectedTextureUrlRef.current === url) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const previousUrl = projectedTextureUrlRef.current;
+    projectedTextureUrlRef.current = url;
+    void acquireProjectedStyleTexture(url).then((texture) => {
+      if (cancelled || !texture) {
+        if (texture) releaseProjectedStyleTexture(url);
+        return;
+      }
+      setProjectedTexture(texture);
+      setProjectedTextureReadyUrl(url);
+      if (previousUrl && previousUrl !== url) releaseProjectedStyleTexture(previousUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectedAssetKey]);
+
+  useEffect(() => () => {
+    releaseProjectedStyleTexture(projectedTextureUrlRef.current);
+    projectedTextureUrlRef.current = undefined;
   }, []);
 
   useEffect(() => {
@@ -1088,6 +1178,13 @@ export function SceneViewport({
     Boolean(shotFraming),
   ]);
 
+  const projectedPano = resolveProjectedStylePano(project);
+  const projectedSettings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const projectedActive = appearance === 'projected'
+    && Boolean(projectedTexture)
+    && projectedTextureReadyUrl === projectedAssetKey
+    && Boolean(projectedPano);
+
   useEffect(() => {
     previewMeshRef.current = null;
     if (sceneRef.current) disposeScene(sceneRef.current);
@@ -1100,6 +1197,16 @@ export function SceneViewport({
       showHelpers: shotFraming ? false : showSceneGuides,
       theme,
       fogDistance: shotFraming ? undefined : renderDistance,
+      appearance: projectedActive ? 'projected' : 'clay',
+      projected: projectedActive && projectedTexture && projectedPano
+        ? {
+          texture: projectedTexture,
+          origin: projectedPano.origin,
+          rotation: projectedPano.rotation,
+          settings: projectedSettings,
+          disposableMaterials: true,
+        }
+        : undefined,
     });
     if (previewPointRef.current && placementTypeRef.current) {
       updatePreviewMesh(previewPointRef.current);
@@ -1109,6 +1216,14 @@ export function SceneViewport({
     clearTransformGizmo,
     originPlacementActive,
     project,
+    projectedActive,
+    projectedPano?.id,
+    projectedPanoId,
+    projectedSettings.exposure,
+    projectedSettings.fallbackMode,
+    projectedSettings.lightingContribution,
+    projectedSettings.opacity,
+    projectedTexture,
     selectedShotId,
     shotFraming,
     showSceneGuides,
@@ -1116,6 +1231,7 @@ export function SceneViewport({
     theme,
     updatePreviewMesh,
     mannequinRevision,
+    renderDistance,
   ]);
 
   useEffect(() => {

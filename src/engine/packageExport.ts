@@ -11,13 +11,16 @@ import { preparePanoExportDataUrl } from './panoImage';
 import { stitchCubemapFacesCrossAsync } from './cubemapStitch';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
 import { downloadBlob } from './projectIO';
+import { canUseProjectedAppearance } from './projectedStyle';
 import {
   getSupportedCameraMoveMp4MimeType,
   renderPanoCubemapFaces,
   renderPanoPerspectiveCrop,
   renderShotCameraMoveMp4,
   renderShotFrame,
+  renderShotProjectedFrame,
   renderViewportClay,
+  renderViewportProjected,
 } from './renderers';
 
 export { downloadBlob };
@@ -109,6 +112,21 @@ async function appendShotPackageToZip(
     addDataUrl(zip, `${rootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
   }
 
+  // Dual clay + projected when requested and a styled projector exists.
+  // Soft-skip projected when no eligible pano so clay-only packages still succeed.
+  if (shot.exportSettings.includeProjectedViewport && canUseProjectedAppearance(project)) {
+    try {
+      const projected = await renderShotProjectedFrame(project, shot);
+      addDataUrl(zip, `${rootFolder}/inputs/viewport_projected.png`, projected.dataUrl);
+    } catch (error) {
+      throw new ShotPackageError(
+        error instanceof Error
+          ? error.message
+          : 'Projected viewport export failed. Import a styled panorama or disable projected export.',
+      );
+    }
+  }
+
   if (shot.exportSettings.includeAiResultFrame && aiResultAssetId) {
     const aiResultAsset = project.assets.assets[aiResultAssetId];
     if (aiResultAsset) {
@@ -131,9 +149,36 @@ async function appendShotPackageToZip(
       const video = await renderShotCameraMoveMp4(project, shot, {
         mimeType,
         frameRate: 30,
-        timeoutMs: 90_000,
+        appearance: 'clay',
       });
       zip.file(`${rootFolder}/inputs/viewport_clay_motion.mp4`, video.blob);
+    }
+  }
+
+  if (
+    shot.exportSettings.includeProjectedCameraMoveVideo
+    && canUseProjectedAppearance(project)
+    && hasRenderableCameraMove(shot.cameraKeyframes)
+  ) {
+    const mimeType = getSupportedCameraMoveMp4MimeType();
+    if (!mimeType) {
+      throw new ShotPackageError(
+        'Projected camera-move MP4 export is not supported in this browser. Try Chrome or Edge, or disable projected motion in export settings.',
+      );
+    }
+    try {
+      const video = await renderShotCameraMoveMp4(project, shot, {
+        mimeType,
+        frameRate: 30,
+        appearance: 'projected',
+      });
+      zip.file(`${rootFolder}/inputs/viewport_projected_motion.mp4`, video.blob);
+    } catch (error) {
+      throw new ShotPackageError(
+        error instanceof Error
+          ? error.message
+          : 'Projected camera-move MP4 failed. Import a styled panorama or disable projected motion.',
+      );
     }
   }
 
@@ -150,6 +195,32 @@ async function appendShotPackageToZip(
         shot.exportSettings.height,
       );
       addDataUrl(zip, `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, clay.dataUrl);
+    }
+  }
+
+  const projectedMoveFrames = (
+    shot.exportSettings.includeProjectedCameraMoveReferenceFrames
+    && canUseProjectedAppearance(project)
+  )
+    ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
+    : [];
+  if (projectedMoveFrames.length > 0) {
+    for (const frame of projectedMoveFrames) {
+      try {
+        const projected = await renderViewportProjected(
+          project,
+          frame.camera,
+          shot.exportSettings.width,
+          shot.exportSettings.height,
+        );
+        addDataUrl(zip, `${rootFolder}/inputs/camera_move/projected_${frame.id}.png`, projected.dataUrl);
+      } catch (error) {
+        throw new ShotPackageError(
+          error instanceof Error
+            ? error.message
+            : 'Projected camera-move frames failed. Disable projected move frames or import a styled panorama.',
+        );
+      }
     }
   }
 

@@ -6,6 +6,7 @@ import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
 import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
 import { ReferenceAlignmentPanel } from '../common/ReferenceAlignmentPanel';
+import { ProjectedStylePanel } from '../common/ProjectedStylePanel';
 import { StyledPanoImportButton } from '../common/StyledPanoImportButton';
 import { ContextualPanel } from '../common/ContextualPanel';
 import { Field, IconButton, TextInput } from '../common/Field';
@@ -454,6 +455,14 @@ export function ReferenceWorkspace() {
               </span>
             </span>
           </label>
+
+          <div className="border-t border-subtle pt-4">
+            <ProjectedStylePanel
+              project={project}
+              onChange={(projectedStyle) => updateProjectSettings({ projectedStyle })}
+            />
+          </div>
+
           {needsReferenceAlignment(project) && !alignmentAccepted && (
             <button
               type="button"
