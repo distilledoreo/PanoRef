@@ -52,10 +52,18 @@ const STATUS_LABELS: Record<ShotStatus, string> = {
   rejected: 'Rejected',
 };
 
-/** Quick picks shown on the camera chrome while capturing a move end. */
+/** Quick picks shown on the camera chrome while recording a move. */
 const VIDEO_DURATION_PRESETS_SECONDS = [1, 2, 3, 5, 8] as const;
 
 type CaptureMode = 'still' | 'video';
+
+/**
+ * Video shutter phases (iPhone-style record → stop → export):
+ * - record: press red shutter to capture the starting keyframe
+ * - stop: press stop to capture the ending keyframe
+ * - export: press to encode the graybox MP4
+ */
+type VideoShutterPhase = 'record' | 'stop' | 'export';
 
 function clampVideoDuration(seconds: number): number {
   if (!Number.isFinite(seconds)) return DEFAULT_CAMERA_MOVE_DURATION_SECONDS;
@@ -63,6 +71,13 @@ function clampVideoDuration(seconds: number): number {
     MAX_CAMERA_MOVE_DURATION_SECONDS,
     Math.max(MIN_CAMERA_MOVE_DURATION_SECONDS, seconds),
   );
+}
+
+function videoPhaseFromKeyframes(keyframes: readonly { label: string }[]): VideoShutterPhase {
+  const labels = new Set(keyframes.map((keyframe) => keyframe.label.toLowerCase()));
+  if (labels.has('start') && labels.has('end')) return 'export';
+  if (labels.has('start')) return 'stop';
+  return 'record';
 }
 
 export function ShotsWorkspace() {
@@ -105,10 +120,10 @@ export function ShotsWorkspace() {
   /** Pending move length — applied when end is captured (and updates existing end if present). */
   const [videoDurationSeconds, setVideoDurationSeconds] = useState(DEFAULT_CAMERA_MOVE_DURATION_SECONDS);
   /**
-   * Video shutter phases: pose end → export. Independent of shotCameraFlying so keepFlying
-   * stills/viewfinder can stay live without trapping the shutter on recapture-end.
+   * Video shutter phase is independent of shotCameraFlying so keepFlying stills/viewfinder
+   * can stay live without trapping the shutter after stop.
    */
-  const [videoEndCaptured, setVideoEndCaptured] = useState(false);
+  const [videoPhase, setVideoPhase] = useState<VideoShutterPhase>('record');
 
   const getEffectiveCamera = useCallback((): CameraData | undefined => {
     if (!selectedShot) return undefined;
@@ -194,15 +209,15 @@ export function ShotsWorkspace() {
     if (!selectedShot) return;
     const camera = getEffectiveCamera();
     if (!camera) return;
-    updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
+    const nextKeyframes = setTwoPointCameraKeyframe({
       keyframes: selectedShot.cameraKeyframes,
       slot,
       camera,
       durationSeconds: cameraMoveDurationSeconds,
-    }));
+    });
+    updateCameraMoveKeyframes(nextKeyframes);
     // Keep main shutter phase in sync with advanced drawer Set Start / Set End.
-    if (slot === 'end') setVideoEndCaptured(true);
-    if (slot === 'start') setVideoEndCaptured(false);
+    setVideoPhase(videoPhaseFromKeyframes(nextKeyframes));
   }, [cameraMoveDurationSeconds, getEffectiveCamera, selectedShot, updateCameraMoveKeyframes]);
 
   const changeCameraMoveDuration = useCallback((durationSeconds: number) => {
@@ -400,24 +415,61 @@ export function ShotsWorkspace() {
     window.setTimeout(() => setLandFlash(false), 700);
   }, [addCamera, landShotFraming, selectedShot, snapshotPreview]);
 
+  const setCameraMoveStart = useCallback(() => {
+    if (!selectedShot) return;
+    const camera = getEffectiveCamera();
+    if (!camera) return;
+    // Start pose only — keep flying so the user can continue to the end.
+    updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
+      keyframes: [],
+      slot: 'start',
+      camera,
+      durationSeconds: cameraMoveDurationSeconds,
+    }));
+    draftCameraRef.current = {
+      ...camera,
+      position: [...camera.position] as CameraData['position'],
+      target: [...camera.target] as CameraData['target'],
+    };
+    setVideoPhase('stop');
+    setLandFlash(true);
+    window.setTimeout(() => setLandFlash(false), 500);
+  }, [
+    cameraMoveDurationSeconds,
+    getEffectiveCamera,
+    selectedShot,
+    updateCameraMoveKeyframes,
+  ]);
+
   const setCameraMoveEnd = useCallback(() => {
     if (!selectedShot) return;
     const camera = getEffectiveCamera();
     if (!camera) return;
+    // Preserve an existing start keyframe when stopping; only rewrite end.
+    const baseKeyframes = selectedShot.cameraKeyframes.some(
+      (keyframe) => keyframe.label.toLowerCase() === 'start',
+    )
+      ? selectedShot.cameraKeyframes
+      : setTwoPointCameraKeyframe({
+        keyframes: selectedShot.cameraKeyframes,
+        slot: 'start',
+        camera: selectedShot.camera,
+        durationSeconds: cameraMoveDurationSeconds,
+      });
     updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
-      keyframes: selectedShot.cameraKeyframes,
+      keyframes: baseKeyframes,
       slot: 'end',
       camera,
       durationSeconds: cameraMoveDurationSeconds,
     }));
-    // Keep viewfinder live; shutter phase advances via videoEndCaptured (not flying flag).
+    // Keep viewfinder live; shutter phase advances via videoPhase (not flying flag).
     landShotFraming(selectedShot.id, camera, { keepFlying: true });
     draftCameraRef.current = {
       ...camera,
       position: [...camera.position] as CameraData['position'],
       target: [...camera.target] as CameraData['target'],
     };
-    setVideoEndCaptured(true);
+    setVideoPhase('export');
     snapshotPreview(selectedShot, camera);
     setLandFlash(true);
     window.setTimeout(() => setLandFlash(false), 700);
@@ -437,22 +489,16 @@ export function ShotsWorkspace() {
     );
     setVideoDurationSeconds(duration);
     setCaptureMode('video');
-    setVideoEndCaptured(false);
-    // Fresh move session: start from current still, clear prior end by rewriting start only
-    // and dropping other keyframes so the shutter is not already "export ready."
-    updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
-      keyframes: [],
-      slot: 'start',
-      camera: selectedShot.camera,
-      durationSeconds: duration,
-    }));
+    // Fresh move session: do not auto-capture start — wait for the red record button.
+    setVideoPhase('record');
+    updateCameraMoveKeyframes([]);
     setCameraMoveError(undefined);
     startFlyCamera({ clearFramingAcceptance: false });
   }, [selectedShot, startFlyCamera, updateCameraMoveKeyframes, videoDurationSeconds]);
 
   const enterStillMode = useCallback(() => {
     setCaptureMode('still');
-    setVideoEndCaptured(false);
+    setVideoPhase('record');
     // Still camera is always live — like a phone camera app.
     startFlyCamera({ clearFramingAcceptance: false });
   }, [startFlyCamera]);
@@ -463,6 +509,14 @@ export function ShotsWorkspace() {
     else enterStillMode();
   }, [captureMode, enterStillMode, enterVideoMode]);
 
+  const retakeVideoMove = useCallback(() => {
+    if (!selectedShot) return;
+    updateCameraMoveKeyframes([]);
+    setVideoPhase('record');
+    setCameraMoveError(undefined);
+    startFlyCamera({ clearFramingAcceptance: false });
+  }, [selectedShot, startFlyCamera, updateCameraMoveKeyframes]);
+
   const onCapture = useCallback(() => {
     if (!selectedShot) {
       addCamera();
@@ -470,7 +524,11 @@ export function ShotsWorkspace() {
     }
     if (captureMode === 'video') {
       // Phase is tracked explicitly — do not gate export on !shotCameraFlying.
-      if (!videoEndCaptured) {
+      if (videoPhase === 'record') {
+        setCameraMoveStart();
+        return;
+      }
+      if (videoPhase === 'stop') {
         setCameraMoveEnd();
         return;
       }
@@ -485,7 +543,8 @@ export function ShotsWorkspace() {
     exportCameraMoveVideo,
     selectedShot,
     setCameraMoveEnd,
-    videoEndCaptured,
+    setCameraMoveStart,
+    videoPhase,
   ]);
 
   const panoMatch = selectedShot && linkedPano
@@ -500,7 +559,9 @@ export function ShotsWorkspace() {
         frameResolutionLabel: `${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height}`,
         flyActive: shotCameraFlying,
         onCameraChange: handleFramingCameraChange,
-        onLockCamera: captureMode === 'video' ? setCameraMoveEnd : captureStill,
+        onLockCamera: captureMode === 'video'
+          ? (videoPhase === 'record' ? setCameraMoveStart : videoPhase === 'stop' ? setCameraMoveEnd : undefined)
+          : captureStill,
       }
       : undefined
   ), [
@@ -511,7 +572,9 @@ export function ShotsWorkspace() {
     selectedShot?.exportSettings.height,
     selectedShot?.exportSettings.width,
     setCameraMoveEnd,
+    setCameraMoveStart,
     shotCameraFlying,
+    videoPhase,
   ]);
 
   const framingAccepted = selectedShot ? isShotFramingAccepted(project, selectedShot.id) : false;
@@ -521,7 +584,7 @@ export function ShotsWorkspace() {
   useEffect(() => {
     setCaptureMode('still');
     setLibraryOpen(false);
-    setVideoEndCaptured(false);
+    setVideoPhase('record');
     if (selectedShot) {
       setVideoDurationSeconds(
         getCameraMoveDurationSeconds(selectedShot.cameraKeyframes, DEFAULT_CAMERA_MOVE_DURATION_SECONDS),
@@ -573,18 +636,26 @@ export function ShotsWorkspace() {
   const captureLabel = !selectedShot
     ? 'Add shot'
     : captureMode === 'video'
-      ? (!videoEndCaptured
-        ? 'Capture end'
-        : isExportingCameraMove
-          ? `Exporting ${Math.round(cameraMoveProgress * 100)}%`
-          : 'Export video')
+      ? (videoPhase === 'record'
+        ? 'Record start'
+        : videoPhase === 'stop'
+          ? 'Stop and set end'
+          : isExportingCameraMove
+            ? `Exporting ${Math.round(cameraMoveProgress * 100)}%`
+            : 'Export video')
       : 'Capture';
 
   const captureHint = captureMode === 'video'
-    ? (!videoEndCaptured
-      ? 'Fly to the end pose, then capture'
-      : 'Export the graybox move as MP4')
+    ? (videoPhase === 'record'
+      ? 'Pose the start, then press record'
+      : videoPhase === 'stop'
+        ? 'Fly to the end pose, then press stop'
+        : 'Export the graybox move as MP4')
     : 'Capture adds a shot — viewfinder stays live';
+
+  const captureFlashLabel = captureMode === 'video'
+    ? (videoPhase === 'stop' ? 'Start set' : videoPhase === 'export' ? 'End set' : 'Captured')
+    : 'Captured';
 
   const goAdjacentShot = (direction: -1 | 1) => {
     if (selectedIndex < 0) return;
@@ -631,7 +702,7 @@ export function ShotsWorkspace() {
           >
             <span className="inline-flex items-center gap-2 rounded-full bg-black/55 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm">
               <Check className="h-4 w-4 text-emerald-400" />
-              Captured
+              {captureFlashLabel}
             </span>
           </div>
         )}
@@ -767,11 +838,24 @@ export function ShotsWorkspace() {
 
           {captureMode === 'video' && (
             <div className="pointer-events-auto flex w-full max-w-md flex-col items-center gap-2">
-              <p className="text-center text-[11px] font-medium text-white/75">
-                {!videoEndCaptured
-                  ? 'Start set · pick length · fly to end · capture'
-                  : 'End set · export when ready'}
-              </p>
+              <div className="flex items-center gap-2">
+                {videoPhase === 'stop' && (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full bg-red-600/90 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm"
+                    data-shots-video-rec-badge
+                  >
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                    Rec
+                  </span>
+                )}
+                <p className="text-center text-[11px] font-medium text-white/75">
+                  {videoPhase === 'record'
+                    ? 'Pick length · pose start · record'
+                    : videoPhase === 'stop'
+                      ? 'Fly to end · press stop'
+                      : 'End set · export when ready'}
+                </p>
+              </div>
               <div
                 data-shots-video-duration
                 className="flex flex-wrap items-center justify-center gap-1.5 rounded-full bg-black/45 px-2 py-1.5 backdrop-blur-md"
@@ -800,6 +884,16 @@ export function ShotsWorkspace() {
                   );
                 })}
               </div>
+              {videoPhase === 'export' && !isExportingCameraMove && (
+                <button
+                  type="button"
+                  onClick={retakeVideoMove}
+                  className="text-[11px] font-semibold text-white/70 underline-offset-2 transition hover:text-white hover:underline"
+                  data-shots-video-retake
+                >
+                  Retake move
+                </button>
+              )}
             </div>
           )}
 
@@ -853,24 +947,31 @@ export function ShotsWorkspace() {
             <button
               type="button"
               onClick={onCapture}
-              disabled={captureMode === 'video' && videoEndCaptured && (isExportingCameraMove || !supportedMp4MimeType)}
+              disabled={captureMode === 'video' && videoPhase === 'export' && (isExportingCameraMove || !supportedMp4MimeType)}
               className="group relative flex h-[4.75rem] w-[4.75rem] shrink-0 items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-50"
               aria-label={captureLabel}
               data-shots-shutter
-              data-shots-video-phase={captureMode === 'video' ? (videoEndCaptured ? 'export' : 'capture-end') : undefined}
+              data-shots-video-phase={captureMode === 'video' ? videoPhase : undefined}
               title={captureHint}
             >
               <span className="absolute inset-0 rounded-full border-[3px] border-white/90" />
-              <span
-                className={`h-[3.65rem] w-[3.65rem] rounded-full transition ${
-                  captureMode === 'video'
-                    ? (!videoEndCaptured
-                      ? 'bg-red-500 group-active:scale-95'
-                      : 'bg-[var(--accent)] group-active:scale-95')
-                    : 'bg-white group-active:scale-90'
-                }`}
-              />
-              {captureMode === 'video' && videoEndCaptured && !isExportingCameraMove && (
+              {captureMode === 'video' && videoPhase === 'stop' ? (
+                // Classic stop control while the start keyframe is locked.
+                <span className="flex h-[3.65rem] w-[3.65rem] items-center justify-center rounded-full bg-red-500 transition group-active:scale-95">
+                  <span className="h-5 w-5 rounded-[4px] bg-white shadow-sm" />
+                </span>
+              ) : (
+                <span
+                  className={`h-[3.65rem] w-[3.65rem] rounded-full transition ${
+                    captureMode === 'video'
+                      ? (videoPhase === 'record'
+                        ? 'bg-red-500 group-active:scale-95'
+                        : 'bg-[var(--accent)] group-active:scale-95')
+                      : 'bg-white group-active:scale-90'
+                  }`}
+                />
+              )}
+              {captureMode === 'video' && videoPhase === 'export' && !isExportingCameraMove && (
                 <Film className="pointer-events-none absolute h-5 w-5 text-white" />
               )}
             </button>
@@ -1041,7 +1142,7 @@ export function ShotsWorkspace() {
             <Panel title="Video mode (advanced)">
               <div className="space-y-3">
                 <p className="text-xs text-secondary">
-                  Use the Video mode on the camera chrome for the simple path. Manual keyframes live here.
+                  Prefer the Video mode shutter: record captures start, stop captures end. Manual keyframes live here for fine control.
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   <IconButton onClick={() => captureCameraMoveKeyframe('start')} className="w-full">
@@ -1055,7 +1156,7 @@ export function ShotsWorkspace() {
                 </div>
                 <Field
                   label="Duration Seconds"
-                  hint="Also available as quick picks on the Video camera chrome while capturing the end pose."
+                  hint="Also available as quick picks on the Video camera chrome while recording."
                 >
                   <TextInput
                     type="number"

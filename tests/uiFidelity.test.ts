@@ -343,14 +343,24 @@ describe('ui revamp fidelity surfaces', () => {
     expect(panoViewer).toContain('useState');
   });
 
-  it('advances video shutter from capture-end to export without requiring fly to stop', () => {
+  it('advances video shutter record → stop → export without requiring fly to stop', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
-    expect(shots).toContain('videoEndCaptured');
-    expect(shots).toContain("data-shots-video-phase");
-    expect(shots).toContain('setVideoEndCaptured(true)');
+    expect(shots).toContain("type VideoShutterPhase = 'record' | 'stop' | 'export'");
+    expect(shots).toContain('data-shots-video-phase');
+    expect(shots).toContain("setVideoPhase('stop')");
+    expect(shots).toContain("setVideoPhase('export')");
+    expect(shots).toContain('setCameraMoveStart');
+    expect(shots).toContain('setCameraMoveEnd');
+    expect(shots).toContain('retakeVideoMove');
+    expect(shots).toContain('data-shots-video-retake');
+    expect(shots).toContain('data-shots-video-rec-badge');
+    // Entering video mode must not auto-capture the start keyframe.
+    expect(shots).toMatch(/enterVideoMode[\s\S]*setVideoPhase\('record'\)[\s\S]*updateCameraMoveKeyframes\(\[\]\)/);
+    expect(shots).not.toMatch(/enterVideoMode[\s\S]*slot: 'start'/);
     // Export must not be gated on !shotCameraFlying.
     expect(shots).not.toMatch(/if \(shotCameraFlying \|\| !cameraMoveReady\)/);
-    expect(shots).toMatch(/if \(!videoEndCaptured\)/);
+    expect(shots).toMatch(/if \(videoPhase === 'record'\)/);
+    expect(shots).toMatch(/if \(videoPhase === 'stop'\)/);
     // Preview after capture should read latest store project (not stale closure only).
     expect(shots).toContain('useContinuityStore.getState().project');
   });

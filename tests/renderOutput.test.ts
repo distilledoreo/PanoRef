@@ -14,7 +14,9 @@ describe('rendered shot output', () => {
     expect(source).toContain('applyFlyCameraToPerspectiveCamera');
     expect(source).toContain('panoMap');
     expect(source).toContain('yaw: { value: degreesToRadians(crop.yawDegrees - panoRotation[1]) }');
-    expect(source).toContain('vec3 dir = normalize(vec3(-ndc.x * aspect * tanHalfFov');
+    // Screen-right samples +X so pano crops match the 3D viewfinder (not mirrored).
+    expect(source).toContain('vec3 dir = normalize(vec3(ndc.x * aspect * tanHalfFov');
+    expect(source).not.toContain('vec3(-ndc.x * aspect * tanHalfFov');
     expect(source).toContain('atan(dir.x, dir.z)');
     expect(source).toContain('#include <colorspace_fragment>');
     expect(source).not.toContain('renderContinuityControlView');

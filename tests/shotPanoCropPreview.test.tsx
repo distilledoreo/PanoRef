@@ -40,7 +40,7 @@ describe('ShotPanoCropPreview', () => {
       />,
     );
 
-    expect(html).toContain('Pano Crop Preview');
+    expect(html).toContain('Pano match');
     expect(html).toContain('55°');
     expect(html).toContain('1920×1080');
   });
