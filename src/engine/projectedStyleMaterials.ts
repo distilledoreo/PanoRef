@@ -201,16 +201,9 @@ ${PROJECTED_STYLE_GLSL.equirectUvFromDirection}
 }
 `,
       )
-      .replace(
-        '#include <lights_physical_fragment>',
-        `#include <lights_physical_fragment>
-// Scale specular/metal response down; panorama already has baked lighting.
-material.specularIntensity *= projectedLighting;
-material.roughness = mix(1.0, material.roughness, projectedLighting);
-`,
-      )
-      // Always include lights_fragment_begin (it declares geometry*/irradiance used by
-      // lights_fragment_maps/end). Zero or mix reflectedLight afterward — never wrap the include.
+      // Lighting contract is ONLY post-aomap mixing of reflectedLight.
+      // Do not edit r184 PhysicalMaterial fields (no specular intensity symbol).
+      // Do not wrap lights_fragment_begin — it declares geometry*/irradiance for later chunks.
       .replace(
         '#include <aomap_fragment>',
         `#include <aomap_fragment>
@@ -232,7 +225,7 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v2:${params.settings.fallbackMode}:${params.disposable ? 'd' : 's'}`
+    `projected-style-v3:${params.settings.fallbackMode}:${params.disposable ? 'd' : 's'}`
   );
 
   // Mark for disposal on export-only clones.

@@ -174,13 +174,16 @@ describe('synthetic directional projection sampling', () => {
     expect(PROJECTED_STYLE_GLSL.equirectUvFromDirection).toContain('atan(direction.x, direction.z)');
   });
 
-  it('does not wrap lights_fragment_begin in if/else (keeps geometry* in scope)', () => {
+  it('does not wrap lights_fragment_begin or poke PhysicalMaterial fields (r184-safe)', () => {
     const materials = readFileSync(new URL('../src/engine/projectedStyleMaterials.ts', import.meta.url), 'utf8');
     // Regression: wrapping the include scopes geometryPosition/irradiance and breaks GLSL compile.
     expect(materials).not.toMatch(/if\s*\(\s*projectedLighting[\s\S]*?#include <lights_fragment_begin>/);
+    // r184 MeshStandard/PhysicalMaterial: illegal field injections fail shader compile.
+    expect(materials).not.toMatch(/material\.specularIntensity\s*\*=/);
+    expect(materials).not.toMatch(/#include\s*<lights_physical_fragment>/);
     expect(materials).toContain('#include <aomap_fragment>');
     expect(materials).toContain('reflectedLight.indirectDiffuse = diffuseColor.rgb');
-    expect(materials).toContain('projected-style-v2');
+    expect(materials).toContain('projected-style-v3');
   });
 
   it('sampleSyntheticDirectionalPano covers seam UVs without NaN', () => {
