@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDefaultProject,
   createPanoAsset,
@@ -20,11 +20,51 @@ import {
 } from '../src/engine/projectedStyleMath';
 import {
   acquireProjectedStyleTexture,
+  projectedStyleTextureCacheSize,
   releaseProjectedStyleTexture,
-  disposeAllProjectedStyleTextures,
 } from '../src/engine/projectedStyleMaterials';
 import { degreesToRadians } from '../src/engine/sync';
 import { readFileSync } from 'node:fs';
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+}
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+/** Controllable texture load callbacks, keyed by URL. */
+const pendingLoads = new Map<string, {
+  onLoad: (tex: unknown) => void;
+  onError: (err: unknown) => void;
+}>();
+
+vi.mock('three', async () => {
+  const THREE = await vi.importActual('three');
+  const mod = THREE as typeof import('three');
+
+  return {
+    ...mod,
+    TextureLoader: class MockTextureLoader {
+      load(
+        url: string,
+        onLoad: (tex: unknown) => void,
+        _onProgress?: unknown,
+        onError?: (err: unknown) => void,
+      ) {
+        pendingLoads.set(url, {
+          onLoad,
+          onError: onError ?? (() => {}),
+        });
+      }
+    },
+  } as typeof import('three');
+});
 
 // ---------------------------------------------------------------------------
 // 1. Secondary projector fallback state tests (production helper)
@@ -352,9 +392,149 @@ describe('origin edit consent guards', () => {
 // 7. Async texture lifecycle — acquire/release parity
 // ---------------------------------------------------------------------------
 
-describe('projected style texture release API', () => {
+import type { Texture } from 'three';
+
+/** Minimal fake texture that satisfies the fields THREE sets in onLoad. */
+function fakeTexture(): Texture {
+  return {
+    dispose: vi.fn(),
+    colorSpace: '',
+    wrapS: 0,
+    wrapT: 0,
+    needsUpdate: false,
+  } as unknown as Texture;
+}
+
+describe('projected style texture lifecycle', () => {
+  afterEach(() => {
+    pendingLoads.clear();
+    // Drain any leftover refs so the next test starts clean.
+    for (let i = 0; i < 10; i++) {
+      releaseProjectedStyleTexture('url-a');
+      releaseProjectedStyleTexture('url-b');
+      releaseProjectedStyleTexture('url-c');
+    }
+  });
+
+  afterAll(() => {
+    for (let i = 0; i < 10; i++) {
+      releaseProjectedStyleTexture('url-a');
+      releaseProjectedStyleTexture('url-b');
+      releaseProjectedStyleTexture('url-c');
+    }
+  });
+
   it('release undefined/null is a no-op (safe to call with falsy args)', () => {
     expect(() => releaseProjectedStyleTexture(undefined)).not.toThrow();
     expect(() => releaseProjectedStyleTexture('')).not.toThrow();
+  });
+
+  it('rapid secondary switch discards stale A when B loads before A resolves', async () => {
+    // Step 1: start loading A (simulating first secondary selection).
+    const loadA = acquireProjectedStyleTexture('url-a');
+    expect(pendingLoads.has('url-a')).toBe(true);
+
+    // Step 2: before A resolves, user switches to B.
+    // In the real effect this triggers A's cleanup (cancelled=true)
+    // and B's effect runs with the new URL.
+    const currentUrlRef = { current: 'url-b' };
+    const loadB = acquireProjectedStyleTexture('url-b');
+    expect(pendingLoads.has('url-b')).toBe(true);
+
+    // Step 3: A's texture finally arrives — stale because current URL is now B.
+    const texA = fakeTexture();
+    pendingLoads.get('url-a')!.onLoad(texA);
+    const gotA = await loadA;
+    expect(gotA).toBe(texA);
+
+    // Effect guard: stale URL → release.
+    if (currentUrlRef.current !== 'url-a') {
+      releaseProjectedStyleTexture('url-a');
+    }
+
+    // Step 4: B's texture arrives — should be accepted.
+    const texB = fakeTexture();
+    pendingLoads.get('url-b')!.onLoad(texB);
+    const gotB = await loadB;
+    expect(gotB).toBe(texB);
+
+    // Cleanup B's ref.
+    releaseProjectedStyleTexture('url-b');
+  });
+
+  it('rapid secondary switch: A resolves first, then B, then another stale A still releases', async () => {
+    // Load A then B (order as above).
+    const loadA = acquireProjectedStyleTexture('url-a');
+    const currentUrlRef = { current: 'url-b' };
+    const loadB = acquireProjectedStyleTexture('url-b');
+
+    // A resolves first (stale).
+    const texA = fakeTexture();
+    pendingLoads.get('url-a')!.onLoad(texA);
+    const gotA = await loadA;
+    expect(gotA).toBe(texA);
+    if (currentUrlRef.current !== 'url-a') {
+      releaseProjectedStyleTexture('url-a');
+    }
+
+    // B resolves.
+    const texB = fakeTexture();
+    pendingLoads.get('url-b')!.onLoad(texB);
+    const gotB = await loadB;
+    expect(gotB).toBe(texB);
+
+    // Step 3: user switches back to A (simulating another selection change).
+    currentUrlRef.current = 'url-a';
+    const loadAagain = acquireProjectedStyleTexture('url-a');
+    expect(pendingLoads.has('url-a')).toBe(true);
+
+    // B is now stale — discard.
+    if (currentUrlRef.current !== 'url-b') {
+      releaseProjectedStyleTexture('url-b');
+    }
+
+    // A resolves fresh.
+    const texA2 = fakeTexture();
+    pendingLoads.get('url-a')!.onLoad(texA2);
+    const gotA2 = await loadAagain;
+    expect(gotA2).toBe(texA2);
+
+    // Cleanup.
+    releaseProjectedStyleTexture('url-a');
+  });
+
+  it('interleaved acquire+release cycles balance refCount correctly', async () => {
+    // First acquire creates TextureLoader; resolve it.
+    const texA = fakeTexture();
+    const load1 = acquireProjectedStyleTexture('url-a');
+    pendingLoads.get('url-a')!.onLoad(texA);
+    const t1 = await load1;
+    expect(t1).toBe(texA);
+
+    // Second acquire hits cache → same instance, no new loader.
+    const t2 = await acquireProjectedStyleTexture('url-a');
+    expect(t2).toBe(t1);
+
+    // Release once: refCount 2→1.
+    releaseProjectedStyleTexture('url-a');
+
+    // Third acquire still cached.
+    const t3 = await acquireProjectedStyleTexture('url-a');
+    expect(t3).toBe(t1);
+
+    // Release twice → refCount hits 0 → disposed.
+    releaseProjectedStyleTexture('url-a');
+    releaseProjectedStyleTexture('url-a');
+
+    // Fresh acquire creates a new loader.
+    const texB = fakeTexture();
+    const load4 = acquireProjectedStyleTexture('url-a');
+    expect(pendingLoads.has('url-a')).toBe(true);
+    pendingLoads.get('url-a')!.onLoad(texB);
+    const t4 = await load4;
+    expect(t4).toBe(texB);
+    expect(t4).not.toBe(t1);
+
+    releaseProjectedStyleTexture('url-a');
   });
 });

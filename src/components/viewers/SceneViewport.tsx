@@ -237,7 +237,7 @@ export function SceneViewport({
   const flyDirtyRef = useRef(false);
   const projectedTextureUrlRef = useRef<string | undefined>();
   const projectedSecondaryUrlRef = useRef<string | undefined>();
-  const projectedSecondaryLoadingRef = useRef(false);
+
   const [projectedTexture, setProjectedTexture] = useState<THREE.Texture | null>(null);
   const [projectedSecondaryTexture, setProjectedSecondaryTexture] = useState<THREE.Texture | null>(null);
   const [projectedTextureReadyUrl, setProjectedTextureReadyUrl] = useState<string | undefined>();
@@ -1323,7 +1323,7 @@ export function SceneViewport({
     const previousUrl = projectedTextureUrlRef.current;
     projectedTextureUrlRef.current = url;
     void acquireProjectedStyleTexture(url).then((texture) => {
-      if (cancelled || !texture) {
+      if (cancelled || projectedTextureUrlRef.current !== url || !texture) {
         if (texture) releaseProjectedStyleTexture(url);
         return;
       }
@@ -1351,16 +1351,11 @@ export function SceneViewport({
         cancelled = true;
       };
     }
-    if (projectedSecondaryLoadingRef.current) {
-      return () => { cancelled = true; };
-    }
     const previousUrl = projectedSecondaryUrlRef.current;
     projectedSecondaryUrlRef.current = url;
-    projectedSecondaryLoadingRef.current = true;
     setSecondaryLoadError(false);
     void acquireProjectedStyleTexture(url).then((texture) => {
-      projectedSecondaryLoadingRef.current = false;
-      if (cancelled) {
+      if (cancelled || projectedSecondaryUrlRef.current !== url) {
         if (texture) releaseProjectedStyleTexture(url);
         return;
       }
