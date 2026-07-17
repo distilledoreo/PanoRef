@@ -14,7 +14,9 @@ describe('rendered shot output', () => {
     expect(source).toContain('applyFlyCameraToPerspectiveCamera');
     expect(source).toContain('panoMap');
     expect(source).toContain('yaw: { value: degreesToRadians(crop.yawDegrees - panoRotation[1]) }');
-    expect(source).toContain('vec3 dir = normalize(vec3(-ndc.x * aspect * tanHalfFov');
+    // Screen-right samples +X so pano crops match the 3D viewfinder (not mirrored).
+    expect(source).toContain('vec3 dir = normalize(vec3(ndc.x * aspect * tanHalfFov');
+    expect(source).not.toContain('vec3(-ndc.x * aspect * tanHalfFov');
     expect(source).toContain('atan(dir.x, dir.z)');
     expect(source).toContain('#include <colorspace_fragment>');
     expect(source).not.toContain('renderContinuityControlView');
@@ -41,6 +43,26 @@ describe('rendered shot output', () => {
     expect(storeSource).toContain('useThemeStore.getState().theme');
     expect(storeSource).not.toContain('renderGrayboxEquirectangularPano(state.project, 2048, 1024)');
     expect(storeSource).not.toMatch(/renderGrayboxPano:[\s\S]*downloadDataUrl/);
+  });
+
+  it('defaults shots, letterboxed panos, and simple viewer downloads to 4K UHD', () => {
+    const defaults = readFileSync(new URL('../src/domain/defaults.ts', import.meta.url), 'utf8');
+    const panoImage = readFileSync(new URL('../src/engine/panoImage.ts', import.meta.url), 'utf8');
+    const simpleViewer = readFileSync(new URL('../src/components/workspaces/PanoViewerWorkspace.tsx', import.meta.url), 'utf8');
+    const project = createDefaultProject();
+
+    expect(defaults).toContain('export const DEFAULT_SHOT_WIDTH = 3840');
+    expect(defaults).toContain('export const DEFAULT_SHOT_HEIGHT = 2160');
+    expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
+    expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT = 2048');
+    expect(project.settings.defaultShotWidth).toBe(3840);
+    expect(project.settings.defaultShotHeight).toBe(2160);
+    expect(project.shots[0].exportSettings.width).toBe(3840);
+    expect(project.shots[0].exportSettings.height).toBe(2160);
+    expect(panoImage).toContain('targetWidth = DEFAULT_SHOT_WIDTH');
+    expect(panoImage).toContain('targetHeight = DEFAULT_SHOT_HEIGHT');
+    expect(simpleViewer).toContain('const DEFAULT_DOWNLOAD_WIDTH = 3840');
+    expect(simpleViewer).toContain('const DEFAULT_DOWNLOAD_HEIGHT = 2160');
   });
 
   it('renders the full graybox scene without fog or a fixed distance cutoff', () => {

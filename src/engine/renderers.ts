@@ -441,9 +441,11 @@ export async function renderPanoPerspectiveCrop(
       }
 
       void main() {
+        // Looking +Z with Y-up: +ndc.x samples +X (screen right). Must match the 3D
+        // viewfinder and cubemap faces — do not negate X or pano crops appear mirrored.
         vec2 ndc = vUv * 2.0 - 1.0;
         float tanHalfFov = tan(fov * 0.5);
-        vec3 dir = normalize(vec3(-ndc.x * aspect * tanHalfFov, ndc.y * tanHalfFov, 1.0));
+        vec3 dir = normalize(vec3(ndc.x * aspect * tanHalfFov, ndc.y * tanHalfFov, 1.0));
         dir = rotateY(yaw) * rotateX(pitch) * rotateZ(roll) * dir;
         float u = atan(dir.x, dir.z) / (2.0 * PI) + 0.5;
         float v = asin(clamp(dir.y, -1.0, 1.0)) / PI + 0.5;

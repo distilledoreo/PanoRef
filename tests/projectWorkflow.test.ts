@@ -343,6 +343,28 @@ describe('project workflow logic', () => {
     expect(paths).toContain('shot_001/metadata/camera_move_reference_frames.json');
   });
 
+  it('lists camera move MP4 in the manifest from keyframes even without a pre-exported asset', () => {
+    const project = createDefaultProject();
+    const shot = project.shots[0];
+    shot.assets.cameraMoveVideoAssetId = undefined;
+    shot.cameraKeyframes = setTwoPointCameraKeyframe({
+      keyframes: setTwoPointCameraKeyframe({
+        keyframes: [],
+        slot: 'start',
+        camera: shot.camera,
+      }),
+      slot: 'end',
+      camera: {
+        ...shot.camera,
+        position: [2, 1.7, -2],
+      },
+      durationSeconds: 2,
+    });
+
+    const manifest = createShotPackageManifest(project, shot);
+    expect(manifest.files.map((file) => file.path)).toContain('shot_001/inputs/viewport_clay_motion.mp4');
+  });
+
   it('adds cubemap references to the manifest when a camera move has a linked pano', () => {
     const project = createDefaultProject();
     const asset = createPanoAsset({

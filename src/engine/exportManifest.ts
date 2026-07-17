@@ -1,5 +1,5 @@
 import { LocationProject, PanoReference, Shot } from '../domain/types';
-import { getCameraMoveReferenceFrames } from './cameraKeyframes';
+import { getCameraMoveReferenceFrames, hasRenderableCameraMove } from './cameraKeyframes';
 import { CAMERA_MOVE_CUBEMAP_FACES } from './cameraMoveCubemap';
 import { generateImagePrompt, generateVideoPrompt } from './prompts';
 
@@ -69,7 +69,11 @@ export function createShotPackageManifest(
   if (shot.exportSettings.includeAiResultFrame && aiResultAssetId) {
     files.push({ path: `${rootFolder}/outputs/ai_result_frame.png`, kind: 'image', required: false });
   }
-  if (shot.exportSettings.includeCameraMoveVideo && shot.assets.cameraMoveVideoAssetId) {
+  // List the motion MP4 whenever packaging will include it: attached asset or keyframes.
+  if (
+    shot.exportSettings.includeCameraMoveVideo
+    && (shot.assets.cameraMoveVideoAssetId || hasRenderableCameraMove(shot.cameraKeyframes))
+  ) {
     files.push({ path: `${rootFolder}/inputs/viewport_clay_motion.mp4`, kind: 'video', required: false });
   }
   for (const frame of cameraMoveReferenceFrames) {

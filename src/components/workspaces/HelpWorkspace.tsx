@@ -188,7 +188,7 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               <StepCard number="1" title="Block the set" text="Stamp simple objects in Build, place the pano origin, and render a graybox 360." icon={<Boxes className="h-5 w-5" />} onClick={() => openWorkspace('build')} />
               <StepCard number="2" title="Set the reference" text="Import or approve a canonical 2:1 panorama, then align it to the graybox." icon={<Globe2 className="h-5 w-5" />} onClick={() => openWorkspace('reference')} />
-              <StepCard number="3" title="Land cameras" text="Capture still compositions or two-point camera moves in Shots." icon={<Clapperboard className="h-5 w-5" />} onClick={() => openWorkspace('shots')} />
+              <StepCard number="3" title="Land cameras" text="Capture stills, or record → stop a two-point camera move in Shots." icon={<Clapperboard className="h-5 w-5" />} onClick={() => openWorkspace('shots')} />
               <StepCard number="4" title="Export the handoff" text="Choose shots and download a ZIP with visual references, camera data, and prompts." icon={<Upload className="h-5 w-5" />} onClick={() => openWorkspace('export')} />
             </div>
             <Tip>Save the project JSON regularly. Export ZIPs are deliverables; the project JSON is the editable source.</Tip>
@@ -216,7 +216,7 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
               ['Free camera', 'The viewport defaults to orbit/select. Toggle Free camera to drag-look and walk with WASD; Space/Shift move vertically and Ctrl sprints. Esc exits without changing the scene, and selected-object controls return when you exit. On phones, use the on-screen pad and Up/Dn controls to move.'],
               ['Visibility distance', 'Open the adjacent Visibility distance control in Build to adjust both how far the viewport draws and where the fog/shroud obscures the set. It changes the Build viewport only, not shot or export cameras.'],
               ['Scene guides', 'The eye control reveals helpers and camera frustums without including them in renders.'],
-              ['Render 360', 'Create a native 4096×2048 graybox panorama for alignment and export.'],
+              ['Render 360', 'Create a native 4K (4096×2048) graybox panorama for alignment and export.'],
             ]} />
           </DocSection>
 
@@ -235,8 +235,8 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
           <DocSection id="shots" visible={visibleIds.has('shots')} title="Shots workspace" eyebrow="Choose cameras and motion">
             <p className="doc-lead">Treat Shots like a live phone camera inside the graybox. The viewfinder stays live after capture so you can move directly to the next composition.</p>
             <FeatureGrid items={[
-              ['Still mode', 'Fly the camera, set the FOV, and press Capture. A persisted thumbnail is added to the library.'],
-              ['Video mode', 'Capture a start pose, fly to the end pose, then export the graybox MP4.'],
+              ['Still mode', 'Fly the camera, set the FOV, and press Capture at 4K (3840×2160) by default. A persisted thumbnail is added to the library.'],
+              ['Video mode', 'Press record for the start keyframe, fly to the end, press stop, then export the 4K graybox MP4.'],
               ['Shot library', 'Open the bottom-left thumbnail to review, rename, duplicate, or delete captured shots.'],
               ['Camera settings', 'Fine-tune FOV, duration, keyframes, preview downloads, and pano matching.'],
             ]} />

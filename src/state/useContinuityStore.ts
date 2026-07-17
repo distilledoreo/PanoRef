@@ -21,6 +21,8 @@ import {
   createSceneObject,
   createShot,
   createVideoAsset,
+  DEFAULT_GRAYBOX_PANO_HEIGHT,
+  DEFAULT_GRAYBOX_PANO_WIDTH,
 } from '../domain/defaults';
 import {
   getCanonicalPano,
@@ -717,8 +719,8 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const asset = createPanoAsset({
       name: params.name,
       uri: params.dataUrl,
-      width: params.width ?? 4096,
-      height: params.height ?? 2048,
+      width: params.width ?? DEFAULT_GRAYBOX_PANO_WIDTH,
+      height: params.height ?? DEFAULT_GRAYBOX_PANO_HEIGHT,
       metadata: { source: 'user_import' },
     });
     const graybox = state.project.panoRefs.find((pano) => pano.type === 'graybox_render');
@@ -728,8 +730,8 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       type: 'ai_global_reference',
       origin: state.project.scene.panoOrigin,
       rotation: state.project.scene.panoRotation,
-      width: asset.width ?? 4096,
-      height: asset.height ?? 2048,
+      width: asset.width ?? DEFAULT_GRAYBOX_PANO_WIDTH,
+      height: asset.height ?? DEFAULT_GRAYBOX_PANO_HEIGHT,
       isCanonical: true,
       sourcePanoId: graybox?.id,
       notes: params.importNote ?? 'Imported styled reference pano.',

@@ -122,6 +122,17 @@ describe('sync math', () => {
     expect(crop.width).toBe(1920);
   });
 
+  it('maps looking +Z so +X is to the right (matches 3D viewfinder / pano crop)', () => {
+    // Camera looking toward +Z: world +X must land on the right of a pinhole frame.
+    // Pano crop uses ndc.x * +X with looking +Z; this guards the shared yaw convention.
+    const rightOfLook = yawPitchToDirection(90, 0);
+    const leftOfLook = yawPitchToDirection(-90, 0);
+    const forward = yawPitchToDirection(0, 0);
+    expect(forward[2]).toBeGreaterThan(0.9);
+    expect(rightOfLook[0]).toBeGreaterThan(0.9);
+    expect(leftOfLook[0]).toBeLessThan(-0.9);
+  });
+
   it('converts app pano yaw to the Three.js sphere viewer convention', () => {
     const camera = {
       position: [0, 1.6, 0] as [number, number, number],

@@ -70,31 +70,31 @@ export function ShotPanoCropPreview({
   const showParallaxWarning = !disabledReason && matchQuality && matchQuality !== 'good';
 
   return (
-    <div className="flex min-h-0 flex-col bg-zinc-50 p-5">
+    <div className="flex min-h-0 flex-col bg-surface-raised p-4 text-primary">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="font-semibold text-zinc-800">Pano Crop Preview</h3>
+        <h3 className="text-sm font-semibold text-primary">Pano match</h3>
         {crop && !disabledReason && (
-          <span className="font-mono text-xs text-zinc-500">
+          <span className="font-mono text-[10px] text-secondary">
             {crop.fovDegrees.toFixed(0)}° · {crop.width}×{crop.height}
           </span>
         )}
       </div>
 
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border border-zinc-200 bg-zinc-950">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-md border border-subtle bg-surface-base">
         {!imageUrl ? (
-          <div className="flex h-full min-h-[180px] items-center justify-center px-6 text-center text-sm text-zinc-400">
+          <div className="flex h-full min-h-[160px] items-center justify-center px-5 text-center text-xs text-secondary">
             Link a panorama reference to preview the shot crop.
           </div>
         ) : disabledReason ? (
-          <div className="flex h-full min-h-[180px] items-center justify-center px-6 text-center text-sm text-zinc-400">
+          <div className="flex h-full min-h-[160px] items-center justify-center px-5 text-center text-xs text-secondary">
             {disabledReason}
           </div>
         ) : !crop ? (
-          <div className="flex h-full min-h-[180px] items-center justify-center text-sm text-zinc-400">
+          <div className="flex h-full min-h-[160px] items-center justify-center text-xs text-secondary">
             No crop settings for this shot.
           </div>
         ) : isRendering && !previewUrl ? (
-          <div className="flex h-full min-h-[180px] items-center justify-center text-sm text-zinc-400">
+          <div className="flex h-full min-h-[160px] items-center justify-center text-xs text-secondary">
             Rendering pano crop...
           </div>
         ) : previewUrl ? (
@@ -104,21 +104,21 @@ export function ShotPanoCropPreview({
             className="h-full w-full object-contain"
           />
         ) : (
-          <div className="flex h-full min-h-[180px] items-center justify-center text-sm text-zinc-400">
+          <div className="flex h-full min-h-[160px] items-center justify-center text-xs text-secondary">
             No preview yet.
           </div>
         )}
       </div>
 
       <div className="mt-3 space-y-2">
-        <p className="text-xs text-zinc-500">
-          Perspective crop from the linked pano at the locked camera angle — same as exported <span className="font-mono">pano_crop.png</span>, including the yaw offset calibrated in Reference.
+        <p className="text-[11px] leading-relaxed text-secondary">
+          Perspective crop at the locked camera angle — same as exported <span className="font-mono">pano_crop.png</span>, including Reference yaw.
         </p>
         {showParallaxWarning && (
-          <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="flex items-start gap-2 rounded-md border border-amber-200/70 bg-amber-50 px-3 py-2 text-[11px] text-amber-950 dark:border-amber-800 dark:bg-amber-950/35 dark:text-amber-100">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Camera is {matchDistanceMeters?.toFixed(1)}m from the pano origin. The pano was captured at a fixed point, so framing only aligns by direction — move the camera back to the origin for a closer match.
+              Camera is {matchDistanceMeters?.toFixed(1)}m from the pano origin. Framing aligns by direction only — move closer to the origin for a tighter match.
             </span>
           </p>
         )}

@@ -1,3 +1,5 @@
+import { DEFAULT_SHOT_HEIGHT, DEFAULT_SHOT_WIDTH } from '../domain/defaults';
+
 export const EQUIRECT_ASPECT = 2;
 export const LETTERBOX_169_ASPECT = 16 / 9;
 const ASPECT_TOLERANCE = 0.025;
@@ -105,8 +107,8 @@ export async function extractEquirectFromContainer(
 
 export async function letterboxEquirectTo169(
   dataUrl: string,
-  targetWidth = 1920,
-  targetHeight = 1080,
+  targetWidth = DEFAULT_SHOT_WIDTH,
+  targetHeight = DEFAULT_SHOT_HEIGHT,
 ): Promise<PanoImageResult> {
   const image = await loadImage(dataUrl);
   const canvas = document.createElement('canvas');

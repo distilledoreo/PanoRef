@@ -83,7 +83,7 @@ export function getShotWarnings(project: LocationProject, shot: Shot): WarningIt
     warnings.push({
       id: `${shot.id}-missing-camera-move-video`,
       severity: 'info',
-      message: 'Camera move keyframes exist, but no MP4 has been exported yet.',
+      message: 'Camera move keyframes exist — export MP4 from Shots, or the package will generate viewport_clay_motion.mp4 on download.',
     });
   }
 
