@@ -11,10 +11,11 @@ import {
   DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
   type CameraMoveCubemapFaceId,
 } from './cameraMoveCubemap';
-import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH, normalizeProjectedStyleSettings } from '../domain/defaults';
+import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH } from '../domain/defaults';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
 import {
   canUseProjectedAppearance,
+  findProjectionAlignmentForPano,
   getProjectedStyleAssetUri,
   resolveProjectedStylePano,
 } from './projectedStyle';
@@ -22,8 +23,10 @@ import {
   acquireProjectedStyleTexture,
   releaseProjectedStyleTexture,
 } from './projectedStyleMaterials';
+import { acquireProjectionWarpTexture } from './projectionWarpTexture';
 import { buildScene, disposeScene, type SceneVisualTheme } from './sceneObjects';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
+import { normalizeProjectedStyleSettings } from '../domain/defaults';
 
 export interface ImageRenderResult {
   dataUrl: string;
@@ -195,6 +198,10 @@ export async function renderShotCameraMoveMp4(
   const appearance = options.appearance ?? 'clay';
   let projectorImageUrl: string | undefined;
   let projectorTexture: THREE.Texture | null = null;
+  let warpTextureResult: ReturnType<typeof acquireProjectionWarpTexture> | undefined;
+  let cameraMovePano = undefined as ReturnType<typeof resolveProjectedStylePano>;
+  let cameraMoveSettings = undefined as ReturnType<typeof normalizeProjectedStyleSettings> | undefined;
+  let cameraMoveAlignment = undefined as ReturnType<typeof findProjectionAlignmentForPano>;
 
   if (appearance === 'projected') {
     if (!canUseProjectedAppearance(project)) {
@@ -202,15 +209,24 @@ export async function renderShotCameraMoveMp4(
         'Projected camera-move MP4 requires an importable styled panorama with a valid image asset.',
       );
     }
-    const pano = resolveProjectedStylePano(project);
-    projectorImageUrl = getProjectedStyleAssetUri(project, pano);
-    if (!pano || !projectorImageUrl) {
+    cameraMovePano = resolveProjectedStylePano(project);
+    projectorImageUrl = getProjectedStyleAssetUri(project, cameraMovePano);
+    if (!cameraMovePano || !projectorImageUrl) {
       throw new Error('Projected camera-move MP4 could not resolve the projector panorama asset.');
     }
     projectorTexture = await acquireProjectedStyleTexture(projectorImageUrl);
     if (!projectorTexture) {
       throw new Error('Projected camera-move MP4 failed to decode the panorama texture.');
     }
+    cameraMoveSettings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+    const grayboxPano = project.panoRefs.find((p) => p.type === 'graybox_render');
+    cameraMoveAlignment = cameraMovePano ? findProjectionAlignmentForPano(cameraMoveSettings, cameraMovePano.id) : undefined;
+    warpTextureResult = cameraMoveAlignment && grayboxPano
+      ? acquireProjectionWarpTexture(cameraMoveAlignment, {
+          targetYawDegrees: grayboxPano.rotation[1],
+          sourceYawDegrees: cameraMovePano.rotation[1],
+        })
+      : undefined;
   }
 
   const frameRate = options.frameRate ?? 30;
@@ -219,18 +235,19 @@ export async function renderShotCameraMoveMp4(
   const height = shot.exportSettings.height;
   await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
-  const pano = appearance === 'projected' ? resolveProjectedStylePano(project) : undefined;
   const scene = buildScene(project, {
     showHelpers: false,
     hiddenObjectTypes: ['sun_marker'],
-    appearance: appearance === 'projected' && projectorTexture && pano ? 'projected' : 'clay',
-    projected: appearance === 'projected' && projectorTexture && pano
+    appearance: appearance === 'projected' && projectorTexture && cameraMovePano ? 'projected' : 'clay',
+    projected: appearance === 'projected' && projectorTexture && cameraMovePano
       ? {
         texture: projectorTexture,
-        origin: pano.origin,
-        rotation: pano.rotation,
-        settings: normalizeProjectedStyleSettings(project.settings.projectedStyle),
+        origin: cameraMovePano.origin,
+        rotation: cameraMovePano.rotation,
+        settings: cameraMoveSettings ?? normalizeProjectedStyleSettings(project.settings.projectedStyle),
         disposableMaterials: true,
+        warpTexture: warpTextureResult?.texture,
+        warpStrength: cameraMoveAlignment?.strength,
       }
       : undefined,
   });
@@ -343,6 +360,7 @@ export async function renderShotCameraMoveMp4(
     disposeScene(scene);
     disposeRenderer(renderer);
     releaseProjectedStyleTexture(projectorImageUrl);
+    warpTextureResult?.release();
   }
 
   const blob = new Blob(chunks, { type: mimeType });
@@ -463,6 +481,16 @@ export async function renderViewportProjected(
     throw new Error('Projected viewport export failed to decode the panorama texture.');
   }
 
+  const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const grayboxPano = project.panoRefs.find((p) => p.type === 'graybox_render');
+  const alignment = pano ? findProjectionAlignmentForPano(settings, pano.id) : undefined;
+  const warpResult = alignment && grayboxPano
+    ? acquireProjectionWarpTexture(alignment, {
+        targetYawDegrees: grayboxPano.rotation[1],
+        sourceYawDegrees: pano.rotation[1],
+      })
+    : undefined;
+
   const renderer = createRenderer(width, height);
   const scene = buildScene(project, {
     showHelpers: false,
@@ -472,8 +500,10 @@ export async function renderViewportProjected(
       texture,
       origin: pano.origin,
       rotation: pano.rotation,
-      settings: normalizeProjectedStyleSettings(project.settings.projectedStyle),
+      settings,
       disposableMaterials: true,
+      warpTexture: warpResult?.texture,
+      warpStrength: alignment?.strength,
     },
   });
   const camera = new THREE.PerspectiveCamera(
@@ -496,6 +526,7 @@ export async function renderViewportProjected(
   disposeScene(scene);
   disposeRenderer(renderer);
   releaseProjectedStyleTexture(imageUrl);
+  warpResult?.release();
 
   return { dataUrl, width, height };
 }

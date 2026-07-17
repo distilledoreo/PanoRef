@@ -1,9 +1,11 @@
 import React from 'react';
 import { LocationProject, ProjectedStyleSettings } from '../../domain/types';
 import {
+  findProjectionAlignmentForPano,
   listEligibleProjectedStylePanos,
   normalizeProjectedStyleSettings,
   projectedStyleStatusLabel,
+  projectionAlignmentStatusForPano,
   resolveProjectedStylePano,
 } from '../../engine/projectedStyle';
 import { Field, Select, TextInput } from './Field';
@@ -20,6 +22,11 @@ export function ProjectedStylePanel({
   const allPanos = project.panoRefs;
   const status = projectedStyleStatusLabel(project);
   const active = resolveProjectedStylePano(project);
+
+  const currentAlignment = active ? findProjectionAlignmentForPano(settings, active.id) : undefined;
+  const alignmentStatus = active && currentAlignment
+    ? projectionAlignmentStatusForPano(project, active.id)
+    : undefined;
 
   const update = (partial: Partial<ProjectedStyleSettings>) => {
     onChange(normalizeProjectedStyleSettings({ ...settings, ...partial }));
@@ -119,6 +126,62 @@ export function ProjectedStylePanel({
           <option value="neutral">Neutral</option>
         </Select>
       </Field>
+
+      {currentAlignment && alignmentStatus && (
+        <div className="rounded-lg border border-subtle bg-surface-base px-3 py-2 text-xs text-secondary">
+          <div className="flex items-center gap-2">
+            <span className={`font-semibold ${
+              alignmentStatus.state === 'valid' ? 'text-green-600 dark:text-green-400' :
+              alignmentStatus.state === 'stale' ? 'text-amber-600 dark:text-amber-400' :
+              'text-primary'
+            }`}>
+              Projection Assist
+            </span>
+            <span className="text-muted">·</span>
+            <span>{alignmentStatus.message}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-muted">{alignmentStatus.enabledPairCount} active pair{alignmentStatus.enabledPairCount !== 1 ? 's' : ''}</span>
+          </div>
+        </div>
+      )}
+
+      {currentAlignment && (
+        <>
+          <Field label={`Strength (${Math.round((currentAlignment.strength ?? 1) * 100)}%)`}>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round((currentAlignment.strength ?? 1) * 100)}
+              onChange={(event) => {
+                const strength = Number(event.target.value) / 100;
+                onChange(normalizeProjectedStyleSettings({
+                  ...settings,
+                  alignments: settings.alignments?.map((a) =>
+                    a.sourcePanoId === active?.id ? { ...a, strength } : a
+                  ),
+                }));
+              }}
+              className="w-full accent-[var(--accent)]"
+            />
+          </Field>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (!window.confirm('Remove the local fit for this panorama?')) return;
+              onChange(normalizeProjectedStyleSettings({
+                ...settings,
+                alignments: settings.alignments?.filter((a) => a.sourcePanoId !== active?.id),
+              }));
+            }}
+            className="w-full rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
+          >
+            Remove local fit
+          </button>
+        </>
+      )}
     </div>
   );
 }

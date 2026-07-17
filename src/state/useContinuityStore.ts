@@ -6,6 +6,7 @@ import {
   PanoReference,
   PanoViewState,
   ProjectAsset,
+  ProjectionAlignment,
   SceneObject,
   SceneObjectType,
   Shot,
@@ -24,6 +25,8 @@ import {
   DEFAULT_GRAYBOX_PANO_HEIGHT,
   DEFAULT_GRAYBOX_PANO_WIDTH,
   normalizeProjectSettings,
+  normalizeProjectedStyleSettings,
+  setProjectionAlignmentForPano,
 } from '../domain/defaults';
 import {
   getCanonicalPano,
@@ -146,6 +149,7 @@ interface ContinuityStore {
   renderGrayboxPano: () => Promise<PanoReference>;
   importCanonicalPano: (params: { name: string; dataUrl: string; width?: number; height?: number; importNote?: string }) => void;
   removePanoReference: (id: string) => void;
+  setProjectionAlignment: (alignment: ProjectionAlignment | undefined, sourcePanoId: string) => void;
   setActivePano: (id?: string) => void;
   updatePanoReference: (id: string, updates: Partial<PanoReference>) => void;
   setPanoView: (updates: Partial<PanoViewState>) => void;
@@ -760,6 +764,19 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     };
   }),
   setActivePano: (id) => set({ activePanoId: id }),
+  setProjectionAlignment: (alignment, sourcePanoId) => set((state) => {
+    const current = normalizeProjectedStyleSettings(state.project.settings.projectedStyle);
+    const updated = setProjectionAlignmentForPano(current, alignment, sourcePanoId);
+    return {
+      project: touchProject({
+        ...state.project,
+        settings: normalizeProjectSettings({
+          ...state.project.settings,
+          projectedStyle: updated,
+        }),
+      }),
+    };
+  }),
   removePanoReference: (id) => set((state) => {
     const target = state.project.panoRefs.find((pano) => pano.id === id);
     if (!target) return state;

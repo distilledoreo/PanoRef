@@ -6,6 +6,8 @@ import {
   PanoCropSettings,
   PanoReference,
   ProjectAsset,
+  ProjectionAlignment,
+  ProjectionControlPair,
   SceneObject,
   SceneObjectType,
   ProjectedStyleSettings,
@@ -14,6 +16,7 @@ import {
   Shot,
   ShotExportSettings,
   Transform,
+  Vec2,
   Vec3,
 } from './types';
 import { createId } from '../utils/ids';
@@ -82,12 +85,69 @@ export function normalizeProjectWorkflow(workflow?: Partial<ProjectWorkflow>): P
   };
 }
 
+function normalizeUv(uv: unknown): Vec2 {
+  if (!Array.isArray(uv) || uv.length < 2) return [0.5, 0.5];
+  const u = Number(uv[0]);
+  const v = Number(uv[1]);
+  return [
+    Number.isFinite(u) ? Math.min(1, Math.max(0, u)) : 0.5,
+    Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5,
+  ];
+}
+
+function normalizeProjectionControlPair(raw: unknown): ProjectionControlPair | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r['id'] !== 'string' || !r['id']) return null;
+  return {
+    id: r['id'],
+    targetUv: normalizeUv(r['targetUv']),
+    sourceUv: normalizeUv(r['sourceUv']),
+    enabled: r['enabled'] !== false,
+  };
+}
+
+function normalizeProjectionAlignment(raw: unknown): ProjectionAlignment | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r['sourcePanoId'] !== 'string' || !r['sourcePanoId']) return null;
+  if (typeof r['targetGrayboxPanoId'] !== 'string' || !r['targetGrayboxPanoId']) return null;
+  const rawPairs = Array.isArray(r['pairs']) ? r['pairs'] : [];
+  const pairs: ProjectionControlPair[] = [];
+  for (const p of rawPairs) {
+    const pair = normalizeProjectionControlPair(p);
+    if (pair) pairs.push(pair);
+  }
+  const strength = Number(r['strength']);
+  const savedAt = typeof r['savedAt'] === 'string' ? r['savedAt'] : new Date().toISOString();
+  return {
+    sourcePanoId: r['sourcePanoId'],
+    targetGrayboxPanoId: r['targetGrayboxPanoId'],
+    pairs,
+    strength: Number.isFinite(strength) ? Math.min(1, Math.max(0, strength)) : 1,
+    savedAt,
+  };
+}
+
 export function normalizeProjectedStyleSettings(
   settings?: Partial<ProjectedStyleSettings> | null,
 ): ProjectedStyleSettings {
   const opacity = Number(settings?.opacity);
   const exposure = Number(settings?.exposure);
   const lightingContribution = Number(settings?.lightingContribution);
+
+  // Normalize alignments: discard invalid entries, deduplicate by sourcePanoId (last wins).
+  let alignments: ProjectionAlignment[] | undefined;
+  if (Array.isArray(settings?.alignments)) {
+    const map = new Map<string, ProjectionAlignment>();
+    for (const raw of settings.alignments) {
+      const a = normalizeProjectionAlignment(raw);
+      if (a) map.set(a.sourcePanoId, a);
+    }
+    const entries = [...map.values()];
+    alignments = entries.length > 0 ? entries : undefined;
+  }
+
   return {
     panoId: typeof settings?.panoId === 'string' && settings.panoId.length > 0 ? settings.panoId : undefined,
     opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : defaultProjectedStyleSettings.opacity,
@@ -96,6 +156,34 @@ export function normalizeProjectedStyleSettings(
       ? Math.min(1, Math.max(0, lightingContribution))
       : defaultProjectedStyleSettings.lightingContribution,
     fallbackMode: settings?.fallbackMode === 'neutral' ? 'neutral' : 'clay',
+    alignments,
+  };
+}
+
+/**
+ * Return the alignment for a given source pano, or undefined when none exists.
+ */
+export function findProjectionAlignmentForPano(
+  settings: ProjectedStyleSettings,
+  sourcePanoId: string,
+): ProjectionAlignment | undefined {
+  return settings.alignments?.find((a) => a.sourcePanoId === sourcePanoId);
+}
+
+/**
+ * Return a new settings object where the alignment for sourcePanoId has been
+ * replaced (or removed when alignment is undefined). Other entries are kept.
+ */
+export function setProjectionAlignmentForPano(
+  settings: ProjectedStyleSettings,
+  alignment: ProjectionAlignment | undefined,
+  sourcePanoId: string,
+): ProjectedStyleSettings {
+  const existing = settings.alignments?.filter((a) => a.sourcePanoId !== sourcePanoId) ?? [];
+  const next = alignment ? [...existing, alignment] : existing;
+  return {
+    ...settings,
+    alignments: next.length > 0 ? next : undefined,
   };
 }
 

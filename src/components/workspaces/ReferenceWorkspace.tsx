@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Check, FileDown, Hand, Sparkles, Star, Trash2 } from 'lucide-react';
 import { STYLED_PANO } from '../../domain/copy';
+import { ProjectionAlignment } from '../../domain/types';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
@@ -14,7 +15,9 @@ import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
 import { LandmarkStrip, PanoLandmarkMarkers } from '../viewers/PanoLandmarkOverlay';
 import { PanoViewer } from '../viewers/PanoViewer';
+import { ProjectionAlignmentEditor } from '../reference/ProjectionAlignmentEditor';
 import { directionToYawPitch, subtract } from '../../engine/sync';
+import { findProjectionAlignmentForPano, projectionAlignmentStatusForPano } from '../../engine/projectedStyle';
 import {
   hasReferenceCandidate,
   hasStyledCanonicalPano,
@@ -29,6 +32,7 @@ export function ReferenceWorkspace() {
   const [compareOpacity, setCompareOpacity] = useState(0.65);
   const [precisionOpen, setPrecisionOpen] = useState(false);
   const [focusedLandmarkId, setFocusedLandmarkId] = useState<string | undefined>();
+  const [alignmentEditorOpen, setAlignmentEditorOpen] = useState(false);
   const {
     project,
     activePanoId,
@@ -37,6 +41,7 @@ export function ReferenceWorkspace() {
     setPanoView,
     updatePanoReference,
     updateProjectSettings,
+    setProjectionAlignment,
     importCanonicalPano,
     removePanoReference,
     approveGrayboxForReference,
@@ -50,6 +55,16 @@ export function ReferenceWorkspace() {
   const grayboxAsset = getPanoAsset(project, grayboxPano);
   const canCalibrate = Boolean(activePano && activePano.type !== 'graybox_render' && grayboxPano);
   const alignmentAccepted = isReferenceAlignmentAccepted(project);
+  const canLocalFit = canCalibrate && Boolean(activeAsset) && Boolean(grayboxAsset);
+  const currentAlignment = (activePano && canLocalFit)
+    ? findProjectionAlignmentForPano(
+        project.settings.projectedStyle ?? { opacity: 1, exposure: 1, lightingContribution: 0, fallbackMode: 'clay' },
+        activePano.id,
+      )
+    : undefined;
+  const alignmentStatus = (activePano && currentAlignment)
+    ? projectionAlignmentStatusForPano(project, activePano.id)
+    : undefined;
   const primaryAction = useMemo(
     () => resolveWorkspacePrimaryAction({ project, workspace: 'reference', shotCameraFlying: false }),
     [project],
@@ -124,6 +139,18 @@ export function ReferenceWorkspace() {
     );
     setPanoView({ yawDegrees: targetYaw, pitchDegrees: targetPitch });
   };
+
+  const handleAlignmentApply = useCallback((alignment: ProjectionAlignment) => {
+    if (!activePano) return;
+    setProjectionAlignment(alignment, activePano.id);
+    setAlignmentEditorOpen(false);
+  }, [activePano, setProjectionAlignment]);
+
+  const handleAlignmentPreview = useCallback((_alignment: ProjectionAlignment) => {
+    // Geometry preview passes a locally cloned project with draft alignment.
+    // No Zustand write until confirmed.
+    setAlignmentEditorOpen(false);
+  }, []);
 
   const approveReference = () => {
     if (canCalibrate && needsReferenceAlignment(project) && !alignmentAccepted) {
@@ -340,6 +367,37 @@ export function ReferenceWorkspace() {
                       Reset
                     </button>
                   </div>
+
+                  {canLocalFit && (
+                    <div className="border-t border-subtle/50 pt-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-secondary">Local fit</div>
+                          {alignmentStatus && (
+                            <p className={`mt-0.5 text-[11px] ${
+                              alignmentStatus.state === 'valid' ? 'text-green-600 dark:text-green-400' :
+                              alignmentStatus.state === 'stale' ? 'text-amber-600 dark:text-amber-400' :
+                              'text-secondary'
+                            }`}>
+                              {alignmentStatus.message}
+                            </p>
+                          )}
+                          {!currentAlignment && (
+                            <p className="mt-0.5 text-[11px] text-secondary">
+                              Fine-tune the projection at specific points.
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setAlignmentEditorOpen(true)}
+                          className="shrink-0 text-[11px] font-medium text-accent hover:underline"
+                        >
+                          {currentAlignment ? 'Edit' : 'Fix local mismatches'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </ContextualPanel>
               </div>
             )}
@@ -347,6 +405,20 @@ export function ReferenceWorkspace() {
           </div>
         </div>
       </div>
+
+      {activePano && canLocalFit && (
+        <ProjectionAlignmentEditor
+          open={alignmentEditorOpen}
+          sourcePano={activePano}
+          sourceImageUrl={activeAsset?.uri}
+          targetPano={grayboxPano}
+          targetImageUrl={grayboxAsset?.uri}
+          initialAlignment={currentAlignment}
+          onCancel={() => setAlignmentEditorOpen(false)}
+          onApply={handleAlignmentApply}
+          onPreviewGeometry={handleAlignmentPreview}
+        />
+      )}
 
       <PrecisionDrawer open={precisionOpen} title="Reference Settings" onClose={() => setPrecisionOpen(false)}>
         <div className="space-y-4">

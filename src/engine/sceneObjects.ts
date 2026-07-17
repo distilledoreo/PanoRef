@@ -188,6 +188,9 @@ export interface ProjectedSceneOptions {
   settings: ProjectedStyleSettings;
   /** Dispose projected materials with the scene (export / one-shot). */
   disposableMaterials?: boolean;
+  /** Optional warp texture for projection alignment correction. */
+  warpTexture?: THREE.DataTexture;
+  warpStrength?: number;
 }
 
 export function buildScene(
@@ -351,6 +354,8 @@ function applyProjectedStyleToObject(
     settings: projected.settings,
     fallbackColor: projected.settings.fallbackMode === 'neutral' ? 0xb0b6b2 : fallbackColor,
     disposable: projected.disposableMaterials ?? true,
+    warpTexture: projected.warpTexture,
+    warpStrength: projected.warpStrength,
   });
   // Keep a tiny emissive edge so selection remains readable under projection.
   if (root.userData?.sceneObjectId && projected.disposableMaterials === false) {

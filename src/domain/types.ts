@@ -1,3 +1,4 @@
+export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
 export type Euler = [number, number, number];
 export type ProjectVersion = '0.1';
@@ -174,6 +175,40 @@ export interface ShotExportSettings {
   includePrompt: boolean;
 }
 
+/**
+ * A single matched point: a UV in the target graybox image paired with
+ * the corresponding UV in the source styled image.
+ */
+export interface ProjectionControlPair {
+  id: string;
+  /** UV in the target graybox image (raw image space, 0–1). */
+  targetUv: Vec2;
+  /** UV in the source styled panorama image (0–1). */
+  sourceUv: Vec2;
+  /** When false the pair is ignored by the solver but preserved in the project. */
+  enabled: boolean;
+}
+
+/**
+ * A full set of control pairs aligning one source styled pano to the
+ * target graybox pano. There is at most one saved alignment per sourcePanoId.
+ */
+export interface ProjectionAlignment {
+  /** ID of the source styled panorama (PanoReference.id). */
+  sourcePanoId: string;
+  /** ID of the target graybox panorama (PanoReference.id). */
+  targetGrayboxPanoId: string;
+  /** Sorted enabled control pairs. */
+  pairs: ProjectionControlPair[];
+  /**
+   * Warp strength applied in the shader (0–1, default 1).
+   * Stored separately so changing it does not invalidate the cached texture.
+   */
+  strength: number;
+  /** ISO timestamp of the last save. Used as part of the cache key. */
+  savedAt: string;
+}
+
 /** Project-level projector configuration (no GPU resources). */
 export interface ProjectedStyleSettings {
   /** Pano reference id to project; omit to auto-pick canonical styled pano. */
@@ -182,6 +217,13 @@ export interface ProjectedStyleSettings {
   exposure: number;
   lightingContribution: number;
   fallbackMode: 'clay' | 'neutral';
+  /**
+   * Local projection corrections, one entry per source pano.
+   * At most one active alignment per sourcePanoId (last valid entry wins on
+   * normalization). An alignment for a missing pano is preserved but reported
+   * as stale rather than silently dropped.
+   */
+  alignments?: ProjectionAlignment[];
 }
 
 export interface PromptOverrides {

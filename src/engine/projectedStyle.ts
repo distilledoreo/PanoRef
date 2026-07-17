@@ -1,13 +1,15 @@
 import {
   LocationProject,
   PanoReference,
+  ProjectionAlignment,
+  ProjectionControlPair,
   Vec3,
 } from '../domain/types';
-import { normalizeProjectedStyleSettings } from '../domain/defaults';
+import { findProjectionAlignmentForPano, normalizeProjectedStyleSettings } from '../domain/defaults';
 import { length, subtract } from './sync';
 
 export type ViewportAppearanceMode = 'clay' | 'projected';
-export { normalizeProjectedStyleSettings };
+export { findProjectionAlignmentForPano, normalizeProjectedStyleSettings };
 
 /** Styled / imported panos preferred for projection (not the graybox render by default). */
 export function isEligibleProjectedStylePano(pano: PanoReference): boolean {
@@ -82,6 +84,94 @@ export function projectedStyleStatusLabel(project: LocationProject): {
     available: true,
     panoName: pano.name,
     originLabel: formatOrigin(pano.origin),
+  };
+}
+
+export interface AlignmentStatus {
+  state: 'valid' | 'stale' | 'missing' | 'disabled';
+  pairCount: number;
+  enabledPairCount: number;
+  conflictCount: number;
+  message: string;
+}
+
+export function isProjectionAlignmentCurrent(
+  project: LocationProject,
+  alignment: ProjectionAlignment,
+): boolean {
+  const sourcePano = project.panoRefs.find((p) => p.id === alignment.sourcePanoId);
+  if (!sourcePano) return false;
+  const targetPano = project.panoRefs.find((p) => p.id === alignment.targetGrayboxPanoId);
+  if (!targetPano) return false;
+  const assetUri = project.assets.assets[sourcePano.imageAssetId]?.uri;
+  if (!assetUri) return false;
+  return true;
+}
+
+export function projectionAlignmentStatusForPano(
+  project: LocationProject,
+  sourcePanoId: string,
+): AlignmentStatus {
+  const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const alignment = findProjectionAlignmentForPano(settings, sourcePanoId);
+
+  if (!alignment) {
+    return {
+      state: 'missing',
+      pairCount: 0,
+      enabledPairCount: 0,
+      conflictCount: 0,
+      message: 'No local fit configured for this panorama.',
+    };
+  }
+
+  if (!isProjectionAlignmentCurrent(project, alignment)) {
+    const sourceMissing = !project.panoRefs.find((p) => p.id === alignment.sourcePanoId);
+    const targetMissing = !project.panoRefs.find((p) => p.id === alignment.targetGrayboxPanoId);
+    if (sourceMissing) {
+      return {
+        state: 'stale',
+        pairCount: alignment.pairs.length,
+        enabledPairCount: alignment.pairs.filter((p) => p.enabled).length,
+        conflictCount: 0,
+        message: 'Source panorama has been removed. Recreate the local fit.',
+      };
+    }
+    if (targetMissing) {
+      return {
+        state: 'stale',
+        pairCount: alignment.pairs.length,
+        enabledPairCount: alignment.pairs.filter((p) => p.enabled).length,
+        conflictCount: 0,
+        message: 'Graybox render has changed. Recreate the local fit.',
+      };
+    }
+    return {
+      state: 'stale',
+      pairCount: alignment.pairs.length,
+      enabledPairCount: alignment.pairs.filter((p) => p.enabled).length,
+      conflictCount: 0,
+      message: 'Local fit assets are missing.',
+    };
+  }
+
+  const enabledPairs = alignment.pairs.filter((p) => p.enabled);
+  if (enabledPairs.length === 0) {
+    return {
+      state: 'disabled',
+      pairCount: alignment.pairs.length,
+      enabledPairCount: 0,
+      conflictCount: 0,
+      message: 'All control pairs are disabled. Enable at least one pair to apply the local fit.',
+    };
+  }
+
+  return {
+    state: 'valid',
+    pairCount: alignment.pairs.length,
+    enabledPairCount: enabledPairs.length,
+    conflictCount: 0,
+    message: `${enabledPairs.length} control pair${enabledPairs.length !== 1 ? 's' : ''} active.`,
   };
 }
 

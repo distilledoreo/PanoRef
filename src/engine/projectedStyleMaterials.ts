@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Euler, ProjectedStyleSettings, Vec3 } from '../domain/types';
 import { PROJECTED_STYLE_GLSL } from './projectedStyleMath';
 import { degreesToRadians } from './sync';
+import { disposeAllProjectionWarpTextures as disposeAllWarpTextures } from './projectionWarpTexture';
 
 /**
  * Shared equirect texture cache keyed by image URL.
@@ -91,6 +92,7 @@ export function disposeAllProjectedStyleTextures() {
     entry.texture?.dispose();
     textureCache.delete(url);
   }
+  disposeAllWarpTextures();
 }
 
 export function projectedStyleTextureCacheSize(): number {
@@ -107,6 +109,10 @@ export interface ProjectedMaterialParams {
   fallbackColor: THREE.ColorRepresentation;
   /** When true, materials mark themselves disposable (export path). */
   disposable?: boolean;
+  /** Optional warp texture for projection alignment correction. */
+  warpTexture?: THREE.DataTexture;
+  /** Strength of the warp displacement (0–1). */
+  warpStrength?: number;
 }
 
 /**
@@ -141,6 +147,10 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
     shader.uniforms.projectedLighting = { value: lightingContribution };
     shader.uniforms.projectedFallbackColor = { value: fallback };
     shader.uniforms.projectedUseNeutralFallback = { value: useNeutralFallback ? 1 : 0 };
+    shader.uniforms.projectedWarpMap = { value: params.warpTexture ?? new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat) };
+    shader.uniforms.projectedWarpMapSize = { value: new THREE.Vector2(params.warpTexture?.image.width ?? 1, params.warpTexture?.image.height ?? 1) };
+    shader.uniforms.projectedWarpStrength = { value: params.warpStrength ?? 0 };
+    shader.uniforms.projectedWarpEnabled = { value: params.warpTexture ? 1 : 0 };
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -166,12 +176,23 @@ uniform float projectedExposure;
 uniform float projectedLighting;
 uniform vec3 projectedFallbackColor;
 uniform int projectedUseNeutralFallback;
+uniform sampler2D projectedWarpMap;
+uniform vec2 projectedWarpMapSize;
+uniform float projectedWarpStrength;
+uniform int projectedWarpEnabled;
 varying vec3 vProjectedWorldPos;
 const float PROJECTED_PI = 3.141592653589793;
 
 ${PROJECTED_STYLE_GLSL.applyInversePanoYaw}
 
 ${PROJECTED_STYLE_GLSL.equirectUvFromDirection}
+
+vec2 decodeProjectedWarpDisplacement(vec2 uv) {
+  vec4 packed = texture2D(projectedWarpMap, uv);
+  float dU = (packed.r * 255.0 + packed.g / 255.0) * 2.0 - 1.0;
+  float dV = (packed.b * 255.0 + packed.a / 255.0) * 2.0 - 1.0;
+  return vec2(dU, dV);
+}
 `,
       )
       .replace(
@@ -188,8 +209,14 @@ ${PROJECTED_STYLE_GLSL.equirectUvFromDirection}
   } else {
     vec3 direction = applyInversePanoYaw(normalize(offset), projectedPanoYaw);
     vec2 panoUv = equirectUvFromDirection(direction);
-    panoUv.x = fract(panoUv.x);
-    panoUv.y = clamp(panoUv.y, 0.0, 1.0);
+    if (projectedWarpEnabled == 1) {
+      vec2 displacement = decodeProjectedWarpDisplacement(panoUv);
+      panoUv.x = fract(panoUv.x + displacement.x * projectedWarpStrength);
+      panoUv.y = clamp(panoUv.y + displacement.y * projectedWarpStrength, 0.0, 1.0);
+    } else {
+      panoUv.x = fract(panoUv.x);
+      panoUv.y = clamp(panoUv.y, 0.0, 1.0);
+    }
     vec4 panoSample = texture2D(projectedPanoMap, panoUv);
     sampleColor = panoSample.rgb * projectedExposure;
   }
@@ -225,7 +252,7 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v3:${params.settings.fallbackMode}:${params.disposable ? 'd' : 's'}`
+    `projected-style-v3:${params.settings.fallbackMode}:${params.disposable ? 'd' : 's'}:${params.warpTexture ? 'w1' : 'w0'}`
   );
 
   // Mark for disposal on export-only clones.
