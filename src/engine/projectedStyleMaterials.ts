@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Euler, ProjectedStyleSettings, Vec3 } from '../domain/types';
+import { PROJECTED_STYLE_GLSL } from './projectedStyleMath';
 import { degreesToRadians } from './sync';
 
 /**
@@ -168,24 +169,9 @@ uniform int projectedUseNeutralFallback;
 varying vec3 vProjectedWorldPos;
 const float PROJECTED_PI = 3.141592653589793;
 
-vec3 applyInversePanoYaw(vec3 direction, float yaw) {
-  float s = sin(yaw);
-  float c = cos(yaw);
-  return normalize(vec3(
-    direction.x * c - direction.z * s,
-    direction.y,
-    direction.z * c + direction.x * s
-  ));
-}
+${PROJECTED_STYLE_GLSL.applyInversePanoYaw}
 
-vec2 equirectUvFromDirection(vec3 direction) {
-  float longitude = atan(direction.x, direction.z);
-  float latitude = asin(clamp(direction.y, -1.0, 1.0));
-  return vec2(
-    longitude / (2.0 * PROJECTED_PI) + 0.5,
-    latitude / PROJECTED_PI + 0.5
-  );
-}
+${PROJECTED_STYLE_GLSL.equirectUvFromDirection}
 `,
       )
       .replace(

@@ -556,10 +556,11 @@ export function createPreviewMesh(object: SceneObject, theme: SceneVisualTheme =
 }
 
 export function disposePreviewMesh(node: THREE.Object3D) {
+  const disposedMaterials = new Set<THREE.Material>();
   node.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (mesh.geometry) mesh.geometry.dispose();
-    disposeOwnedMaterials(mesh.material);
+    disposeOwnedMaterials(mesh.material, disposedMaterials);
   });
 }
 

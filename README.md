@@ -197,7 +197,8 @@ For Fly Camera specifically, verify sustained movement can travel beyond walls a
 - Geometry editing is primitive-level only. There is no vertex editing, UV editing, shader graph, rigging, or timeline.
 - Native `.blend`, `.ma`, `.mb`, and Unreal asset bytes require a GLB/FBX bridge or `.panoscene` handoff; the browser does not parse those proprietary formats directly.
 - Imported mesh assets are embedded in saved project JSON as base64 data URLs, so large geometry can make project files substantially larger.
-- Shot packages rely on `viewport_clay.png` for camera-locked layout control rather than projected pano textures on proxy geometry.
-- Projection quality depends on pano alignment. If the canonical pano is yaw-shifted relative to the graybox pano, use the opacity compare view and set the reference yaw offset before exporting shot packages.
+- Shot packages keep `viewport_clay.png` as the authoritative geometric control frame. When **Projected Style** is enabled and a styled panorama is available, packages can also include optional `inputs/viewport_projected.png` (and optional `inputs/camera_move/projected_*.png`) as view-dependent appearance references — not a baked texture atlas on proxy geometry.
+- Projected Style samples the aligned equirectangular panorama in world space onto existing graybox/imported meshes. It does not create geometry, reconstruct occluded surfaces, or bake UVs; quality is best near the pano origin and degrades with large translations (stretching / duplicated imagery around occlusions).
+- Projection quality depends on pano alignment. If the canonical pano is yaw-shifted relative to the graybox pano, use the opacity compare view and set the reference yaw offset before exporting shot packages. Projector knobs (opacity, exposure, lighting contribution, fallback, source pano) live under Reference → Precision as `settings.projectedStyle`.
 - Final/generated AI images and videos live outside Continuity Stage; the in-app MP4 export is a graybox camera-motion control clip, not final AI video generation.
 - Project assets are stored as data URLs inside the JSON project file, so large projects can become heavy.
