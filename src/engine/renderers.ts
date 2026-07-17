@@ -13,7 +13,8 @@ import {
 } from './cameraMoveCubemap';
 import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH } from '../domain/defaults';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
-import { resolveProjectedProjectorAssets } from './multiOriginProjection';
+import { resolveProjectedProjectorAssets, resolveProjectionWarpForPano } from './multiOriginProjection';
+import type { WarpTextureResult } from './projectionWarpTexture';
 import {
   canUseProjectedAppearance,
 } from './projectedStyle';
@@ -27,7 +28,13 @@ import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sy
 /** Load primary (+ optional secondary) textures for projected export/render. */
 async function loadProjectedSceneOptions(
   project: LocationProject,
-): Promise<{ options: ProjectedSceneOptions; primaryUrl: string; secondaryUrl?: string } | undefined> {
+): Promise<{
+  options: ProjectedSceneOptions;
+  primaryUrl: string;
+  secondaryUrl?: string;
+  primaryWarp?: WarpTextureResult;
+  secondaryWarp?: WarpTextureResult;
+} | undefined> {
   const assets = resolveProjectedProjectorAssets(project);
   if (!assets) return undefined;
   const texture = await acquireProjectedStyleTexture(assets.primaryUrl);
@@ -36,9 +43,26 @@ async function loadProjectedSceneOptions(
   if (assets.secondaryUrl) {
     secondaryTexture = (await acquireProjectedStyleTexture(assets.secondaryUrl)) ?? undefined;
   }
+
+  const primaryWarp = resolveProjectionWarpForPano(
+    assets.settings,
+    assets.primary.id,
+    assets.primary.rotation,
+  );
+  let secondaryWarp: WarpTextureResult | undefined;
+  if (secondaryTexture && assets.secondary) {
+    secondaryWarp = resolveProjectionWarpForPano(
+      assets.settings,
+      assets.secondary.id,
+      assets.secondary.rotation,
+    );
+  }
+
   return {
     primaryUrl: assets.primaryUrl,
     secondaryUrl: secondaryTexture ? assets.secondaryUrl : undefined,
+    primaryWarp,
+    secondaryWarp,
     options: {
       texture,
       origin: assets.primary.origin,
@@ -48,6 +72,12 @@ async function loadProjectedSceneOptions(
       secondaryTexture,
       secondaryOrigin: secondaryTexture && assets.secondary ? assets.secondary.origin : undefined,
       secondaryRotation: secondaryTexture && assets.secondary ? assets.secondary.rotation : undefined,
+      warpMap: primaryWarp?.texture,
+      warpMapSize: primaryWarp ? [primaryWarp.width, primaryWarp.height] : undefined,
+      warpStrength: primaryWarp ? 1 : undefined,
+      warpMapB: secondaryWarp?.texture,
+      warpMapSizeB: secondaryWarp ? [secondaryWarp.width, secondaryWarp.height] : undefined,
+      warpStrengthB: secondaryWarp ? 1 : undefined,
     },
   };
 }
@@ -294,6 +324,8 @@ export async function renderShotCameraMoveMp4(
     if (projectedLoad) {
       releaseProjectedStyleTexture(projectedLoad.primaryUrl);
       releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
+      projectedLoad.primaryWarp?.release();
+      projectedLoad.secondaryWarp?.release();
     }
     throw new Error('Canvas video capture is not supported in this browser.');
   }
@@ -394,6 +426,8 @@ export async function renderShotCameraMoveMp4(
     if (projectedLoad) {
       releaseProjectedStyleTexture(projectedLoad.primaryUrl);
       releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
+      projectedLoad.primaryWarp?.release();
+      projectedLoad.secondaryWarp?.release();
     }
   }
 
@@ -537,6 +571,8 @@ export async function renderViewportProjected(
   disposeRenderer(renderer);
   releaseProjectedStyleTexture(projectedLoad.primaryUrl);
   releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
+  projectedLoad.primaryWarp?.release();
+  projectedLoad.secondaryWarp?.release();
 
   return { dataUrl, width, height };
 }

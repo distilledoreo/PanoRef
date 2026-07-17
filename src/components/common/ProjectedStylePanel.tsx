@@ -1,8 +1,14 @@
-import React from 'react';
-import { LocationProject, ProjectedStyleSettings } from '../../domain/types';
+import React, { useCallback } from 'react';
+import { LocationProject, ProjectedStyleSettings, ProjectionControlPair } from '../../domain/types';
+import {
+  createProjectionAlignment,
+  createProjectionControlPair,
+  findProjectionAlignmentForPano,
+  normalizeProjectedStyleSettings,
+  setProjectionAlignmentForPano,
+} from '../../domain/defaults';
 import {
   listEligibleProjectedStylePanos,
-  normalizeProjectedStyleSettings,
   projectedStyleStatusLabel,
   resolveProjectedStylePano,
 } from '../../engine/projectedStyle';
@@ -12,7 +18,7 @@ import {
   canUseDualProjectorBlend,
   resolveProjectors,
 } from '../../engine/multiOriginProjection';
-import { Field, Select, TextInput } from './Field';
+import { Field, IconButton, Select, TextInput } from './Field';
 
 const BLEND_OPTIONS: ProjectorBlendMode[] = [
   'primary_only',
@@ -200,6 +206,236 @@ export function ProjectedStylePanel({
           <option value="neutral">Neutral</option>
         </Select>
       </Field>
+
+      <AlignmentSection
+        settings={settings}
+        primaryPanoId={active?.id}
+        onSettingsChange={onChange}
+      />
+    </div>
+  );
+}
+
+function AlignmentSection({
+  settings,
+  primaryPanoId,
+  onSettingsChange,
+}: {
+  settings: ProjectedStyleSettings;
+  primaryPanoId?: string;
+  onSettingsChange: (settings: ProjectedStyleSettings) => void;
+}) {
+  const [expanded, setExpanded] = React.useState(false);
+
+  const alignment = primaryPanoId
+    ? findProjectionAlignmentForPano(settings, primaryPanoId)
+    : undefined;
+
+  const updateAlignment = useCallback(
+    (updateFn: (current: ProjectionControlPair[]) => ProjectionControlPair[]) => {
+      if (!primaryPanoId) return;
+      const current = alignment?.pairs ?? [];
+      const next = updateFn(current.map((p) => ({ ...p })));
+      const updatedAlignment = createProjectionAlignment(primaryPanoId, primaryPanoId, next);
+      onSettingsChange(setProjectionAlignmentForPano(settings, primaryPanoId, updatedAlignment));
+    },
+    [alignment, primaryPanoId, onSettingsChange, settings],
+  );
+
+  const addPair = useCallback(() => {
+    const nextOrder = (alignment?.pairs ?? []).length;
+    const newPair = createProjectionControlPair({
+      order: nextOrder,
+      targetUv: [0.5, 0.5],
+      sourceUv: [0.5, 0.5],
+    });
+    updateAlignment((pairs) => [...pairs, newPair]);
+  }, [alignment, updateAlignment]);
+
+  const removePair: (pairId: string) => void = useCallback(
+    (pairId: string) => {
+      updateAlignment((pairs) => pairs.filter((p) => p.id !== pairId));
+    },
+    [updateAlignment],
+  );
+
+  const updatePair: (pairId: string, partial: Partial<ProjectionControlPair>) => void = useCallback(
+    (pairId: string, partial: Partial<ProjectionControlPair>) => {
+      updateAlignment((pairs) =>
+        pairs.map((p) => (p.id === pairId ? { ...p, ...partial } : p)),
+      );
+    },
+    [updateAlignment],
+  );
+
+  const pairs = alignment?.pairs ?? [];
+  const markerCount = pairs.filter((p) => p.enabled).length;
+
+  return (
+    <div className="border-t border-subtle pt-3">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wide text-secondary"
+      >
+        <span>
+          Alignment{' '}
+          {pairs.length > 0 && (
+            <span className="ml-1 font-normal normal-case text-muted">
+              ({markerCount} marker{markerCount !== 1 ? 's' : ''})
+            </span>
+          )}
+        </span>
+        <span className="text-muted">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          {pairs.length === 0 ? (
+            <p className="text-xs text-muted">
+              No alignment markers yet. Add markers to fine-tune the projection warp.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {pairs.map((pair, index) => (
+                <div key={pair.id}>
+                  <PairRow
+                    pair={pair}
+                    index={index}
+                    onUpdate={updatePair}
+                    onRemove={removePair}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          <IconButton onClick={addPair} className="w-full">
+            + Add marker
+          </IconButton>
+
+          {pairs.length > 0 && (
+            <p className="text-xs text-muted">
+              Target UV is the point on the graybox where the feature appears.
+              Source UV is where it should sample from the styled panorama.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PairRow({
+  pair,
+  index,
+  onUpdate,
+  onRemove,
+}: {
+  pair: ProjectionControlPair;
+  index: number;
+  onUpdate: (pairId: string, partial: Partial<ProjectionControlPair>) => void;
+  onRemove: (pairId: string) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-subtle bg-surface-base px-3 py-2">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-primary">#{index + 1}</span>
+          <label className="flex cursor-pointer items-center gap-1">
+            <input
+              type="checkbox"
+              checked={pair.enabled}
+              onChange={(event) => onUpdate(pair.id, { enabled: event.target.checked })}
+              className="h-3.5 w-3.5 accent-[var(--accent)]"
+            />
+            <span className="text-xs text-muted">{pair.enabled ? 'On' : 'Off'}</span>
+          </label>
+        </div>
+        <button
+          type="button"
+          onClick={() => onRemove(pair.id)}
+          className="text-xs text-red-500 hover:text-red-600"
+          aria-label={`Remove marker ${index + 1}`}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+            Target U
+          </span>
+          <TextInput
+            type="number"
+            min={0}
+            max={1}
+            step={0.01}
+            value={pair.targetUv[0]}
+            onChange={(event) =>
+              onUpdate(pair.id, {
+                targetUv: [Number(event.target.value), pair.targetUv[1]],
+              })
+            }
+            className="!py-1 !text-xs"
+          />
+        </div>
+        <div>
+          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+            Target V
+          </span>
+          <TextInput
+            type="number"
+            min={0}
+            max={1}
+            step={0.01}
+            value={pair.targetUv[1]}
+            onChange={(event) =>
+              onUpdate(pair.id, {
+                targetUv: [pair.targetUv[0], Number(event.target.value)],
+              })
+            }
+            className="!py-1 !text-xs"
+          />
+        </div>
+        <div>
+          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+            Source U
+          </span>
+          <TextInput
+            type="number"
+            min={0}
+            max={1}
+            step={0.01}
+            value={pair.sourceUv[0]}
+            onChange={(event) =>
+              onUpdate(pair.id, {
+                sourceUv: [Number(event.target.value), pair.sourceUv[1]],
+              })
+            }
+            className="!py-1 !text-xs"
+          />
+        </div>
+        <div>
+          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+            Source V
+          </span>
+          <TextInput
+            type="number"
+            min={0}
+            max={1}
+            step={0.01}
+            value={pair.sourceUv[1]}
+            onChange={(event) =>
+              onUpdate(pair.id, {
+                sourceUv: [pair.sourceUv[0], Number(event.target.value)],
+              })
+            }
+            className="!py-1 !text-xs"
+          />
+        </div>
+      </div>
     </div>
   );
 }

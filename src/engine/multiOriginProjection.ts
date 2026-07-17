@@ -5,9 +5,11 @@ import {
   ProjectedStyleSettings,
   Vec3,
 } from '../domain/types';
-import { normalizeProjectedStyleSettings } from '../domain/defaults';
+import { findProjectionAlignmentForPano, normalizeProjectedStyleSettings } from '../domain/defaults';
 import { isEligibleProjectedStylePano, listEligibleProjectedStylePanos } from './projectedStyle';
-import { length, subtract } from './sync';
+import { solveProjectionWarp } from './projectionAlignmentSolver';
+import { createWarpTexture, type WarpTextureResult } from './projectionWarpTexture';
+import { degreesToRadians, length, subtract } from './sync';
 
 /**
  * Multi-origin projector blend modes (depth-free approximation).
@@ -240,4 +242,37 @@ export function resolveProjectedProjectorAssets(
       blendMode: secondaryUrl ? resolved.blendMode : 'primary_only',
     },
   };
+}
+
+/**
+ * Resolve a warp map texture for a given projector pano.
+ * Finds the alignment, runs the RBF solver, and creates/returns a cached warp texture.
+ * Returns undefined when no alignment exists (shader will fall back to identity warp).
+ */
+export function resolveProjectionWarpForPano(
+  settings: ProjectedStyleSettings,
+  sourcePanoId: string,
+  sourceRotation: Euler,
+  width = 256,
+  height = 128,
+): WarpTextureResult | undefined {
+  const alignment = findProjectionAlignmentForPano(settings, sourcePanoId);
+  if (!alignment) return undefined;
+
+  const sourceYawRadians = degreesToRadians(sourceRotation[1] ?? 0);
+  const field = solveProjectionWarp(alignment, {
+    targetYawRadians: 0,
+    sourceYawRadians,
+    width,
+    height,
+  });
+
+  return createWarpTexture(
+    alignment,
+    sourceYawRadians,
+    0,
+    field.displacement,
+    width,
+    height,
+  );
 }

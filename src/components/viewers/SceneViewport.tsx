@@ -13,6 +13,7 @@ import { BUILD_GRID_SIZE, createPlacedSceneObject, resolveStampPoint } from '../
 import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
 import {
   resolveProjectedProjectorAssets,
+  resolveProjectionWarpForPano,
 } from '../../engine/multiOriginProjection';
 import {
   computeProjectedAppearanceState,
@@ -27,6 +28,9 @@ import {
   type ProjectedTextureOwnership,
 } from '../../engine/projectedStyleMaterials';
 import { buildScene, computeBuildFogRange, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
+import { createAlignmentMarkerOverlay, disposeAlignmentOverlay } from '../../engine/projectionAlignmentDebug';
+import { findProjectionAlignmentForPano } from '../../domain/defaults';
+import type { WarpTextureResult } from '../../engine/projectionWarpTexture';
 import {
   angleInAxisPlane,
   applyAxisRotationDelta,
@@ -126,6 +130,7 @@ export function SceneViewport({
   freeCameraActive = false,
   renderDistance = DEFAULT_BUILD_RENDER_DISTANCE,
   appearance = 'clay',
+  showAlignmentOverlay = false,
   onFreeCameraActiveChange,
   shotFraming,
   onSelectObject,
@@ -159,6 +164,8 @@ export function SceneViewport({
   renderDistance?: number;
   /** Clay keeps existing materials; Projected applies world-space equirect styling when available. */
   appearance?: ViewportAppearanceMode;
+  /** When true, renders alignment marker pins + connecting lines in 3D space. */
+  showAlignmentOverlay?: boolean;
   onFreeCameraActiveChange?: (active: boolean) => void;
   shotFraming?: {
     camera: CameraData;
@@ -241,6 +248,11 @@ export function SceneViewport({
   /** Requested vs owned URL ownership — prevents A→B→C leaks (see prepareProjectedTextureRequest). */
   const primaryOwnershipRef = useRef<ProjectedTextureOwnership>({});
   const secondaryOwnershipRef = useRef<ProjectedTextureOwnership>({});
+  /** Current warp texture results; released on effect re-run or unmount. */
+  const primaryWarpRef = useRef<WarpTextureResult | undefined>();
+  const secondaryWarpRef = useRef<WarpTextureResult | undefined>();
+  /** Alignment debug overlay group added to the scene. */
+  const alignmentOverlayRef = useRef<THREE.Group | null>(null);
 
   const [projectedTexture, setProjectedTexture] = useState<THREE.Texture | null>(null);
   const [projectedSecondaryTexture, setProjectedSecondaryTexture] = useState<THREE.Texture | null>(null);
@@ -1384,6 +1396,12 @@ export function SceneViewport({
   useEffect(() => () => {
     disposeProjectedTextureOwnership(primaryOwnershipRef.current);
     disposeProjectedTextureOwnership(secondaryOwnershipRef.current);
+    primaryWarpRef.current?.release();
+    secondaryWarpRef.current?.release();
+    if (alignmentOverlayRef.current) {
+      disposeAlignmentOverlay(alignmentOverlayRef.current);
+      alignmentOverlayRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -1437,6 +1455,28 @@ export function SceneViewport({
     previewMeshRef.current = null;
     if (sceneRef.current) disposeScene(sceneRef.current);
     clearTransformGizmo();
+
+    // Resolve warp maps for active projectors
+    primaryWarpRef.current?.release();
+    secondaryWarpRef.current?.release();
+    primaryWarpRef.current = undefined;
+    secondaryWarpRef.current = undefined;
+
+    if (projectedActive && projectedTexture && projectedPano) {
+      primaryWarpRef.current = resolveProjectionWarpForPano(
+        projectedSettings,
+        projectedPano.id,
+        projectedPano.rotation,
+      );
+      if (dualActive && projectedSecondary) {
+        secondaryWarpRef.current = resolveProjectionWarpForPano(
+          projectedSettings,
+          projectedSecondary.id,
+          projectedSecondary.rotation,
+        );
+      }
+    }
+
     sceneRef.current = buildScene(project, {
       selectedShotId,
       hideShotFrustums: Boolean(shotFraming) || !showSceneGuides,
@@ -1456,6 +1496,16 @@ export function SceneViewport({
           secondaryTexture: dualActive ? projectedSecondaryTexture ?? undefined : undefined,
           secondaryOrigin: dualActive ? projectedSecondary?.origin : undefined,
           secondaryRotation: dualActive ? projectedSecondary?.rotation : undefined,
+          warpMap: primaryWarpRef.current?.texture,
+          warpMapSize: primaryWarpRef.current
+            ? [primaryWarpRef.current.width, primaryWarpRef.current.height]
+            : undefined,
+          warpStrength: primaryWarpRef.current ? 1 : undefined,
+          warpMapB: secondaryWarpRef.current?.texture,
+          warpMapSizeB: secondaryWarpRef.current
+            ? [secondaryWarpRef.current.width, secondaryWarpRef.current.height]
+            : undefined,
+          warpStrengthB: secondaryWarpRef.current ? 1 : undefined,
         }
         : undefined,
     });
@@ -1474,10 +1524,7 @@ export function SceneViewport({
     projectedSecondary?.id,
     projectedSecondaryPanoId,
     projectedSecondaryTexture,
-    projectedSettings.exposure,
-    projectedSettings.fallbackMode,
-    projectedSettings.lightingContribution,
-    projectedSettings.opacity,
+    projectedSettings,
     projectedTexture,
     selectedShotId,
     shotFraming,
@@ -1492,6 +1539,41 @@ export function SceneViewport({
   useEffect(() => {
     syncTransformGizmo();
   }, [gizmoMode, selectedObjectIds, showTransformGizmo, syncTransformGizmo]);
+
+  // Alignment debug overlay: marker pins + connecting lines
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    const existing = alignmentOverlayRef.current;
+    if (existing) {
+      scene.remove(existing);
+      disposeAlignmentOverlay(existing);
+      alignmentOverlayRef.current = null;
+    }
+
+    if (!showAlignmentOverlay) return;
+    if (!projectedActive || !projectedPano) return;
+    if (!projectedSettings.alignments || projectedSettings.alignments.length === 0) return;
+
+    const alignment = findProjectionAlignmentForPano(projectedSettings, projectedPano.id);
+    if (!alignment) return;
+
+    const overlay = createAlignmentMarkerOverlay(
+      alignment,
+      projectedPano.origin,
+      projectedPano.rotation,
+    );
+    scene.add(overlay);
+    alignmentOverlayRef.current = overlay;
+  }, [
+    showAlignmentOverlay,
+    projectedActive,
+    projectedPano?.id,
+    projectedPano?.origin,
+    projectedPano?.rotation,
+    projectedSettings,
+  ]);
 
   useEffect(() => {
     if (!frameRequest || shotFraming || !cameraRef.current) return;

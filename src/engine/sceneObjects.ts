@@ -192,6 +192,18 @@ export interface ProjectedSceneOptions {
   secondaryTexture?: THREE.Texture;
   secondaryOrigin?: Vec3;
   secondaryRotation?: Euler;
+  /** Optional warp map for primary projector. */
+  warpMap?: THREE.DataTexture;
+  /** Warp map dimensions for primary. */
+  warpMapSize?: [number, number];
+  /** Warp strength for primary (0 = no warp, default 1 when warpMap is set). */
+  warpStrength?: number;
+  /** Optional warp map for secondary projector. */
+  warpMapB?: THREE.DataTexture;
+  /** Warp map dimensions for secondary. */
+  warpMapSizeB?: [number, number];
+  /** Warp strength for secondary. */
+  warpStrengthB?: number;
 }
 
 export function buildScene(
@@ -358,6 +370,12 @@ function applyProjectedStyleToObject(
     secondaryTexture: projected.secondaryTexture,
     secondaryOrigin: projected.secondaryOrigin,
     secondaryRotation: projected.secondaryRotation,
+    warpMap: projected.warpMap,
+    warpMapSize: projected.warpMapSize,
+    warpStrength: projected.warpStrength,
+    warpMapB: projected.warpMapB,
+    warpMapSizeB: projected.warpMapSizeB,
+    warpStrengthB: projected.warpStrengthB,
   });
   // Keep a tiny emissive edge so selection remains readable under projection.
   if (root.userData?.sceneObjectId && projected.disposableMaterials === false) {

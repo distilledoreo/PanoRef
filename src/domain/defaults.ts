@@ -221,6 +221,40 @@ export function setProjectionAlignmentForPano(
   };
 }
 
+let pairCounter = 0;
+export function resetPairCounterForTests(): void {
+  pairCounter = 0;
+}
+
+export function createProjectionControlPair(
+  overrides?: Partial<ProjectionControlPair>,
+): ProjectionControlPair {
+  const id = overrides?.id ?? `pair-${Date.now()}-${++pairCounter}`;
+  return {
+    id,
+    order: overrides?.order ?? 0,
+    targetUv: overrides?.targetUv ?? [0.5, 0.5],
+    sourceUv: overrides?.sourceUv ?? [0.5, 0.5],
+    enabled: overrides?.enabled ?? true,
+  };
+}
+
+export function createProjectionAlignment(
+  sourcePanoId: string,
+  targetGrayboxPanoId: string,
+  pairs?: ProjectionControlPair[],
+): ProjectionAlignment {
+  return {
+    version: 1,
+    solver: 'spherical-rbf-v1',
+    sourcePanoId,
+    targetGrayboxPanoId,
+    pairs: pairs ?? [createProjectionControlPair({ order: 0 })],
+    strength: 1,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function normalizeProjectSettings(settings?: Partial<ProjectSettings>): ProjectSettings {
   return {
     ...defaultProjectSettings,
