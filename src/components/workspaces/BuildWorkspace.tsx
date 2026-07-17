@@ -120,7 +120,6 @@ export function BuildWorkspace() {
   const [appearance, setAppearance] = useState<'clay' | 'projected'>('clay');
   const [renderDistanceOpen, setRenderDistanceOpen] = useState(false);
   const [renderDistance, setRenderDistance] = useState(DEFAULT_BUILD_RENDER_DISTANCE);
-  const [originMoveAcknowledged, setOriginMoveAcknowledged] = useState(false);
   const {
     project,
     selectedObjectIds,
@@ -163,6 +162,20 @@ export function BuildWorkspace() {
   const canUndo = buildHistoryPast.length > 0;
   const canRedo = buildHistoryFuture.length > 0;
 
+  /**
+   * Warning acknowledgment scoped to current project + styled pano IDs.
+   * Resets when project changes or styled pano set changes.
+   */
+  const originWarningScopeKey = useMemo(() => {
+    const styledPanoIds = project.panoRefs
+      .filter((p) => p.type !== 'graybox_render')
+      .map((p) => p.id)
+      .sort();
+    if (styledPanoIds.length === 0) return '';
+    return `${project.id}:${styledPanoIds.join(',')}`;
+  }, [project.id, project.panoRefs]);
+  const [acknowledgedScopeKey, setAcknowledgedScopeKey] = useState<string>();
+
   const handleRenderGraybox = useCallback(() => {
     if (isRenderingGraybox) return;
     setGrayboxRenderError(undefined);
@@ -173,22 +186,29 @@ export function BuildWorkspace() {
     });
   }, [isRenderingGraybox, renderGrayboxPano]);
 
-  const confirmOriginEditIfNeeded = useCallback(() => {
-    if (originMoveAcknowledged || !shouldWarnOnOriginMove(project)) return true;
+  /**
+   * Ask for user consent before editing the capture origin when styled panoramas exist.
+   * Called by the viewport on pointer-down (before drag/history begin).
+   * Acknowledgment is scoped to the current project + styled pano set so switching
+   * projects or adding/removing styled panos re-enables the warning.
+   */
+  const requestOriginEditConsent = useCallback(() => {
+    if (!shouldWarnOnOriginMove(project)) return true;
+    if (!originWarningScopeKey) return true;
+    if (acknowledgedScopeKey === originWarningScopeKey) return true;
     const ok = window.confirm(originMoveWarningMessage(countStyledPanoramas(project)));
-    if (ok) setOriginMoveAcknowledged(true);
+    if (ok) setAcknowledgedScopeKey(originWarningScopeKey);
     return ok;
-  }, [originMoveAcknowledged, project]);
+  }, [project, originWarningScopeKey, acknowledgedScopeKey]);
 
   const handleMovePanoOrigin = useCallback((origin: Vec3) => {
-    if (!confirmOriginEditIfNeeded()) return;
     setPanoOrigin(origin);
-  }, [confirmOriginEditIfNeeded, setPanoOrigin]);
+  }, [setPanoOrigin]);
 
   const handleRotatePanoOrigin = useCallback((rotation: Euler) => {
-    if (!confirmOriginEditIfNeeded()) return;
+    // Projection currently consumes only rotation[1] (yaw) — preserve X and Z.
     setPanoRotation(rotation);
-  }, [confirmOriginEditIfNeeded, setPanoRotation]);
+  }, [setPanoRotation]);
   const selectedObjects = project.scene.objects.filter((object) => selectedObjectIds.includes(object.id));
   const selectedObject = project.scene.objects.find((object) => object.id === selectedObjectIds.at(-1));
   const selectionHasLocked = selectedObjects.some((object) => object.locked);
@@ -464,6 +484,7 @@ export function BuildWorkspace() {
           }}
           onMovePanoOrigin={handleMovePanoOrigin}
           onRotatePanoOrigin={handleRotatePanoOrigin}
+          onRequestPanoOriginEdit={requestOriginEditConsent}
           onEditBatchStart={beginBuildHistoryBatch}
           onEditBatchEnd={endBuildHistoryBatch}
           frameRequest={frameRequest}

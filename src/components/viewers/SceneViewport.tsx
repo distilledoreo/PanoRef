@@ -30,6 +30,7 @@ import {
   axisWorldVector,
   computeScreenAxisDragDelta,
   createGizmoGroup,
+  createPanoOriginGizmoGroup,
   getGizmoWorldPosition,
   createSelectionOutline,
   disposeGizmoNodes,
@@ -131,6 +132,7 @@ export function SceneViewport({
   onScaleObject,
   onMovePanoOrigin,
   onRotatePanoOrigin,
+  onRequestPanoOriginEdit,
   onEditBatchStart,
   onEditBatchEnd,
   frameRequest = 0,
@@ -171,6 +173,12 @@ export function SceneViewport({
   onMovePanoOrigin?: (origin: Vec3) => void;
   /** Capture-origin rotation (degrees Euler) while Origin mode gizmo is used. */
   onRotatePanoOrigin?: (rotation: Euler) => void;
+  /**
+   * Called when the user attempts to start an origin gizmo drag.
+   * Return true to allow the edit, false to cancel (no drag, no history).
+   * This is the place for the styled-panorama warning to block the interaction.
+   */
+  onRequestPanoOriginEdit?: () => boolean;
   /** Wrap continuous gizmo / origin drags so undo records one step per gesture. */
   onEditBatchStart?: () => void;
   onEditBatchEnd?: () => void;
@@ -206,6 +214,7 @@ export function SceneViewport({
     onEditBatchStart,
     onEditBatchEnd,
     onFreeCameraActiveChange,
+    onRequestPanoOriginEdit,
   });
   const editBatchActiveRef = useRef(false);
   const previewPointRef = useRef<Vec3 | undefined>();
@@ -231,6 +240,7 @@ export function SceneViewport({
   const [projectedSecondaryTexture, setProjectedSecondaryTexture] = useState<THREE.Texture | null>(null);
   const [projectedTextureReadyUrl, setProjectedTextureReadyUrl] = useState<string | undefined>();
   const [projectedSecondaryReadyUrl, setProjectedSecondaryReadyUrl] = useState<string | undefined>();
+  const [secondaryLoadError, setSecondaryLoadError] = useState(false);
   const gizmoRef = useRef<THREE.Group | null>(null);
   const selectionOutlineRefs = useRef<THREE.BoxHelper[]>([]);
   const showSceneGuidesRef = useRef(showSceneGuides);
@@ -262,6 +272,7 @@ export function SceneViewport({
     onEditBatchStart,
     onEditBatchEnd,
     onFreeCameraActiveChange,
+    onRequestPanoOriginEdit,
   };
 
   const clearTransformGizmo = useCallback(() => {
@@ -299,7 +310,7 @@ export function SceneViewport({
         });
         disposeGizmoNodes(selectionOutlineRefs.current);
         selectionOutlineRefs.current = [];
-        gizmoRef.current = createGizmoGroup(originMode);
+        gizmoRef.current = createPanoOriginGizmoGroup(originMode);
         gizmoRef.current.userData.originGizmo = true;
         scene.add(gizmoRef.current);
       }
@@ -556,7 +567,11 @@ export function SceneViewport({
       pointer: ReturnType<typeof getPointerState>,
       event: PointerEvent,
     ) => {
-      const { onMovePanoOrigin, onRotatePanoOrigin } = callbacksRef.current;
+      const { onMovePanoOrigin, onRotatePanoOrigin, onRequestPanoOriginEdit } = callbacksRef.current;
+      // Check consent before starting any drag or batch.
+      const allowed = onRequestPanoOriginEdit?.() ?? true;
+      if (!allowed) return false;
+
       const gizmo = gizmoRef.current;
       const camera = cameraRef.current;
       if (!gizmo || !camera || !pointer) return false;
@@ -1326,6 +1341,7 @@ export function SceneViewport({
       projectedSecondaryUrlRef.current = undefined;
       setProjectedSecondaryTexture(null);
       setProjectedSecondaryReadyUrl(undefined);
+      setSecondaryLoadError(false);
       releaseProjectedStyleTexture(previousUrl);
       return () => {
         cancelled = true;
@@ -1338,13 +1354,16 @@ export function SceneViewport({
     }
     const previousUrl = projectedSecondaryUrlRef.current;
     projectedSecondaryUrlRef.current = url;
+    setSecondaryLoadError(false);
     void acquireProjectedStyleTexture(url).then((texture) => {
-      if (cancelled || !texture) {
-        if (texture) releaseProjectedStyleTexture(url);
+      if (cancelled) return;
+      if (!texture) {
+        setSecondaryLoadError(true);
         return;
       }
       setProjectedSecondaryTexture(texture);
       setProjectedSecondaryReadyUrl(url);
+      setSecondaryLoadError(false);
       if (previousUrl && previousUrl !== url) releaseProjectedStyleTexture(previousUrl);
     });
     return () => {
@@ -1392,27 +1411,35 @@ export function SceneViewport({
     ?? normalizeProjectedStyleSettings(project.settings.projectedStyle);
   const projectedPano = projectedProjectors?.primary;
   const projectedSecondary = projectedProjectors?.secondary;
+  /**
+   * projectedActive: true when primary projection is viable.
+   * Does NOT depend on secondary readiness — secondary absence or failure
+   * degrades to primary-only instead of falling back to clay.
+   */
+  const projectedActive = appearance === 'projected'
+    && Boolean(projectedTexture)
+    && projectedTextureReadyUrl === projectedAssetKey
+    && Boolean(projectedPano);
+
+  /**
+   * dualActive: true only when both projectors are ready and the blend mode
+   * actually uses the secondary.
+   */
   const secondaryReady = !projectedSecondaryAssetKey
     || (
       Boolean(projectedSecondaryTexture)
       && projectedSecondaryReadyUrl === projectedSecondaryAssetKey
     );
-  const projectedActive = appearance === 'projected'
-    && Boolean(projectedTexture)
-    && projectedTextureReadyUrl === projectedAssetKey
-    && Boolean(projectedPano)
-    && secondaryReady;
+  const dualActive = projectedActive
+    && projectedBlendMode !== 'primary_only'
+    && Boolean(projectedSecondaryPanoId)
+    && Boolean(projectedSecondaryTexture)
+    && projectedSecondaryReadyUrl === projectedSecondaryAssetKey;
 
   useEffect(() => {
     previewMeshRef.current = null;
     if (sceneRef.current) disposeScene(sceneRef.current);
     clearTransformGizmo();
-    const dualActive = Boolean(
-      projectedActive
-      && projectedSecondaryTexture
-      && projectedSecondary
-      && projectedBlendMode !== 'primary_only',
-    );
     sceneRef.current = buildScene(project, {
       selectedShotId,
       hideShotFrustums: Boolean(shotFraming) || !showSceneGuides,
@@ -1498,6 +1525,11 @@ export function SceneViewport({
         ? 'cursor-grab'
         : 'cursor-default';
 
+  const showSecondaryWarning = secondaryLoadError
+    && projectedActive
+    && Boolean(projectedSecondaryAssetKey)
+    && !dualActive;
+
   return (
     <div
       className={`relative h-full ${minHeightClassName} overflow-hidden bg-surface-base ${cursorClass}`}
@@ -1518,6 +1550,14 @@ export function SceneViewport({
           onAxesChange={setFlyAxes}
           verticalPositionClassName={freeCameraActive ? 'bottom-[12rem]' : undefined}
         />
+      )}
+      {showSecondaryWarning && (
+        <div
+          role="status"
+          className="pointer-events-none absolute bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-full border border-amber-500/40 bg-amber-50/90 px-4 py-2 text-xs font-medium text-amber-800 shadow-card backdrop-blur-sm dark:bg-amber-950/80 dark:text-amber-200"
+        >
+          Secondary panorama unavailable. Showing the primary projection only.
+        </div>
       )}
     </div>
   );
