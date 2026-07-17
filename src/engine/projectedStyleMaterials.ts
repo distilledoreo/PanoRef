@@ -209,27 +209,19 @@ material.specularIntensity *= projectedLighting;
 material.roughness = mix(1.0, material.roughness, projectedLighting);
 `,
       )
-      .replace(
-        '#include <lights_fragment_begin>',
-        `
-// At lightingContribution 0, skip scene lights and show baked pano as-is.
-if (projectedLighting <= 0.001) {
-  // no direct/indirect lights — leave reflectedLight at zero then add albedo as emissive-like
-} else {
-#include <lights_fragment_begin>
-}
-`,
-      )
+      // Always include lights_fragment_begin (it declares geometry*/irradiance used by
+      // lights_fragment_maps/end). Zero or mix reflectedLight afterward — never wrap the include.
       .replace(
         '#include <aomap_fragment>',
         `#include <aomap_fragment>
 if (projectedLighting <= 0.001) {
+  // Unlit path: pano albedo as the full outgoing diffuse, no scene lights.
   reflectedLight.directDiffuse = vec3(0.0);
   reflectedLight.directSpecular = vec3(0.0);
   reflectedLight.indirectDiffuse = diffuseColor.rgb;
   reflectedLight.indirectSpecular = vec3(0.0);
 } else {
-  // Mild light contribution: keep most of the pano, fold in a fraction of lit result later via outgoing.
+  // Mild light contribution: keep most of the baked pano, fold in a fraction of lit result.
   reflectedLight.directDiffuse *= projectedLighting;
   reflectedLight.directSpecular *= projectedLighting;
   reflectedLight.indirectDiffuse = mix(diffuseColor.rgb, reflectedLight.indirectDiffuse, projectedLighting);
@@ -240,7 +232,7 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v1:${params.settings.fallbackMode}:${params.disposable ? 'd' : 's'}`
+    `projected-style-v2:${params.settings.fallbackMode}:${params.disposable ? 'd' : 's'}`
   );
 
   // Mark for disposal on export-only clones.
