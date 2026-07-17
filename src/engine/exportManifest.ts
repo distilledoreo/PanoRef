@@ -1,6 +1,7 @@
 import { LocationProject, PanoReference, Shot } from '../domain/types';
 import { getCameraMoveReferenceFrames, hasRenderableCameraMove } from './cameraKeyframes';
 import { CAMERA_MOVE_CUBEMAP_FACES } from './cameraMoveCubemap';
+import { canUseProjectedAppearance } from './projectedStyle';
 import { generateImagePrompt, generateVideoPrompt } from './prompts';
 
 export interface ShotPackageManifest {
@@ -51,7 +52,8 @@ export function createShotPackageManifest(
   if (shot.exportSettings.includeViewport) {
     files.push({ path: `${rootFolder}/inputs/viewport_clay.png`, kind: 'image', required: true });
   }
-  if (shot.exportSettings.includeProjectedViewport) {
+  // Only list projected files when packaging will actually write them.
+  if (shot.exportSettings.includeProjectedViewport && canUseProjectedAppearance(project)) {
     files.push({ path: `${rootFolder}/inputs/viewport_projected.png`, kind: 'image', required: false });
   }
   if (shot.exportSettings.includePanoCrop && linkedPano && shot.panoCrop) {
@@ -82,7 +84,10 @@ export function createShotPackageManifest(
   for (const frame of cameraMoveReferenceFrames) {
     files.push({ path: `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, kind: 'image', required: false });
   }
-  const projectedMoveFrames = shot.exportSettings.includeProjectedCameraMoveReferenceFrames
+  const projectedMoveFrames = (
+    shot.exportSettings.includeProjectedCameraMoveReferenceFrames
+    && canUseProjectedAppearance(project)
+  )
     ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
     : [];
   for (const frame of projectedMoveFrames) {

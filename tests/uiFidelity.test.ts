@@ -78,6 +78,8 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain("captureMode === 'video'");
     expect(shots).toContain('viewfinder stays live');
     expect(shots).toContain('AppearanceModeToggle');
+    expect(shots).toContain('data-shots-dual-output-hint');
+    expect(shots).toContain('renderShotProjectedFrame');
     expect(shots).not.toContain('data-shots-action-dock');
     expect(shots).not.toContain('data-shots-land-fork');
     expect(shots).not.toContain('ShotInfoCard');

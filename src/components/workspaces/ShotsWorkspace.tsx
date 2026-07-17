@@ -31,7 +31,14 @@ import {
   updateCameraMoveDuration,
 } from '../../engine/cameraKeyframes';
 import { downloadBlob, downloadDataUrl } from '../../engine/projectIO';
-import { getSupportedCameraMoveMp4MimeType, renderShotCameraMoveMp4, renderShotFrame } from '../../engine/renderers';
+import {
+  getSupportedCameraMoveMp4MimeType,
+  renderShotCameraMoveMp4,
+  renderShotFrame,
+  renderShotProjectedFrame,
+  renderViewportProjected,
+} from '../../engine/renderers';
+import { getCameraMoveReferenceFrames } from '../../engine/cameraKeyframes';
 import { isShotFramingAccepted } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
 import { useContinuityStore } from '../../state/useContinuityStore';
@@ -178,6 +185,7 @@ export function ShotsWorkspace() {
     if (!previewShot) return;
     setIsExportingFrame(true);
     try {
+      // Clay remains the shot-attached geometric control frame.
       const frame = await renderShotFrame(project, previewShot);
       setShotFramePreview(previewShot.id, frame.dataUrl);
       attachViewportRenderToShot(previewShot.id, {
@@ -187,6 +195,16 @@ export function ShotsWorkspace() {
         height: frame.height,
       });
       downloadDataUrl(frame.dataUrl, exportFrameFileName);
+      // Also download a projected still when a styled pano is available (dual output).
+      if (canUseProjectedAppearance(project)) {
+        try {
+          const projected = await renderShotProjectedFrame(project, previewShot);
+          const projectedName = exportFrameFileName.replace(/\.png$/i, '_projected.png');
+          downloadDataUrl(projected.dataUrl, projectedName);
+        } catch {
+          // Soft-fail projected companion; clay already succeeded.
+        }
+      }
       if (!shotCameraFlying) {
         updateShot(previewShot.id, { status: 'exported' });
       }
@@ -275,6 +293,24 @@ export function ShotsWorkspace() {
       setCameraMovePreviewUrl(asset.uri);
       // Download from the MediaRecorder blob — multi‑MB data: URLs fail as anchor hrefs.
       downloadBlob(video.blob, asset.name || cameraMoveFileName);
+      // Companion projected keyframe stills when a styled pano is available.
+      if (canUseProjectedAppearance(project) && !cameraMoveAbortRef.current.cancelled) {
+        try {
+          const frames = getCameraMoveReferenceFrames(selectedShot.cameraKeyframes);
+          const base = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '');
+          for (const frame of frames) {
+            const projected = await renderViewportProjected(
+              project,
+              frame.camera,
+              selectedShot.exportSettings.width,
+              selectedShot.exportSettings.height,
+            );
+            downloadDataUrl(projected.dataUrl, `${base}_projected_${frame.id}.png`);
+          }
+        } catch {
+          // Soft-fail projected companions; clay MP4 already succeeded.
+        }
+      }
     } catch (error) {
       if (!cameraMoveAbortRef.current.cancelled) {
         setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
@@ -375,15 +411,28 @@ export function ShotsWorkspace() {
       },
     };
     setSnapshotError(undefined);
+    const baseName = `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}`;
     void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number])
-      .then((frame) => {
+      .then(async (frame) => {
         setShotFramePreview(shot.id, frame.dataUrl);
         useContinuityStore.getState().attachViewportRenderToShot(shot.id, {
-          name: `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}_viewport.png`,
+          name: `${baseName}_viewport.png`,
           dataUrl: frame.dataUrl,
           width: frame.width,
           height: frame.height,
         });
+        // Dual download: clay control frame is attached; projected companion downloads when available.
+        if (canUseProjectedAppearance(latestProject)) {
+          try {
+            const projected = await renderShotProjectedFrame(
+              latestProject,
+              previewShot as typeof latestProject.shots[number],
+            );
+            downloadDataUrl(projected.dataUrl, `${baseName}_viewport_projected.png`);
+          } catch {
+            // Soft-fail projected companion.
+          }
+        }
       })
       .catch(() => {
         setSnapshotError('Could not save the shot preview. Try Capture again.');
@@ -701,24 +750,31 @@ export function ShotsWorkspace() {
               ? `${selectedIndex + 1} / ${project.shots.length}`
               : 'No shots'}
           </div>
-          <div className="pointer-events-auto flex items-center gap-2">
-            <AppearanceModeToggle
-              value={appearance}
-              projectedAvailable={canUseProjectedAppearance(project)}
-              onChange={setAppearance}
-              compact
-              className="border-white/15 bg-black/50 text-white [&_button]:text-white/80 [&_button[aria-pressed=true]]:bg-white [&_button[aria-pressed=true]]:text-zinc-900"
-            />
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(true)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white shadow-card backdrop-blur-sm transition hover:bg-black/60"
-              aria-label="Camera settings"
-              data-shots-settings-trigger
-              title="Settings (I)"
-            >
-              <Settings2 className="h-4 w-4" />
-            </button>
+          <div className="pointer-events-auto flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              <AppearanceModeToggle
+                value={appearance}
+                projectedAvailable={canUseProjectedAppearance(project)}
+                onChange={setAppearance}
+                compact
+                className="border-white/15 bg-black/50 text-white [&_button]:text-white/80 [&_button[aria-pressed=true]]:bg-white [&_button[aria-pressed=true]]:text-zinc-900"
+              />
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white shadow-card backdrop-blur-sm transition hover:bg-black/60"
+                aria-label="Camera settings"
+                data-shots-settings-trigger
+                title="Settings (I)"
+              >
+                <Settings2 className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="max-w-[14rem] text-right text-[10px] font-medium text-white/55" data-shots-dual-output-hint>
+              {canUseProjectedAppearance(project)
+                ? 'View mode only · captures include clay + projected'
+                : 'View mode only · captures save clay frames'}
+            </p>
           </div>
         </div>
 

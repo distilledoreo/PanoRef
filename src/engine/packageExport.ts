@@ -11,6 +11,7 @@ import { preparePanoExportDataUrl } from './panoImage';
 import { stitchCubemapFacesCrossAsync } from './cubemapStitch';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
 import { downloadBlob } from './projectIO';
+import { canUseProjectedAppearance } from './projectedStyle';
 import {
   getSupportedCameraMoveMp4MimeType,
   renderPanoCubemapFaces,
@@ -111,7 +112,9 @@ async function appendShotPackageToZip(
     addDataUrl(zip, `${rootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
   }
 
-  if (shot.exportSettings.includeProjectedViewport) {
+  // Dual clay + projected when requested and a styled projector exists.
+  // Soft-skip projected when no eligible pano so clay-only packages still succeed.
+  if (shot.exportSettings.includeProjectedViewport && canUseProjectedAppearance(project)) {
     try {
       const projected = await renderShotProjectedFrame(project, shot);
       addDataUrl(zip, `${rootFolder}/inputs/viewport_projected.png`, projected.dataUrl);
@@ -168,7 +171,10 @@ async function appendShotPackageToZip(
     }
   }
 
-  const projectedMoveFrames = shot.exportSettings.includeProjectedCameraMoveReferenceFrames
+  const projectedMoveFrames = (
+    shot.exportSettings.includeProjectedCameraMoveReferenceFrames
+    && canUseProjectedAppearance(project)
+  )
     ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
     : [];
   if (projectedMoveFrames.length > 0) {

@@ -109,9 +109,9 @@ function normalizeShot(shot: Shot): Shot {
       includeAiResultFrame: legacyExportSettings.includeAiResultFrame ?? legacyExportSettings.includeSkinnedFrame ?? true,
       includeCameraMoveVideo: legacyExportSettings.includeCameraMoveVideo ?? true,
       includeCameraMoveReferenceFrames: legacyExportSettings.includeCameraMoveReferenceFrames ?? true,
-      includeProjectedViewport: legacyExportSettings.includeProjectedViewport ?? false,
+      includeProjectedViewport: legacyExportSettings.includeProjectedViewport ?? true,
       includeProjectedCameraMoveReferenceFrames:
-        legacyExportSettings.includeProjectedCameraMoveReferenceFrames ?? false,
+        legacyExportSettings.includeProjectedCameraMoveReferenceFrames ?? true,
     },
     assets: {
       ...shot.assets,
