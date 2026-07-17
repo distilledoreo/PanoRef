@@ -1,3 +1,4 @@
+export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
 export type Euler = [number, number, number];
 export type ProjectVersion = '0.1';
@@ -184,6 +185,26 @@ export type ProjectorBlendMode =
   | 'primary_dominant'
   | 'secondary_dominant';
 
+// --- Projection Control Pairs ---
+
+export interface ProjectionControlPair {
+  id: string;
+  order: number;
+  targetUv: Vec2;
+  sourceUv: Vec2;
+  enabled: boolean;
+}
+
+export interface ProjectionAlignment {
+  version: 1;
+  solver: 'spherical-rbf-v1';
+  sourcePanoId: string;
+  targetGrayboxPanoId: string;
+  pairs: ProjectionControlPair[];
+  strength: number;
+  updatedAt: string;
+}
+
 /** Project-level projector configuration (no GPU resources). */
 export interface ProjectedStyleSettings {
   /** Primary pano reference id; omit to auto-pick canonical styled pano. */
@@ -196,6 +217,8 @@ export interface ProjectedStyleSettings {
   exposure: number;
   lightingContribution: number;
   fallbackMode: 'clay' | 'neutral';
+  /** Per-pano projection alignments. Indexed by sourcePanoId. */
+  alignments?: ProjectionAlignment[];
 }
 
 export interface PromptOverrides {

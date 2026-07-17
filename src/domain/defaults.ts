@@ -6,6 +6,8 @@ import {
   PanoCropSettings,
   PanoReference,
   ProjectAsset,
+  ProjectionAlignment,
+  ProjectionControlPair,
   SceneObject,
   SceneObjectType,
   ProjectedStyleSettings,
@@ -14,6 +16,7 @@ import {
   Shot,
   ShotExportSettings,
   Transform,
+  Vec2,
   Vec3,
 } from './types';
 import { createId } from '../utils/ids';
@@ -112,6 +115,109 @@ export function normalizeProjectedStyleSettings(
       ? Math.min(1, Math.max(0, lightingContribution))
       : defaultProjectedStyleSettings.lightingContribution,
     fallbackMode: settings?.fallbackMode === 'neutral' ? 'neutral' : 'clay',
+    alignments: normalizeProjectionAlignments(settings?.alignments),
+  };
+}
+
+// --- Projection Alignment ---
+
+function isValidVec2(v: unknown): v is Vec2 {
+  return Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number';
+}
+
+function clampUvCoord(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function normalizePair(
+  pair: Partial<ProjectionControlPair> | undefined | null,
+): ProjectionControlPair | null {
+  if (!pair) return null;
+  if (typeof pair.id !== 'string' || pair.id.length === 0) return null;
+  if (!isValidVec2(pair.targetUv)) return null;
+  if (!isValidVec2(pair.sourceUv)) return null;
+  return {
+    id: pair.id,
+    order: typeof pair.order === 'number' && Number.isFinite(pair.order) ? pair.order : 0,
+    targetUv: [clampUvCoord(pair.targetUv[0]), clampUvCoord(pair.targetUv[1])],
+    sourceUv: [clampUvCoord(pair.sourceUv[0]), clampUvCoord(pair.sourceUv[1])],
+    enabled: pair.enabled !== false,
+  };
+}
+
+function normalizeAlignment(
+  alignment: Partial<ProjectionAlignment> | undefined | null,
+): ProjectionAlignment | null {
+  if (!alignment) return null;
+  if (alignment.version !== 1) return null;
+  if (alignment.solver !== 'spherical-rbf-v1') return null;
+  if (typeof alignment.sourcePanoId !== 'string' || alignment.sourcePanoId.length === 0) return null;
+  if (typeof alignment.targetGrayboxPanoId !== 'string' || alignment.targetGrayboxPanoId.length === 0) return null;
+  if (!Array.isArray(alignment.pairs)) return null;
+
+  const pairs: ProjectionControlPair[] = [];
+  for (const raw of alignment.pairs) {
+    const p = normalizePair(raw);
+    if (p) pairs.push(p);
+  }
+
+  if (pairs.length === 0) return null;
+
+  const strength = typeof alignment.strength === 'number' && Number.isFinite(alignment.strength)
+    ? Math.min(1, Math.max(0, alignment.strength))
+    : 1;
+
+  return {
+    version: 1,
+    solver: 'spherical-rbf-v1',
+    sourcePanoId: alignment.sourcePanoId,
+    targetGrayboxPanoId: alignment.targetGrayboxPanoId,
+    pairs,
+    strength,
+    updatedAt: typeof alignment.updatedAt === 'string' ? alignment.updatedAt : '',
+  };
+}
+
+export function normalizeProjectionAlignments(
+  alignments: unknown,
+): ProjectionAlignment[] | undefined {
+  if (!Array.isArray(alignments) || alignments.length === 0) return undefined;
+
+  const seen = new Map<string, ProjectionAlignment>();
+  for (const raw of alignments) {
+    const a = normalizeAlignment(raw);
+    if (a) {
+      seen.set(a.sourcePanoId, a);
+    }
+  }
+  const result = [...seen.values()];
+  return result.length > 0 ? result : undefined;
+}
+
+export function findProjectionAlignmentForPano(
+  settings: ProjectedStyleSettings,
+  sourcePanoId: string,
+): ProjectionAlignment | undefined {
+  if (!settings.alignments) return undefined;
+  return settings.alignments.find((a) => a.sourcePanoId === sourcePanoId);
+}
+
+export function setProjectionAlignmentForPano(
+  settings: ProjectedStyleSettings,
+  sourcePanoId: string,
+  alignment: ProjectionAlignment | undefined,
+): ProjectedStyleSettings {
+  const current = settings.alignments ?? [];
+  let next: ProjectionAlignment[];
+  if (!alignment) {
+    next = current.filter((a) => a.sourcePanoId !== sourcePanoId);
+  } else {
+    const filtered = current.filter((a) => a.sourcePanoId !== sourcePanoId);
+    next = [...filtered, alignment];
+  }
+  return {
+    ...settings,
+    alignments: next.length > 0 ? next : undefined,
   };
 }
 
