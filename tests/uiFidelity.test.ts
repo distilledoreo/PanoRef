@@ -345,6 +345,7 @@ describe('ui revamp fidelity surfaces', () => {
 
   it('advances video shutter record → stop → export without requiring fly to stop', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
+    const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
     expect(shots).toContain("type VideoShutterPhase = 'record' | 'stop' | 'export'");
     expect(shots).toContain('data-shots-video-phase');
     expect(shots).toContain("setVideoPhase('stop')");
@@ -357,6 +358,13 @@ describe('ui revamp fidelity surfaces', () => {
     // Entering video mode must not auto-capture the start keyframe.
     expect(shots).toMatch(/enterVideoMode[\s\S]*setVideoPhase\('record'\)[\s\S]*updateCameraMoveKeyframes\(\[\]\)/);
     expect(shots).not.toMatch(/enterVideoMode[\s\S]*slot: 'start'/);
+    // Record must keep the live fly pose (persist pose + never seed draft over an active fly).
+    expect(shots).toMatch(/setCameraMoveStart[\s\S]*updateShot\(selectedShot\.id, \{[\s\S]*camera: pose/);
+    expect(shots).toMatch(/startFlyCamera[\s\S]*if \(selectedShot && !shotCameraFlying\)/);
+    // Fly re-seed must key off pose scalars, not the whole shotFraming object (phase churn).
+    expect(viewport).toContain('shotFraming?.camera.position[0]');
+    expect(viewport).toContain('Boolean(shotFraming)');
+    expect(viewport).not.toMatch(/flyCameraFromCamera\(shotFraming\.camera\);[\s\S]*shotFraming,\s*\n\s*\]/);
     // Export must not be gated on !shotCameraFlying.
     expect(shots).not.toMatch(/if \(shotCameraFlying \|\| !cameraMoveReady\)/);
     expect(shots).toMatch(/if \(videoPhase === 'record'\)/);

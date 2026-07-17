@@ -350,9 +350,12 @@ export function ShotsWorkspace() {
   }, [selectedShot?.id, shotCameraFlying, updateShot]);
 
   const startFlyCamera = useCallback((options?: { clearFramingAcceptance?: boolean }) => {
-    if (selectedShot) draftCameraRef.current = selectedShot.camera;
+    // Seed from the stored shot only when entering fly — never clobber a live draft pose.
+    if (selectedShot && !shotCameraFlying) {
+      draftCameraRef.current = selectedShot.camera;
+    }
     setShotCameraFlying(true, options);
-  }, [selectedShot?.camera, setShotCameraFlying]);
+  }, [selectedShot?.camera, setShotCameraFlying, shotCameraFlying]);
 
   const snapshotPreview = useCallback((shot: { id: string; name?: string; exportSettings: { width: number; height: number }; camera: CameraData }, camera: CameraData) => {
     // Use latest project from the store so freshly created shots are not missing
@@ -419,18 +422,29 @@ export function ShotsWorkspace() {
     if (!selectedShot) return;
     const camera = getEffectiveCamera();
     if (!camera) return;
-    // Start pose only — keep flying so the user can continue to the end.
-    updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
-      keyframes: [],
-      slot: 'start',
-      camera,
-      durationSeconds: cameraMoveDurationSeconds,
-    }));
-    draftCameraRef.current = {
+    const pose: CameraData = {
       ...camera,
       position: [...camera.position] as CameraData['position'],
       target: [...camera.target] as CameraData['target'],
     };
+    // Start pose only — keep flying so the user can continue to the end.
+    // Persist the live pose onto the shot so chrome re-renders cannot reseat the camera at an old origin.
+    updateShot(selectedShot.id, {
+      camera: pose,
+      cameraKeyframes: setTwoPointCameraKeyframe({
+        keyframes: [],
+        slot: 'start',
+        camera: pose,
+        durationSeconds: cameraMoveDurationSeconds,
+      }),
+      assets: {
+        ...selectedShot.assets,
+        cameraMoveVideoAssetId: undefined,
+      },
+    });
+    setCameraMovePreviewUrl(undefined);
+    setCameraMoveError(undefined);
+    draftCameraRef.current = pose;
     setVideoPhase('stop');
     setLandFlash(true);
     window.setTimeout(() => setLandFlash(false), 500);
@@ -438,7 +452,7 @@ export function ShotsWorkspace() {
     cameraMoveDurationSeconds,
     getEffectiveCamera,
     selectedShot,
-    updateCameraMoveKeyframes,
+    updateShot,
   ]);
 
   const setCameraMoveEnd = useCallback(() => {

@@ -1061,9 +1061,12 @@ export function SceneViewport({
 
   useEffect(() => {
     if (!shotFraming || dragRef.current.kind === 'shot_framing') return;
+    // Re-seed fly pose only when the shot or stored camera pose changes.
+    // Do not depend on the whole shotFraming object — video shutter phase and
+    // other chrome churn recreate that object and must not yank the live camera.
     flyRef.current = flyCameraFromCamera(shotFraming.camera);
     framingFovRef.current = shotFraming.camera.fovDegrees;
-    if (cameraRef.current && shotFraming) {
+    if (cameraRef.current) {
       applyFlyCameraToPerspectiveCamera(
         cameraRef.current,
         flyRef.current,
@@ -1072,11 +1075,17 @@ export function SceneViewport({
       );
     }
   }, [
-    shotFraming?.camera.position,
-    shotFraming?.camera.target,
-    shotFraming?.camera.fovDegrees,
     selectedShotId,
-    shotFraming,
+    shotFraming?.camera.position[0],
+    shotFraming?.camera.position[1],
+    shotFraming?.camera.position[2],
+    shotFraming?.camera.target[0],
+    shotFraming?.camera.target[1],
+    shotFraming?.camera.target[2],
+    shotFraming?.camera.fovDegrees,
+    shotFraming?.frameAspectRatio,
+    // Presence toggle: enter/leave shot framing mode.
+    Boolean(shotFraming),
   ]);
 
   useEffect(() => {
