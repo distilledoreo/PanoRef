@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { createDefaultProject, createPanoAsset, createPanoReference } from '../src/domain/defaults';
@@ -50,6 +51,14 @@ async function zipPaths(blob: Blob): Promise<string[]> {
 }
 
 describe('package export', () => {
+  it('generates camera move MP4 during packaging when keyframes exist without a pre-exported asset', () => {
+    const source = readFileSync(new URL('../src/engine/packageExport.ts', import.meta.url), 'utf8');
+    expect(source).toContain('hasRenderableCameraMove(shot.cameraKeyframes)');
+    expect(source).toContain('renderShotCameraMoveMp4');
+    expect(source).toContain('viewport_clay_motion.mp4');
+    expect(source).toContain('getSupportedCameraMoveMp4MimeType');
+  });
+
   it('builds a single-shot package zip', async () => {
     const project = withGrayboxAndShot();
     const result = await buildShotPackage(project, project.shots[0]);

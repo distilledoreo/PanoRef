@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { LocationProject, Shot } from '../domain/types';
-import { getCameraMoveReferenceFrames } from './cameraKeyframes';
+import { getCameraMoveReferenceFrames, hasRenderableCameraMove } from './cameraKeyframes';
 import {
   CAMERA_MOVE_CUBEMAP_FACES,
   DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
@@ -10,7 +10,17 @@ import { generateImagePrompt, generateVideoPrompt } from './prompts';
 import { preparePanoExportDataUrl } from './panoImage';
 import { stitchCubemapFacesCrossAsync } from './cubemapStitch';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
-import { renderPanoCubemapFaces, renderPanoPerspectiveCrop, renderShotFrame, renderViewportClay } from './renderers';
+import { downloadBlob } from './projectIO';
+import {
+  getSupportedCameraMoveMp4MimeType,
+  renderPanoCubemapFaces,
+  renderPanoPerspectiveCrop,
+  renderShotCameraMoveMp4,
+  renderShotFrame,
+  renderViewportClay,
+} from './renderers';
+
+export { downloadBlob };
 
 export interface ShotPackageResult {
   blob: Blob;
@@ -106,8 +116,25 @@ async function appendShotPackageToZip(
     }
   }
 
-  if (shot.exportSettings.includeCameraMoveVideo && cameraMoveVideoAsset) {
-    addDataUrl(zip, `${rootFolder}/inputs/viewport_clay_motion.mp4`, cameraMoveVideoAsset.uri);
+  if (shot.exportSettings.includeCameraMoveVideo) {
+    if (cameraMoveVideoAsset?.uri) {
+      // Prefer the pre-exported asset from Shots when present.
+      addBinaryToZip(zip, `${rootFolder}/inputs/viewport_clay_motion.mp4`, cameraMoveVideoAsset.uri);
+    } else if (hasRenderableCameraMove(shot.cameraKeyframes)) {
+      // Generate during packaging so keyframed moves still ship without a prior Shots export.
+      const mimeType = getSupportedCameraMoveMp4MimeType();
+      if (!mimeType) {
+        throw new ShotPackageError(
+          'Camera move MP4 export is not supported in this browser. Try Chrome or Edge, or disable “Camera move MP4” in export settings.',
+        );
+      }
+      const video = await renderShotCameraMoveMp4(project, shot, {
+        mimeType,
+        frameRate: 30,
+        timeoutMs: 90_000,
+      });
+      zip.file(`${rootFolder}/inputs/viewport_clay_motion.mp4`, video.blob);
+    }
   }
 
   const cameraMoveReferenceFrames = shot.exportSettings.includeCameraMoveReferenceFrames
@@ -204,18 +231,18 @@ async function appendShotPackageToZip(
   return manifest.files.map((file) => file.path);
 }
 
-export function downloadBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+function addDataUrl(zip: JSZip, path: string, dataUrl: string) {
+  const comma = dataUrl.indexOf(',');
+  const payload = comma >= 0 ? dataUrl.slice(comma + 1) : '';
+  zip.file(path, payload, { base64: /;base64/i.test(dataUrl.slice(0, Math.max(0, comma))) });
 }
 
-function addDataUrl(zip: JSZip, path: string, dataUrl: string) {
-  const [, payload = ''] = dataUrl.split(',');
-  zip.file(path, payload, { base64: true });
+/** Add a data URL or opaque URI payload to the zip (data URLs are written as binary). */
+function addBinaryToZip(zip: JSZip, path: string, uri: string) {
+  if (uri.startsWith('data:')) {
+    addDataUrl(zip, path, uri);
+    return;
+  }
+  // Non-data URIs are unexpected for in-app video assets; store as text so the path exists.
+  zip.file(path, uri);
 }

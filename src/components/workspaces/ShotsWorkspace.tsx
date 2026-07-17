@@ -30,7 +30,7 @@ import {
   setTwoPointCameraKeyframe,
   updateCameraMoveDuration,
 } from '../../engine/cameraKeyframes';
-import { downloadDataUrl } from '../../engine/projectIO';
+import { downloadBlob, downloadDataUrl } from '../../engine/projectIO';
 import { getSupportedCameraMoveMp4MimeType, renderShotCameraMoveMp4, renderShotFrame } from '../../engine/renderers';
 import { isShotFramingAccepted } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
@@ -270,7 +270,8 @@ export function ShotsWorkspace() {
         frameRate: video.frameRate,
       });
       setCameraMovePreviewUrl(asset.uri);
-      downloadDataUrl(asset.uri, asset.name);
+      // Download from the MediaRecorder blob — multi‑MB data: URLs fail as anchor hrefs.
+      downloadBlob(video.blob, asset.name || cameraMoveFileName);
     } catch (error) {
       if (!cameraMoveAbortRef.current.cancelled) {
         setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
