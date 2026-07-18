@@ -1,13 +1,44 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Euler, PanoViewState } from '../../domain/types';
 import { panoYawToThreeJsYawDegrees } from '../../engine/sync';
+import {
+  isPanoViewerClick,
+  panoUvToScreenPoint,
+  screenPointToPanoUv,
+  shouldPickPanoViewerPointerUp,
+} from '../../engine/panoViewerPicking';
 import { useThemeStore } from '../../state/useThemeStore';
 
 const THEME_COLORS = {
   light: { empty: 0xe4e7e5, background: 0xf4f6f4 },
   dark: { empty: 0x243040, background: 0x0f1419 },
 } as const;
+
+const DEFAULT_VIEW: PanoViewState = {
+  yawDegrees: 0,
+  pitchDegrees: 0,
+  fovDegrees: 65,
+};
+
+export interface PanoViewerMarker {
+  id: string;
+  uv: [number, number];
+  label: string;
+  state?: 'complete' | 'pending' | 'disabled' | 'conflicting';
+}
+
+export type { PanoViewState };
+
+interface PointerGesture {
+  active: boolean;
+  pointerId?: number;
+  startX: number;
+  startY: number;
+  lastX: number;
+  lastY: number;
+  multiplePointers: boolean;
+}
 
 export function PanoViewer({
   imageUrl,
@@ -18,17 +49,26 @@ export function PanoViewer({
   compareImageUrl,
   compareRotation = [0, 0, 0],
   compareOpacity = 1,
+  interactionMode = 'navigate',
+  onPickUv,
+  markers = [],
 }: {
   imageUrl?: string;
-  view: PanoViewState;
-  onViewChange: (updates: Partial<PanoViewState>) => void;
+  view?: PanoViewState;
+  onViewChange?: (updates: Partial<PanoViewState>) => void;
   label?: string;
   panoRotation?: Euler;
   compareImageUrl?: string;
   compareRotation?: Euler;
   compareOpacity?: number;
+  interactionMode?: 'navigate' | 'pick';
+  onPickUv?: (uv: [number, number]) => void;
+  markers?: PanoViewerMarker[];
 }) {
   const theme = useThemeStore((state) => state.theme);
+  const [uncontrolledView, setUncontrolledView] = useState(DEFAULT_VIEW);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const effectiveView = view ?? uncontrolledView;
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const activeSceneRef = useRef<THREE.Scene | null>(null);
@@ -37,7 +77,37 @@ export function PanoViewer({
   const activeSphereRef = useRef<THREE.Mesh | null>(null);
   const compareSphereRef = useRef<THREE.Mesh | null>(null);
   const frameRef = useRef<number>(0);
-  const dragRef = useRef({ active: false, x: 0, y: 0 });
+  const dragRef = useRef<PointerGesture>({
+    active: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    multiplePointers: false,
+  });
+  const activePointerIdsRef = useRef(new Set<number>());
+  const viewRef = useRef(effectiveView);
+  const activeRotationRef = useRef(panoRotation);
+  const compareRotationRef = useRef(compareRotation);
+  const compareImageUrlRef = useRef(compareImageUrl);
+  const opacityRef = useRef(compareOpacity);
+  const controlledRef = useRef(view !== undefined);
+  const onViewChangeRef = useRef(onViewChange);
+  const onPickUvRef = useRef(onPickUv);
+  const interactionModeRef = useRef(interactionMode);
+
+  viewRef.current = effectiveView;
+  controlledRef.current = view !== undefined;
+  onViewChangeRef.current = onViewChange;
+  onPickUvRef.current = onPickUv;
+  interactionModeRef.current = interactionMode;
+
+  const emitViewChange = useCallback((update: Partial<PanoViewState>) => {
+    const next = { ...viewRef.current, ...update };
+    viewRef.current = next;
+    if (!controlledRef.current) setUncontrolledView(next);
+    onViewChangeRef.current?.(update);
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -57,7 +127,7 @@ export function PanoViewer({
     activeSceneRef.current = activeScene;
     compareSceneRef.current = compareScene;
 
-    const camera = new THREE.PerspectiveCamera(view.fovDegrees, container.clientWidth / container.clientHeight, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(viewRef.current.fovDegrees, container.clientWidth / container.clientHeight, 0.1, 1000);
     cameraRef.current = camera;
 
     const compareSphere = createSphere(new THREE.MeshBasicMaterial({ color: THEME_COLORS[theme].empty }));
@@ -103,14 +173,6 @@ export function PanoViewer({
     };
   }, [theme]);
 
-  const viewRef = useRef(view);
-  const activeRotationRef = useRef(panoRotation);
-  const compareRotationRef = useRef(compareRotation);
-  const compareImageUrlRef = useRef(compareImageUrl);
-  const opacityRef = useRef(compareOpacity);
-  useEffect(() => {
-    viewRef.current = view;
-  }, [view]);
   useEffect(() => {
     activeRotationRef.current = panoRotation;
   }, [panoRotation]);
@@ -158,29 +220,100 @@ export function PanoViewer({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const updateSize = () => {
+      setViewportSize({
+        width: Math.max(0, container.clientWidth),
+        height: Math.max(0, container.clientHeight),
+      });
+    };
+    updateSize();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(container);
+      return () => observer.disconnect();
+    }
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
     const onPointerDown = (event: PointerEvent) => {
-      dragRef.current = { active: true, x: event.clientX, y: event.clientY };
-      container.setPointerCapture(event.pointerId);
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      if (event.pointerType === 'mouse' && event.isPrimary === false) return;
+      activePointerIdsRef.current.add(event.pointerId);
+      if (activePointerIdsRef.current.size > 1) {
+        dragRef.current.multiplePointers = true;
+        return;
+      }
+      dragRef.current = {
+        active: true,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        multiplePointers: false,
+      };
+      try {
+        container.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is not available in a few embedded browser surfaces.
+      }
     };
     const onPointerMove = (event: PointerEvent) => {
-      if (!dragRef.current.active) return;
-      const dx = event.clientX - dragRef.current.x;
-      const dy = event.clientY - dragRef.current.y;
-      dragRef.current.x = event.clientX;
-      dragRef.current.y = event.clientY;
+      if (!dragRef.current.active || dragRef.current.pointerId !== event.pointerId) return;
+      const dx = event.clientX - dragRef.current.lastX;
+      const dy = event.clientY - dragRef.current.lastY;
+      dragRef.current.lastX = event.clientX;
+      dragRef.current.lastY = event.clientY;
       const factor = viewRef.current.fovDegrees / Math.max(1, container.clientHeight);
-      onViewChange({
+      emitViewChange({
         yawDegrees: viewRef.current.yawDegrees - dx * factor,
         pitchDegrees: Math.max(-89, Math.min(89, viewRef.current.pitchDegrees - dy * factor)),
       });
     };
     const onPointerUp = (event: PointerEvent) => {
+      const gesture = dragRef.current;
+      activePointerIdsRef.current.delete(event.pointerId);
+      if (!gesture.active || gesture.pointerId !== event.pointerId) return;
+      const rect = container.getBoundingClientRect();
+      const isClick = isPanoViewerClick(
+        { x: gesture.startX, y: gesture.startY },
+        { x: event.clientX, y: event.clientY },
+        gesture.multiplePointers || activePointerIdsRef.current.size > 0,
+      );
+      if (shouldPickPanoViewerPointerUp(interactionModeRef.current, isClick)) {
+        const uv = screenPointToPanoUv(
+          { x: event.clientX - rect.left, y: event.clientY - rect.top },
+          { width: rect.width, height: rect.height },
+          viewRef.current,
+          activeRotationRef.current,
+        );
+        if (uv) onPickUvRef.current?.(uv);
+      }
       dragRef.current.active = false;
-      container.releasePointerCapture(event.pointerId);
+      try {
+        if (container.hasPointerCapture(event.pointerId)) container.releasePointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture may already have been released by the browser.
+      }
+    };
+    const onPointerCancel = (event: PointerEvent) => {
+      activePointerIdsRef.current.delete(event.pointerId);
+      if (dragRef.current.pointerId !== event.pointerId) return;
+      dragRef.current.active = false;
+      dragRef.current.multiplePointers = true;
+      try {
+        if (container.hasPointerCapture(event.pointerId)) container.releasePointerCapture(event.pointerId);
+      } catch {
+        // Ignore a browser-side capture release.
+      }
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      onViewChange({ fovDegrees: Math.max(18, Math.min(120, viewRef.current.fovDegrees + event.deltaY * 0.04)) });
+      emitViewChange({ fovDegrees: Math.max(18, Math.min(120, viewRef.current.fovDegrees + event.deltaY * 0.04)) });
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -195,35 +328,35 @@ export function PanoViewer({
       switch (event.key) {
         case 'ArrowLeft':
           event.preventDefault();
-          onViewChange({ yawDegrees: viewRef.current.yawDegrees - step });
+          emitViewChange({ yawDegrees: viewRef.current.yawDegrees - step });
           break;
         case 'ArrowRight':
           event.preventDefault();
-          onViewChange({ yawDegrees: viewRef.current.yawDegrees + step });
+          emitViewChange({ yawDegrees: viewRef.current.yawDegrees + step });
           break;
         case 'ArrowUp':
           event.preventDefault();
-          onViewChange({
+          emitViewChange({
             pitchDegrees: Math.max(-89, Math.min(89, viewRef.current.pitchDegrees + step)),
           });
           break;
         case 'ArrowDown':
           event.preventDefault();
-          onViewChange({
+          emitViewChange({
             pitchDegrees: Math.max(-89, Math.min(89, viewRef.current.pitchDegrees - step)),
           });
           break;
         case '+':
         case '=':
           event.preventDefault();
-          onViewChange({
+          emitViewChange({
             fovDegrees: Math.max(18, Math.min(120, viewRef.current.fovDegrees - fovStep)),
           });
           break;
         case '-':
         case '_':
           event.preventDefault();
-          onViewChange({
+          emitViewChange({
             fovDegrees: Math.max(18, Math.min(120, viewRef.current.fovDegrees + fovStep)),
           });
           break;
@@ -235,25 +368,54 @@ export function PanoViewer({
     container.addEventListener('pointerdown', onPointerDown);
     container.addEventListener('pointermove', onPointerMove);
     container.addEventListener('pointerup', onPointerUp);
+    container.addEventListener('pointercancel', onPointerCancel);
     container.addEventListener('wheel', onWheel, { passive: false });
     container.addEventListener('keydown', onKeyDown);
     return () => {
       container.removeEventListener('pointerdown', onPointerDown);
       container.removeEventListener('pointermove', onPointerMove);
       container.removeEventListener('pointerup', onPointerUp);
+      container.removeEventListener('pointercancel', onPointerCancel);
       container.removeEventListener('wheel', onWheel);
       container.removeEventListener('keydown', onKeyDown);
     };
-  }, [onViewChange]);
+  }, [emitViewChange]);
+
+  const markerElements = markers.map((marker) => {
+    const point = panoUvToScreenPoint(marker.uv, viewportSize, effectiveView, panoRotation);
+    if (!point.visible) return null;
+    const state = marker.state ?? 'complete';
+    const tone = state === 'pending'
+      ? 'border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-500 dark:bg-amber-950 dark:text-amber-100'
+      : state === 'disabled'
+        ? 'border-slate-300 bg-slate-100 text-slate-500 opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400'
+        : state === 'conflicting'
+          ? 'border-red-300 bg-red-100 text-red-800 ring-2 ring-red-300 dark:border-red-500 dark:bg-red-950 dark:text-red-100'
+          : 'border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-500 dark:bg-emerald-950 dark:text-emerald-100';
+    return (
+      <span
+        key={marker.id}
+        data-pano-marker={marker.id}
+        className={`pointer-events-none absolute z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-[11px] font-bold shadow-sm ${tone}`}
+        style={{ left: point.x, top: point.y }}
+        aria-label={`${marker.label}${state === 'conflicting' ? ', conflicting' : state === 'pending' ? ', pending' : ''}`}
+      >
+        {marker.label}
+      </span>
+    );
+  });
 
   return (
     <div
-      className="relative h-full min-h-0 overflow-hidden bg-surface-base outline-none"
+      className="relative h-full min-h-0 touch-none overflow-hidden bg-surface-base outline-none"
       ref={containerRef}
       tabIndex={0}
       role="application"
-      aria-label="360 panorama viewer. Drag or use arrow keys to look around. Plus and minus change field of view."
+      aria-label={label
+        ? `${label}. 360 panorama viewer. Drag or use arrow keys to look around. Plus and minus change field of view.`
+        : '360 panorama viewer. Drag or use arrow keys to look around. Plus and minus change field of view.'}
     >
+      {markerElements}
       {!imageUrl && (
         <div className="pointer-events-none absolute inset-0 z-0 flex flex-col items-center justify-center bg-surface-base text-secondary">
           <p className="text-sm font-medium">No panorama selected</p>
