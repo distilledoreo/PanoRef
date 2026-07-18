@@ -4,7 +4,6 @@ import {
   Check,
   Eye,
   MapPin,
-  RotateCcw,
   Trash2,
   Undo2,
   X,
@@ -33,10 +32,12 @@ import {
   isProjectionAlignmentDraftDirty,
   ProjectionAlignmentDraft,
   removeDraftPair,
+  setDraftStrength,
   setDraftTarget,
   toggleDraftPair,
   undoLastDraftAction,
 } from './projectionAlignmentEditorState';
+import { ProjectionAlignmentPreview } from './ProjectionAlignmentPreview';
 
 const DEFAULT_SHARED_VIEW: PanoViewState = {
   yawDegrees: 0,
@@ -124,7 +125,7 @@ export function ProjectionAlignmentEditor({
   const [sharedView, setSharedView] = useState(DEFAULT_SHARED_VIEW);
   const [selectedPairId, setSelectedPairId] = useState<string | undefined>();
   const [savedStatus, setSavedStatus] = useState<ReturnType<typeof projectionAlignmentStatusForPano>>();
-  const [previewRequested, setPreviewRequested] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [mobilePane, setMobilePane] = useState<'graybox' | 'styled'>('graybox');
 
@@ -164,7 +165,7 @@ export function ProjectionAlignmentEditor({
     setDraftsBySource(nextDrafts);
     setSharedView(DEFAULT_SHARED_VIEW);
     setSelectedPairId(undefined);
-    setPreviewRequested(false);
+    setPreviewMode(false);
     setMobilePane('graybox');
     const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
     firstFocusable?.focus();
@@ -273,6 +274,30 @@ export function ProjectionAlignmentEditor({
   };
 
   if (!open) return null;
+
+  if (previewMode) {
+    return (
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-2 backdrop-blur-sm sm:p-4">
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="projection-preview-title"
+          onKeyDown={handleDialogKeyDown}
+          className="flex h-full max-h-[min(900px,calc(100vh-1rem))] w-full max-w-[1500px] flex-col overflow-hidden rounded-2xl border border-subtle bg-surface-raised shadow-soft sm:max-h-[calc(100vh-2rem)]"
+        >
+          <ProjectionAlignmentPreview
+            project={project}
+            draft={draft}
+            onBack={() => setPreviewMode(false)}
+            onApply={handleApply}
+            onCancel={closeEditor}
+            onStrengthChange={(strength) => updateDraft((current) => setDraftStrength(current, strength))}
+          />
+        </div>
+      </div>
+    );
+  }
 
   const conflicting = savedStatus?.state === 'conflicting';
   const targetMarkers: PanoViewerMarker[] = [
@@ -507,7 +532,7 @@ export function ProjectionAlignmentEditor({
               Clear
             </IconButton>
             <IconButton
-              onClick={() => setPreviewRequested(true)}
+              onClick={() => setPreviewMode(true)}
               disabled={!canApply}
               aria-label="Preview projection correction on geometry"
             >
@@ -520,12 +545,6 @@ export function ProjectionAlignmentEditor({
               {draft.pairs.length === 0 ? 'Remove local fit' : 'Use improved projection'}
             </IconButton>
           </div>
-          {previewRequested && (
-            <div className="mt-2 flex items-center gap-2 text-xs text-secondary" role="status">
-              <RotateCcw className="h-3.5 w-3.5 text-accent" />
-              Preview will use this draft locally; apply remains explicit.
-            </div>
-          )}
         </footer>
       </div>
     </div>
