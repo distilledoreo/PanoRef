@@ -1,55 +1,53 @@
 # Projection Assist
 
-Projection Assist is the local-first workflow for correcting a styled panorama when its recognizable features do not line up with the matching graybox panorama. It records visual matches and applies the existing projection correction to the selected source panorama. It does not edit geometry or create a new image.
+Projection Assist corrects a styled panorama where coherent visual regions do not line up with the matching graybox. The recommended method is **Region Fit**. It deforms only the selected region and its narrow, softened transition—not unrelated walls, floors, posts, or furniture.
 
-## Workflow
+## Region Fit workflow
 
-1. Render or import a graybox panorama with a valid image asset, then import a styled panorama with its own image asset.
-2. Open **Reference → Precision → Projected Style**. The panel shows a separate local-fit card for each active projector.
-3. Choose **Fix local mismatches** (or **Edit local fit**, **Repair local fit**, or **Review matches** when a fit already exists).
-4. Select the matching graybox panorama. One valid graybox is selected automatically; multiple valid grayboxes require an explicit choice.
-5. In the guided editor, click a corner, edge, or recognizable boundary in **Graybox**, then click the same feature in **Styled**. Add several matches around the visible area rather than relying on one point.
-6. Review the match list. Matches can be disabled, removed, cleared, or undone. The editor permits one source panorama draft per session; switching sources after edits asks for confirmation and discards that source’s unsaved draft before loading the next source.
-7. Choose **Preview on geometry** to inspect **Before** and **After** in the live scene viewport. Adjust **Local fit strength** from 0–100% if the correction should be softened.
-8. Choose **Apply local fit** / **Use improved projection** to save the draft, or **Back to matches** / **Cancel** to leave the saved project unchanged.
+1. Import a styled panorama and a graybox panorama captured from the same position.
+2. Open **Reference → Precision → Projected Style → Projection Assist** and choose **Add region** for the applicable primary or secondary panorama.
+3. In **Graybox**, choose **Polygon** and draw around the region where it should fit. Click the first handle, double-click, or press Enter to close it. **Rectangle** provides a four-handle quick start.
+4. PanoRef automatically creates the identical outline in **Styled**, preserving every handle ID, its order, and its paired edge. The styled outline starts at the graybox coordinates; never redraw it independently.
+5. Move, scale, or rotate the styled outline, then drag individual handles around the matching styled content. Shift-click selects multiple handles. Double-click a handle to insert a paired handle on its outgoing edge; Delete removes the selected paired handle. An outline cannot fall below three handles.
+6. In **Review**, save the region, adjust **Edge softness**, rename or disable it, and move it up or down. Later regions appear above earlier overlapping regions.
+7. Add separate regions for separate coherent surfaces. For example, correct a canopy, rear wall, floor, chair, and curtains independently instead of asking one global correction to reconcile all five.
+8. Choose **Preview** for the draft-local geometry result. Adjust overall strength, then **Apply** to persist or **Cancel** to leave the saved project unchanged.
 
-The editor uses one shared viewing orientation for both panorama viewers. On narrow screens it automatically moves from Graybox to Styled after a target click and back to Graybox after a source click. Dragging navigates; a click selects a feature.
+On phones the editor progresses automatically through **Graybox → Styled → Review**. Both panorama viewers share their viewing orientation. Changing the styled or graybox panorama while a draft is dirty requires confirmation.
 
-## Ownership and persistence
+## Paired topology and persistence
 
-An alignment belongs to its source panorama ID and records its target graybox ID:
+Each region stores one ordered `vertices` collection. Every vertex record contains a shared ID plus its graybox and styled positions, so the two outlines cannot diverge in vertex count, order, winding, connectivity, or starting point. Insertion and deletion always modify the pair together.
 
-- `sourcePanoId` identifies the styled panorama being projected.
-- `targetGrayboxPanoId` identifies the graybox used for the matches.
-- `pairs` preserves match IDs, order, coordinates, and enabled state.
-- `strength` stores the saved correction strength from 0 to 1.
+Region Fits are stored in `settings.projectedStyle.regionAlignments`. At most one alignment belongs to each source panorama. Primary and secondary slots resolve their own source-owned entries independently; changing blend mode does not transfer or merge them. Invalid saved regions remain available for repair but do not run.
 
-Alignments are stored in `settings.projectedStyle.alignments`. They do not belong to the primary or secondary slot. Swapping slots, changing blend mode, removing a secondary slot, and adding it again leave the source panorama’s saved fit attached to that panorama.
+## Rendering and precedence
 
-Editor picks, undo, preview toggles, and preview strength changes are draft-local. Apply and Preview stay disabled while a target point is waiting for its styled counterpart or while every match is disabled. The project and Zustand state change only when Apply is confirmed. Removing a fit requires confirmation and removes only the selected source panorama’s entry.
+Region Fit converts both paired outlines through their panorama yaw into one world-angular fitting plane. The target interior maps through shared triangle indices to the styled interior. An identity outer cage blends the mapping back to the untouched panorama according to Edge softness.
 
-## Statuses
+The same cached displacement and weight textures are used by:
 
-- **No local fit**: the source has no enabled saved matches.
-- **Ready**: the saved fit resolves and its enabled matches are usable.
-- **Local fit needs attention**: the source asset, target graybox, target asset, or required metadata is missing or invalid. The saved entry remains available for repair but is not applied.
-- **Some matches conflict**: enabled matches disagree strongly enough to warrant review. Conflict diagnostics identify the affected draft markers and are refreshed after the editor or alignment data changes; the saved data remains intact.
+- the live projected viewport;
+- projected stills;
+- camera-move frames and MP4 output; and
+- projected package stills, frames, and MP4 files.
 
-The target list contains only `graybox_render` panoramas with valid image assets. A styled panorama cannot silently become its own target.
+Overall strength is applied in the shader and is excluded from the texture cache key. Moving the strength slider therefore does not regenerate the mapping. Later overlapping regions replace earlier mappings deterministically instead of averaging incompatible results.
 
-## Where the correction is used
+For a source panorama, runtime precedence is:
 
-The same saved source-owned alignment is resolved by the live projected viewport and by projected shot rendering. It therefore carries through to:
+1. a valid enabled Region Fit;
+2. legacy point correction; or
+3. natural projection.
 
-- projected shot stills;
-- projected camera-move reference frames;
-- projected camera-move MP4 output; and
-- projected files included in shot packages.
+The two correction methods are never combined. When Region Fit is active, the editor reports that legacy point correction is inactive.
 
-Changing strength updates the correction amount while reusing the cached correction field. It does not rebuild the field for every slider movement. A new match, changed target, or changed source requires a new Apply and can require a new field.
+## Safety and limits
 
-## Limits
+Region Fit is an angular image correction, not 3D reconstruction or inpainting. Styled and graybox capture origins must be within 0.25 m. Yaw differences are supported. A region spanning more than 100 degrees, crossing itself, approaching an unstable pole, passing behind its tangent plane, or producing folded/collapsed triangles is blocked with repair guidance.
 
-Projection Assist is a world-space image correction. It does not reconstruct hidden surfaces, fix geometry, bake UVs, or provide true occlusion. Results are strongest near the source panorama’s captured origin and can stretch or duplicate around large translations and occlusions. The source and target must both remain valid equirectangular panorama references with image assets.
+Large capture-origin changes, missing geometry, disoccluded pixels, mask holes, brush masks, AI segmentation, and generative filling are outside the first release.
 
-The optional 3D marker-and-line overlay is developer-only diagnostic tooling. The production editor uses the two panorama viewers and the live Before/After viewport instead.
+## Legacy point correction
+
+The previous point-driven spherical correction remains under **Advanced → Legacy point correction** and is labeled **Experimental · intended for very small local nudges**. It is not the recommended workflow because multiple point pairs can pull unrelated structures between intended correction areas.

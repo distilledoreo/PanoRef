@@ -12,7 +12,7 @@
 | 6 | **Package Export — Video** | `includeProjectedCameraMoveVideo` | `renderShotCameraMoveMp4({appearance:'projected'})` | Same as #4 |
 | 7 | **Package Export — Frames** | `includeProjectedCameraMoveReferenceFrames` | `renderViewportProjected()` per frame | Same as #2 |
 | 8 | **Test Harness** | `runProjectedStyleCompileGate()` | Direct `createProjectedStyleMaterial()` in test code | Explicit `.dispose()` after readback |
-| 9 | **Projection Assist Preview** | User opens **Preview on geometry** | `ProjectionAlignmentPreview` creates an immutable project snapshot; `SceneViewport` renders it with `appearance='projected'` | Snapshot is discarded on Back, Cancel, or editor close |
+| 9 | **Projection Assist Preview** | User opens **Preview** | `ProjectionRegionEditor` creates an immutable Region Fit project snapshot; `SceneViewport` renders it with `appearance='projected'` | Snapshot is discarded on Back, Cancel, or editor close |
 
 ## Projector Resolution Chain
 
@@ -26,7 +26,7 @@
    - `SceneViewport` (live viewport)
    - `loadProjectedSceneOptions()` in `renderers.ts` (all export paths)
 
-3. `resolveProjectionWarpWithStrengthForProject(project, sourcePanoId, quality)` resolves the source-owned alignment and target graybox, then returns the correction field plus its saved strength. A missing or stale target returns no usable field; the serialized alignment is retained for repair.
+3. `resolveProjectionRegionWithStrengthForProject(project, sourcePanoId, quality)` resolves a valid same-origin paired Region Fit and its displacement/weight textures. If none is usable, `resolveProjectionWarpWithStrengthForProject()` may resolve the legacy point correction. The two methods are not combined.
 
 ## ProjectedStyleSettings
 
@@ -42,12 +42,22 @@ export interface ProjectedStyleSettings {
   fallbackMode: 'clay' | 'neutral';
   /** One saved local fit per source panorama. */
   alignments?: ProjectionAlignment[];
+  /** One recommended paired-mask Region Fit per source panorama. */
+  regionAlignments?: ProjectionRegionAlignment[];
 }
 ```
 
 `ProjectionAlignment` is source-owned. Its `sourcePanoId` identifies the styled panorama and its `targetGrayboxPanoId` identifies the graybox used for the ordered control pairs. These entries are independent of the primary and secondary slots, so slot swaps and blend-mode changes do not copy or retarget matches.
 
-## Projection Assist lifecycle
+## Projection Assist Region Fit lifecycle
+
+`ProjectionRegionEditor` owns a non-persistent `ProjectionRegionDraft`. Closing a graybox polygon creates exactly one `ProjectionRegion`, clones its target positions into styled positions, and preserves shared vertex IDs permanently. Editor transitions provide paired insertion/deletion, styled-only transforms, undo, ordering, softness, enabled state, and dirty-state checks. Pending regions cannot be converted to a persisted alignment.
+
+`projectionRegionCoordinates.ts` converts target and source directions through their respective yaw into one tangent plane. `projectionRegionMesh.ts` triangulates the shared topology and adds an identity transition cage. `projectionRegionTexture.ts` rasterizes deterministic ordered mappings and caches them without overall strength. Diagnostics use the same pure coordinate/mesh checks without acquiring GPU textures.
+
+The editor preview path uses `createProjectionRegionPreviewProject()` to clone the project and replace only the selected source Region Fit. Apply is the only parent settings mutation. Primary and secondary entries remain source-owned and resolve independently in the live viewport and shared export renderer.
+
+## Legacy point-correction lifecycle
 
 `ProjectionAlignmentEditor` keeps one active draft per editor session. The draft contains the target, ordered pairs, enabled state, and strength. Switching sources after editing confirms and discards the current draft before loading the next source, so no hidden source draft can be lost or omitted from Apply. `ProjectionAlignmentEditorState` provides pure transitions for target/source picking, undo, removal, enabling, clearing, target changes, and dirty-state checks.
 
