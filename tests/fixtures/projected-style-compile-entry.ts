@@ -6,12 +6,14 @@
 import * as THREE from 'three';
 import { createProjectedStyleMaterial } from '../../src/engine/projectedStyleMaterials';
 import { defaultProjectedStyleSettings } from '../../src/domain/defaults';
+import type { ProjectedStyleSettings } from '../../src/domain/types';
 
 export interface ProjectedCompileResult {
   ok: boolean;
   errors: string[];
   lightingCases: Array<{ lightingContribution: number; ok: boolean; detail?: string }>;
   dualCases: Array<{ mode: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }>;
+  warpCases: Array<{ name: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }>;
 }
 
 function makeSolidDataTexture(r: number, g: number, b: number, a = 255): THREE.DataTexture {
@@ -179,6 +181,195 @@ function tryCompile(
   }
 }
 
+function makeWarpDataTexture(width: number, height: number, du: number, dv: number): THREE.DataTexture {
+  const pixelCount = width * height;
+  const data = new Uint8Array(pixelCount * 4);
+  for (let i = 0; i < pixelCount; i++) {
+    const encodedU = Math.round(((du + 0.5) / 1) * 65535);
+    const encodedV = Math.round(((dv + 1.0) / 2) * 65535);
+    data[i * 4] = encodedU >> 8;
+    data[i * 4 + 1] = encodedU & 0xff;
+    data[i * 4 + 2] = encodedV >> 8;
+    data[i * 4 + 3] = encodedV & 0xff;
+  }
+  const texture = new THREE.DataTexture(data, width, height);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function tryWarpTests(
+  renderer: THREE.WebGLRenderer,
+): Array<{ name: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }> {
+  // Use a horizontal-gradient pano so that a u-shift changes the sampled pixel.
+  const gradSize = 32;
+  const gradData = new Uint8Array(gradSize * 4 * 4); // 4 wide × 1 tall RGBA
+  for (let x = 0; x < 4; x++) {
+    const v = Math.round((x / 3) * 255);
+    gradData[x * 4] = v;
+    gradData[x * 4 + 1] = 0;
+    gradData[x * 4 + 2] = 255 - v;
+    gradData[x * 4 + 3] = 255;
+  }
+  const panoTex = new THREE.DataTexture(gradData, 4, 1);
+  panoTex.colorSpace = THREE.SRGBColorSpace;
+  panoTex.wrapS = THREE.RepeatWrapping;
+  panoTex.wrapT = THREE.ClampToEdgeWrapping;
+  panoTex.needsUpdate = true;
+
+  const origin: [number, number, number] = [0, 1.6, 0];
+  const settings: ProjectedStyleSettings = {
+    ...defaultProjectedStyleSettings,
+    lightingContribution: 0,
+    blendMode: 'primary_only',
+  };
+  const boxPos: [number, number, number] = [0.5, 1.6, 0.5];
+  const camPos: [number, number, number] = [-2, 2.6, 5];
+
+  // Reference: no warp
+  const matNoWarp = createProjectedStyleMaterial({
+    texture: panoTex,
+    origin,
+    rotation: [0, 0, 0],
+    settings,
+    fallbackColor: 0x888888,
+    disposable: true,
+  });
+  const refRes = renderAndReadPixel(renderer, matNoWarp, boxPos, camPos);
+  matNoWarp.dispose();
+
+  if (!refRes.ok) {
+    panoTex.dispose();
+    return [{ name: 'warp reference', ok: false, detail: refRes.error }];
+  }
+
+  const results: Array<{ name: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }> = [];
+  const refR = refRes.r;
+  const refG = refRes.g;
+  const refB = refRes.b;
+
+  // Identity warp (du=0, dv=0) with strength 1 → same as no-warp
+  const identityWarp = makeWarpDataTexture(1, 1, 0, 0);
+  const matIdWarp = createProjectedStyleMaterial({
+    texture: panoTex,
+    origin,
+    rotation: [0, 0, 0],
+    settings,
+    fallbackColor: 0x888888,
+    disposable: true,
+    warpMap: identityWarp,
+    warpMapSize: [1, 1],
+    warpStrength: 1,
+  });
+  const idRes = renderAndReadPixel(renderer, matIdWarp, boxPos, camPos);
+  matIdWarp.dispose();
+  identityWarp.dispose();
+
+  if (idRes.ok && Math.abs(idRes.r - refR) <= 5 && Math.abs(idRes.g - refG) <= 5 && Math.abs(idRes.b - refB) <= 5) {
+    results.push({ name: 'identity_warp_strength_1', ok: true, pixelR: idRes.r, pixelG: idRes.g, pixelB: idRes.b });
+  } else {
+    results.push({ name: 'identity_warp_strength_1', ok: false, detail: idRes.error ?? `pixel mismatch: ref=(${refR},${refG},${refB}) got=(${idRes.r},${idRes.g},${idRes.b})`, pixelR: idRes.r, pixelG: idRes.g, pixelB: idRes.b });
+  }
+
+  // Identity warp with strength 0 → same as no-warp
+  const matIdWarp0 = createProjectedStyleMaterial({
+    texture: panoTex,
+    origin,
+    rotation: [0, 0, 0],
+    settings,
+    fallbackColor: 0x888888,
+    disposable: true,
+    warpMap: identityWarp,
+    warpMapSize: [1, 1],
+    warpStrength: 0,
+  });
+  const id0Res = renderAndReadPixel(renderer, matIdWarp0, boxPos, camPos);
+  matIdWarp0.dispose();
+
+  if (id0Res.ok && Math.abs(id0Res.r - refR) <= 5 && Math.abs(id0Res.g - refG) <= 5 && Math.abs(id0Res.b - refB) <= 5) {
+    results.push({ name: 'identity_warp_strength_0', ok: true, pixelR: id0Res.r, pixelG: id0Res.g, pixelB: id0Res.b });
+  } else {
+    results.push({ name: 'identity_warp_strength_0', ok: false, detail: id0Res.error ?? `pixel mismatch: ref=(${refR},${refG},${refB}) got=(${id0Res.r},${id0Res.g},${id0Res.b})`, pixelR: id0Res.r, pixelG: id0Res.g, pixelB: id0Res.b });
+  }
+
+  // Non-zero shift warp with strength 1 → should differ from no-warp
+  const shiftWarp = makeWarpDataTexture(1, 1, 0.25, 0);
+  const matShift = createProjectedStyleMaterial({
+    texture: panoTex,
+    origin,
+    rotation: [0, 0, 0],
+    settings,
+    fallbackColor: 0x888888,
+    disposable: true,
+    warpMap: shiftWarp,
+    warpMapSize: [1, 1],
+    warpStrength: 1,
+  });
+  const shiftRes = renderAndReadPixel(renderer, matShift, boxPos, camPos);
+  matShift.dispose();
+
+  if (shiftRes.ok && (Math.abs(shiftRes.r - refR) > 5 || Math.abs(shiftRes.g - refG) > 5 || Math.abs(shiftRes.b - refB) > 5)) {
+    results.push({ name: 'nonzero_shift_warp_strength_1', ok: true, pixelR: shiftRes.r, pixelG: shiftRes.g, pixelB: shiftRes.b });
+  } else if (shiftRes.ok) {
+    results.push({ name: 'nonzero_shift_warp_strength_1', ok: false, detail: `warp did not shift pixel: ref=(${refR},${refG},${refB}) got=(${shiftRes.r},${shiftRes.g},${shiftRes.b})`, pixelR: shiftRes.r, pixelG: shiftRes.g, pixelB: shiftRes.b });
+  } else {
+    results.push({ name: 'nonzero_shift_warp_strength_1', ok: false, detail: shiftRes.error, pixelR: shiftRes.r, pixelG: shiftRes.g, pixelB: shiftRes.b });
+  }
+
+  // Non-zero shift warp with strength 0 → same as no-warp
+  const matShift0 = createProjectedStyleMaterial({
+    texture: panoTex,
+    origin,
+    rotation: [0, 0, 0],
+    settings,
+    fallbackColor: 0x888888,
+    disposable: true,
+    warpMap: shiftWarp,
+    warpMapSize: [1, 1],
+    warpStrength: 0,
+  });
+  const shift0Res = renderAndReadPixel(renderer, matShift0, boxPos, camPos);
+  matShift0.dispose();
+
+  if (shift0Res.ok && Math.abs(shift0Res.r - refR) <= 5 && Math.abs(shift0Res.g - refG) <= 5 && Math.abs(shift0Res.b - refB) <= 5) {
+    results.push({ name: 'nonzero_shift_warp_strength_0', ok: true, pixelR: shift0Res.r, pixelG: shift0Res.g, pixelB: shift0Res.b });
+  } else {
+    results.push({ name: 'nonzero_shift_warp_strength_0', ok: false, detail: shift0Res.error ?? `pixel mismatch: ref=(${refR},${refG},${refB}) got=(${shift0Res.r},${shift0Res.g},${shift0Res.b})`, pixelR: shift0Res.r, pixelG: shift0Res.g, pixelB: shift0Res.b });
+  }
+
+  // Non-zero shift warp with strength 0.5: verify the warp path stays active
+  // at an intermediate strength value (pixel should match ref or full).
+  const matShiftHalf = createProjectedStyleMaterial({
+    texture: panoTex,
+    origin,
+    rotation: [0, 0, 0],
+    settings,
+    fallbackColor: 0x888888,
+    disposable: true,
+    warpMap: shiftWarp,
+    warpMapSize: [1, 1],
+    warpStrength: 0.5,
+  });
+  const shiftHalfRes = renderAndReadPixel(renderer, matShiftHalf, boxPos, camPos);
+  matShiftHalf.dispose();
+
+  if (shiftHalfRes.ok) {
+    const matchesRef = Math.abs(shiftHalfRes.r - refR) <= 5 && Math.abs(shiftHalfRes.g - refG) <= 5 && Math.abs(shiftHalfRes.b - refB) <= 5;
+    const matchesFull = Math.abs(shiftHalfRes.r - shiftRes.r) <= 5 && Math.abs(shiftHalfRes.g - shiftRes.g) <= 5 && Math.abs(shiftHalfRes.b - shiftRes.b) <= 5;
+    results.push({ name: 'nonzero_shift_warp_strength_0.5', ok: matchesRef || matchesFull, pixelR: shiftHalfRes.r, pixelG: shiftHalfRes.g, pixelB: shiftHalfRes.b });
+  } else {
+    results.push({ name: 'nonzero_shift_warp_strength_0.5', ok: false, detail: shiftHalfRes.error, pixelR: shiftHalfRes.r, pixelG: shiftHalfRes.g, pixelB: shiftHalfRes.b });
+  }
+
+  panoTex.dispose();
+  identityWarp.dispose();
+  shiftWarp.dispose();
+  return results;
+}
+
 export function runProjectedStyleCompileGate(): ProjectedCompileResult {
   const canvas = document.createElement('canvas');
   canvas.width = 64;
@@ -207,6 +398,7 @@ export function runProjectedStyleCompileGate(): ProjectedCompileResult {
       errors: [`WebGLRenderer init failed: ${error instanceof Error ? error.message : String(error)}`],
       lightingCases: [],
       dualCases: [],
+      warpCases: [],
     };
   }
 
@@ -224,17 +416,21 @@ export function runProjectedStyleCompileGate(): ProjectedCompileResult {
     return { mode, ...result };
   });
 
+  // Warp pixel readback tests
+  const warpCases = tryWarpTests(renderer);
+
   renderer.dispose();
   console.error = originalError;
 
   const shaderFail = glErrors.some((line) =>
     /shader|fragment|vertex|compile|link|THREE\.WebGLProgram/i.test(line),
   );
-  const allCasesOk = lightingCases.every((c) => c.ok) && dualCases.every((c) => c.ok);
+  const allCasesOk = lightingCases.every((c) => c.ok) && dualCases.every((c) => c.ok) && warpCases.every((c) => c.ok);
   const errors = [
     ...glErrors.filter((line) => /shader|fragment|vertex|compile|link|THREE\.WebGLProgram/i.test(line)),
     ...lightingCases.filter((c) => !c.ok).map((c) => `lighting=${c.lightingContribution}: ${c.detail}`),
     ...dualCases.filter((c) => !c.ok).map((c) => `dual mode=${c.mode}: ${c.detail}`),
+    ...warpCases.filter((c) => !c.ok).map((c) => `warp ${c.name}: ${c.detail}`),
   ];
 
   return {
@@ -242,6 +438,7 @@ export function runProjectedStyleCompileGate(): ProjectedCompileResult {
     errors,
     lightingCases,
     dualCases,
+    warpCases,
   };
 }
 
@@ -262,5 +459,6 @@ try {
     errors: [error instanceof Error ? error.message : String(error)],
     lightingCases: [],
     dualCases: [],
+    warpCases: [],
   };
 }

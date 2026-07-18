@@ -13,7 +13,7 @@ import { BUILD_GRID_SIZE, createPlacedSceneObject, resolveStampPoint } from '../
 import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
 import {
   resolveProjectedProjectorAssets,
-  resolveProjectionWarpForPano,
+  resolveProjectionWarpWithStrengthForProject,
 } from '../../engine/multiOriginProjection';
 import {
   computeProjectedAppearanceState,
@@ -1461,25 +1461,24 @@ export function SceneViewport({
     const oldPrimaryWarp = primaryWarpRef.current;
     const oldSecondaryWarp = secondaryWarpRef.current;
 
-    primaryWarpRef.current = projectedActive && projectedTexture && projectedPano
-      ? resolveProjectionWarpForPano(projectedSettings, projectedPano.id, projectedPano.rotation, project.panoRefs)
+    // Use the project-aware resolver that returns both the warp texture and
+    // the saved alignment strength in one call, replacing the deprecated
+    // settings-only resolver and the separate manual strength lookups.
+    const primaryResolved = projectedActive && projectedTexture && projectedPano
+      ? resolveProjectionWarpWithStrengthForProject(project, projectedPano.id, 'runtime')
       : undefined;
-    secondaryWarpRef.current = dualActive && projectedSecondary
-      ? resolveProjectionWarpForPano(projectedSettings, projectedSecondary.id, projectedSecondary.rotation, project.panoRefs)
+    const secondaryResolved = dualActive && projectedSecondary
+      ? resolveProjectionWarpWithStrengthForProject(project, projectedSecondary.id, 'runtime')
       : undefined;
+
+    primaryWarpRef.current = primaryResolved?.warp;
+    secondaryWarpRef.current = secondaryResolved?.warp;
 
     oldPrimaryWarp?.release();
     oldSecondaryWarp?.release();
 
-    // Read alignment strength from settings so live rendering and exports
-    // consume the same value; previously strength was hardcoded to 1 in the
-    // viewport while exports used the saved value.
-    const primaryStrength = primaryWarpRef.current && projectedPano
-      ? (findProjectionAlignmentForPano(projectedSettings, projectedPano.id)?.strength ?? 1)
-      : undefined;
-    const secondaryStrength = secondaryWarpRef.current && projectedSecondary
-      ? (findProjectionAlignmentForPano(projectedSettings, projectedSecondary.id)?.strength ?? 1)
-      : undefined;
+    const primaryStrength = primaryResolved?.strength;
+    const secondaryStrength = secondaryResolved?.strength;
 
     sceneRef.current = buildScene(project, {
       selectedShotId,

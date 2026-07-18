@@ -80,6 +80,7 @@ describe('projected style WebGL compile gate', () => {
           errors: string[];
           lightingCases: Array<{ lightingContribution: number; ok: boolean; detail?: string }>;
           dualCases: Array<{ mode: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }>;
+          warpCases: Array<{ name: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }>;
         };
       }).__PROJECTED_COMPILE__);
 
@@ -98,6 +99,8 @@ describe('projected style WebGL compile gate', () => {
       expect(result.lightingCases.every((c) => c.ok)).toBe(true);
       expect(result.dualCases).toHaveLength(4);
       expect(result.dualCases.every((c) => c.ok)).toBe(true);
+      expect(result.warpCases).toHaveLength(5);
+      expect(result.warpCases.every((c) => c.ok)).toBe(true);
 
       // Verify pixel readback for each dual mode
       const primaryOnly = result.dualCases.find((c) => c.mode === 'primary_only');

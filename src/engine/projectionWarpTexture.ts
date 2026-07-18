@@ -33,6 +33,8 @@ function buildWarpCacheKey(
 ): string {
   const pairIds = alignment.pairs
     .filter((p) => p.enabled)
+    .slice()
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
     .map((p) => `${p.id}:${p.order}:${p.targetUv[0].toFixed(6)}:${p.targetUv[1].toFixed(6)}:${p.sourceUv[0].toFixed(6)}:${p.sourceUv[1].toFixed(6)}`)
     .join('|');
 

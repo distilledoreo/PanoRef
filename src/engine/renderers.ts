@@ -13,7 +13,7 @@ import {
 } from './cameraMoveCubemap';
 import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH } from '../domain/defaults';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
-import { resolveProjectedProjectorAssets, resolveProjectionWarpForPano } from './multiOriginProjection';
+import { resolveProjectedProjectorAssets, resolveProjectionWarpWithStrengthForProject } from './multiOriginProjection';
 import type { WarpTextureResult } from './projectionWarpTexture';
 import {
   canUseProjectedAppearance,
@@ -43,37 +43,33 @@ async function loadProjectedSceneOptions(
   const texture = await acquireProjectedStyleTexture(assets.primaryUrl);
   if (!texture) return undefined;
 
-  // Track acquired resources so we can release on any early failure.
+  // Track acquired URLs so we can release on any early failure.
   const acquiredUrls: string[] = [assets.primaryUrl];
   let secondaryTexture: THREE.Texture | undefined;
+
+  // Hoist warp variables outside the try block so the catch handler can
+  // release a primary warp even if secondary warp acquisition throws.
+  let primaryWarp: WarpTextureResult | undefined;
+  let secondaryWarp: WarpTextureResult | undefined;
+  let primaryStrength = 1;
+  let secondaryStrength = 1;
+
   try {
     if (assets.secondaryUrl) {
       secondaryTexture = (await acquireProjectedStyleTexture(assets.secondaryUrl)) ?? undefined;
       if (secondaryTexture) acquiredUrls.push(assets.secondaryUrl);
     }
 
-    // Read alignment strength from settings
-    const primaryStrength = assets.settings.alignments?.find(
-      (a) => a.sourcePanoId === assets.primary.id,
-    )?.strength ?? 1;
-    const secondaryStrength = assets.secondary
-      ? assets.settings.alignments?.find((a) => a.sourcePanoId === assets.secondary!.id)?.strength ?? 1
-      : 1;
+    // Use the project-aware resolver that returns both the warp texture and
+    // its saved alignment strength, eliminating the separate alignment lookup.
+    const primaryResolved = resolveProjectionWarpWithStrengthForProject(project, assets.primary.id, 'runtime');
+    primaryWarp = primaryResolved?.warp;
+    primaryStrength = primaryResolved?.strength ?? 1;
 
-    const primaryWarp = resolveProjectionWarpForPano(
-      assets.settings,
-      assets.primary.id,
-      assets.primary.rotation,
-      project.panoRefs,
-    );
-    let secondaryWarp: WarpTextureResult | undefined;
     if (secondaryTexture && assets.secondary) {
-      secondaryWarp = resolveProjectionWarpForPano(
-        assets.settings,
-        assets.secondary.id,
-        assets.secondary.rotation,
-        project.panoRefs,
-      );
+      const secondaryResolved = resolveProjectionWarpWithStrengthForProject(project, assets.secondary.id, 'runtime');
+      secondaryWarp = secondaryResolved?.warp;
+      secondaryStrength = secondaryResolved?.strength ?? 1;
     }
 
     return {
@@ -99,12 +95,15 @@ async function loadProjectedSceneOptions(
       },
     };
   } catch (err) {
-    // An exception during warp resolution or material construction means we
-    // must release every texture we have already acquired.
+    // Release every texture URL acquired so far (decrements the cache refcount).
     for (const url of acquiredUrls) {
       releaseProjectedStyleTexture(url);
     }
-    texture.dispose();
+    // Release any warp textures already acquired (idempotent per-acquisition flag).
+    primaryWarp?.release();
+    secondaryWarp?.release();
+    // Never call texture.dispose() directly — the projected-style texture cache
+    // owns disposal and may still share this texture with another consumer.
     throw err;
   }
 }
@@ -329,127 +328,148 @@ export async function renderShotCameraMoveMp4(
   const durationSeconds = getCameraMoveDurationSeconds(keyframes);
   const width = shot.exportSettings.width;
   const height = shot.exportSettings.height;
-  await ensureHumanMannequinModel();
-  const renderer = createRenderer(width, height);
-  const scene = buildScene(project, {
-    showHelpers: false,
-    hiddenObjectTypes: ['sun_marker'],
-    appearance: appearance === 'projected' && projectedLoad ? 'projected' : 'clay',
-    projected: appearance === 'projected' && projectedLoad ? projectedLoad.options : undefined,
-  });
-  const camera = new THREE.PerspectiveCamera(
-    shot.camera.fovDegrees,
-    width / height,
-    shot.camera.near,
-    shot.camera.far,
-  );
 
-  const captureStream = renderer.domElement.captureStream?.bind(renderer.domElement);
-  if (!captureStream) {
-    disposeScene(scene);
-    disposeRenderer(renderer);
-    if (projectedLoad) {
-      releaseProjectedStyleTexture(projectedLoad.primaryUrl);
-      releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
-      projectedLoad.primaryWarp?.release();
-      projectedLoad.secondaryWarp?.release();
-    }
-    throw new Error('Canvas video capture is not supported in this browser.');
-  }
+  // The entire sequence after projected resource acquisition must be inside
+  // a single try/finally so that mannequin loading, renderer/scene creation,
+  // scene construction, and capture-stream detection all have guaranteed
+  // cleanup even when an intermediate step throws.
 
-  const stream = captureStream(frameRate);
-  const chunks: Blob[] = [];
-  // Longer moves need more wall time (esp. 4K projected).
-  const timeoutMs = options.timeoutMs ?? Math.max(90_000, Math.ceil(durationSeconds * 12_000));
-  const externalSignal = options.signal;
+  let renderer: THREE.WebGLRenderer | undefined;
+  let scene: THREE.Scene | undefined;
 
   try {
-    if (externalSignal?.aborted) {
-      throw new Error('MP4 export was cancelled.');
+    await ensureHumanMannequinModel();
+    renderer = createRenderer(width, height);
+    scene = buildScene(project, {
+      showHelpers: false,
+      hiddenObjectTypes: ['sun_marker'],
+      appearance: appearance === 'projected' && projectedLoad ? 'projected' : 'clay',
+      projected: appearance === 'projected' && projectedLoad ? projectedLoad.options : undefined,
+    });
+    const camera = new THREE.PerspectiveCamera(
+      shot.camera.fovDegrees,
+      width / height,
+      shot.camera.near,
+      shot.camera.far,
+    );
+
+    const captureStream = renderer.domElement.captureStream?.bind(renderer.domElement);
+    if (!captureStream) {
+      throw new Error('Canvas video capture is not supported in this browser.');
     }
 
-    const recorder = new MediaRecorder(stream, {
-      mimeType,
-      videoBitsPerSecond: options.videoBitsPerSecond ?? Math.max(1_000_000, width * height * 2),
-    });
+    const stream = captureStream(frameRate);
+    const chunks: Blob[] = [];
+    // Longer moves need more wall time (esp. 4K projected).
+    const timeoutMs = options.timeoutMs ?? Math.max(90_000, Math.ceil(durationSeconds * 12_000));
+    const externalSignal = options.signal;
 
-    await new Promise<void>((resolve, reject) => {
-      let animationFrame = 0;
-      let startTime = 0;
-      let stopping = false;
-      let settled = false;
-      let timeoutId = 0;
+    try {
+      if (externalSignal?.aborted) {
+        throw new Error('MP4 export was cancelled.');
+      }
 
-      const settle = (fn: () => void) => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId) window.clearTimeout(timeoutId);
-        externalSignal?.removeEventListener('abort', onAbort);
-        fn();
-      };
+      const recorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: options.videoBitsPerSecond ?? Math.max(1_000_000, width * height * 2),
+      });
 
-      const stopRecorder = () => {
-        if (stopping) return;
-        stopping = true;
-        cancelAnimationFrame(animationFrame);
-        try {
-          if (recorder.state !== 'inactive') recorder.stop();
-        } catch {
-          // ignore stop races
-        }
-      };
+      await new Promise<void>((resolve, reject) => {
+        let animationFrame = 0;
+        let startTime = 0;
+        let stopping = false;
+        let settled = false;
+        let timeoutId = 0;
 
-      const onAbort = () => {
-        stopRecorder();
-        settle(() => reject(new Error('MP4 export was cancelled.')));
-      };
+        const settle = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          if (timeoutId) window.clearTimeout(timeoutId);
+          externalSignal?.removeEventListener('abort', onAbort);
+          fn();
+        };
 
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) chunks.push(event.data);
-      };
-      recorder.onerror = () => {
-        stopRecorder();
-        settle(() => reject(new Error('MP4 recording failed in this browser.')));
-      };
-      recorder.onstop = () => settle(() => resolve());
-
-      const renderFrame = (now: number) => {
-        if (settled) return;
-        if (!startTime) startTime = now;
-        const elapsedSeconds = Math.min((now - startTime) / 1000, durationSeconds);
-        renderCameraMoveFrame(renderer, scene, camera, keyframes, elapsedSeconds, width, height);
-        options.onProgress?.(durationSeconds === 0 ? 1 : elapsedSeconds / durationSeconds);
-
-        if (elapsedSeconds >= durationSeconds) {
-          // Request a final chunk before stopping so empty-blob silent failures are rare.
+        const stopRecorder = () => {
+          if (stopping) return;
+          stopping = true;
+          cancelAnimationFrame(animationFrame);
           try {
-            if (recorder.state === 'recording') recorder.requestData();
+            if (recorder.state !== 'inactive') recorder.stop();
           } catch {
-            // requestData is best-effort
+            // ignore stop races
           }
+        };
+
+        const onAbort = () => {
           stopRecorder();
-          return;
-        }
+          settle(() => reject(new Error('MP4 export was cancelled.')));
+        };
+
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) chunks.push(event.data);
+        };
+        recorder.onerror = () => {
+          stopRecorder();
+          settle(() => reject(new Error('MP4 recording failed in this browser.')));
+        };
+        recorder.onstop = () => settle(() => resolve());
+
+        const renderFrame = (now: number) => {
+          if (settled) return;
+          if (!startTime) startTime = now;
+          const elapsedSeconds = Math.min((now - startTime) / 1000, durationSeconds);
+          renderCameraMoveFrame(renderer!, scene!, camera, keyframes, elapsedSeconds, width, height);
+          options.onProgress?.(durationSeconds === 0 ? 1 : elapsedSeconds / durationSeconds);
+
+          if (elapsedSeconds >= durationSeconds) {
+            // Request a final chunk before stopping so empty-blob silent failures are rare.
+            try {
+              if (recorder.state === 'recording') recorder.requestData();
+            } catch {
+              // requestData is best-effort
+            }
+            stopRecorder();
+            return;
+          }
+          animationFrame = requestAnimationFrame(renderFrame);
+        };
+
+        externalSignal?.addEventListener('abort', onAbort);
+        timeoutId = window.setTimeout(() => {
+          stopRecorder();
+          settle(() => reject(new Error(
+            `MP4 export timed out after ${Math.round(timeoutMs / 1000)} seconds. Try a shorter move or smaller resolution.`,
+          )));
+        }, timeoutMs);
+
+        renderCameraMoveFrame(renderer!, scene!, camera, keyframes, 0, width, height);
+        // Timeslice keeps data flowing; some Chromium builds otherwise emit one empty blob.
+        recorder.start(250);
         animationFrame = requestAnimationFrame(renderFrame);
-      };
+      });
+    } finally {
+      stream.getTracks().forEach((track) => track.stop());
+    }
 
-      externalSignal?.addEventListener('abort', onAbort);
-      timeoutId = window.setTimeout(() => {
-        stopRecorder();
-        settle(() => reject(new Error(
-          `MP4 export timed out after ${Math.round(timeoutMs / 1000)} seconds. Try a shorter move or smaller resolution.`,
-        )));
-      }, timeoutMs);
-
-      renderCameraMoveFrame(renderer, scene, camera, keyframes, 0, width, height);
-      // Timeslice keeps data flowing; some Chromium builds otherwise emit one empty blob.
-      recorder.start(250);
-      animationFrame = requestAnimationFrame(renderFrame);
-    });
+    const blob = new Blob(chunks, { type: mimeType });
+    if (blob.size === 0) {
+      throw new Error(
+        'MP4 recording produced an empty file. Try Chrome or Edge, or reduce resolution/duration.',
+      );
+    }
+    return {
+      blob,
+      dataUrl: await blobToDataUrl(blob),
+      width,
+      height,
+      durationSeconds,
+      frameRate,
+      mimeType,
+      fileExtension: 'mp4',
+    };
   } finally {
-    stream.getTracks().forEach((track) => track.stop());
-    disposeScene(scene);
-    disposeRenderer(renderer);
+    if (scene) disposeScene(scene);
+    if (renderer) disposeRenderer(renderer);
     if (projectedLoad) {
       releaseProjectedStyleTexture(projectedLoad.primaryUrl);
       releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
@@ -457,23 +477,6 @@ export async function renderShotCameraMoveMp4(
       projectedLoad.secondaryWarp?.release();
     }
   }
-
-  const blob = new Blob(chunks, { type: mimeType });
-  if (blob.size === 0) {
-    throw new Error(
-      'MP4 recording produced an empty file. Try Chrome or Edge, or reduce resolution/duration.',
-    );
-  }
-  return {
-    blob,
-    dataUrl: await blobToDataUrl(blob),
-    width,
-    height,
-    durationSeconds,
-    frameRate,
-    mimeType,
-    fileExtension: 'mp4',
-  };
 }
 
 export function applyFlyCameraToPerspectiveCamera(

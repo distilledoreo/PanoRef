@@ -207,6 +207,30 @@ describe('createWarpTexture', () => {
     expect(projectionWarpTextureCacheSize()).toBe(0);
   });
 
+  it('two consumers: double release from A does not consume B reference', () => {
+    const disp = new Float32Array(8);
+    const alignment = makeAlignment();
+
+    // A acquires
+    const rA = createWarpTexture(alignment, 0, 0, disp, 2, 1);
+    expect(projectionWarpTextureRefCount(buildKey(alignment, 0, 0, 2, 1))).toBe(1);
+
+    // B acquires
+    const rB = createWarpTexture(alignment, 0, 0, disp, 2, 1);
+    expect(projectionWarpTextureRefCount(buildKey(alignment, 0, 0, 2, 1))).toBe(2);
+
+    // A releases twice — second call must be idempotent
+    rA.release();
+    expect(projectionWarpTextureRefCount(buildKey(alignment, 0, 0, 2, 1))).toBe(1);
+    rA.release();
+    expect(projectionWarpTextureRefCount(buildKey(alignment, 0, 0, 2, 1))).toBe(1);
+
+    // B releases — cache should now be empty
+    rB.release();
+    expect(projectionWarpTextureRefCount(buildKey(alignment, 0, 0, 2, 1))).toBe(0);
+    expect(projectionWarpTextureCacheSize()).toBe(0);
+  });
+
   it('identity texture is shared', () => {
     const t1 = getIdentityWarpTexture();
     const t2 = getIdentityWarpTexture();
@@ -225,6 +249,8 @@ function buildKey(
 ): string {
   const pairIds = alignment.pairs
     .filter((p) => p.enabled)
+    .slice()
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
     .map((p) => `${p.id}:${p.order}:${p.targetUv[0].toFixed(6)}:${p.targetUv[1].toFixed(6)}:${p.sourceUv[0].toFixed(6)}:${p.sourceUv[1].toFixed(6)}`)
     .join('|');
 

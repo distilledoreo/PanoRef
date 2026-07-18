@@ -70,7 +70,7 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(5 * DEG);
+    expect(result.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
   }, 30000);
 
   it('several markers reach their targets', () => {
@@ -84,7 +84,7 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(5 * DEG);
+    expect(result.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
   }, 30000);
 
   it('separate regions remain locally independent', () => {
@@ -98,7 +98,7 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(5 * DEG);
+    expect(result.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
   }, 30000);
 
   it('distant regions stay near identity', () => {
@@ -120,7 +120,7 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(5 * DEG);
+    expect(result.maxMarkerErrorRadians).toBeLessThan(4 * DEG);
   }, 30000);
 
   it('different source and target yaws work', () => {
@@ -131,21 +131,21 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 30 * DEG,
       sourceYawRadians: 10 * DEG,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(5 * DEG);
+    expect(result.maxMarkerErrorRadians).toBeLessThan(4 * DEG);
   }, 30000);
 
   it('conflict detection works', () => {
     const alignment = makeAlignment({
       pairs: [
         makePair({ id: 'p1', targetUv: [0.5, 0.5], sourceUv: [0.5, 0.5] }) as any,
-        makePair({ id: 'p2', targetUv: [0.51, 0.5], sourceUv: [0.7, 0.5] }) as any,
+        makePair({ id: 'p2', targetUv: [0.505, 0.5], sourceUv: [0.7, 0.5] }) as any,
       ],
     });
     const result = solveProjectionWarp(alignment, {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.conflictCount).toBeGreaterThanOrEqual(0);
+    expect(result.conflictCount).toBeGreaterThan(0);
   }, 30000);
 
   it('disabled markers are ignored', () => {
@@ -212,7 +212,7 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(resultSmall.maxMarkerErrorRadians).toBeLessThan(5 * DEG);
-    expect(resultLarge.maxMarkerErrorRadians).toBeLessThan(5 * DEG);
+    expect(resultSmall.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
+    expect(resultLarge.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
   }, 30000);
 });
