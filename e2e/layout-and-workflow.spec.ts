@@ -142,6 +142,27 @@ async function reopenableModelPackage() {
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
+async function largeModelPackage() {
+  const project = createDefaultProject();
+  project.name = 'Large imported model';
+  const key = 'e2e/large-model';
+  project.assets.assets['large-model'] = {
+    id: 'large-model',
+    type: 'model',
+    name: 'large-model.panoref-mesh',
+    uri: `${MODEL_ASSET_URI_PREFIX}${key}`,
+    mimeType: 'application/vnd.panoref.graybox-mesh',
+    createdAt: '2026-07-18T00:00:00.000Z',
+  };
+  const zip = new JSZip();
+  zip.file('project.json', JSON.stringify(project));
+  // Reproduce the reported 91.2 MiB package entry without making the fixture
+  // itself large on disk; repeated bytes compress well, but still inflate to
+  // the same large IndexedDB write during project open.
+  zip.file(`model-assets/${encodeURIComponent(key)}.bin`, Buffer.alloc(Math.round(91.2 * 1024 * 1024), 0x5a));
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+}
+
 test.describe('layout and core chrome', () => {
   test('header actions stay in viewport', async ({ page }, testInfo) => {
     await enterContinuityStage(page);
@@ -273,6 +294,18 @@ test.describe('layout and core chrome', () => {
     await expect(page.locator('[data-project-import-status="success"]')).toBeVisible();
     await page.getByTitle('Scene layers').click();
     await expect(page.getByText('Reopenable triangle', { exact: true })).toBeVisible();
+  });
+
+  test('opens a 91.2 MiB binary model entry without an oversized IndexedDB value', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-chromium', 'The large storage regression runs once on desktop Chromium.');
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await page.locator('[data-project-import-input]').setInputFiles({
+      name: 'large-model.panoref-project',
+      mimeType: 'application/zip',
+      buffer: await largeModelPackage(),
+    });
+    await expect(page.locator('[data-project-import-status="success"]')).toBeVisible({ timeout: 90_000 });
   });
 
   test('imports separate multi-node scenes with one report card per source file', async ({ page }) => {

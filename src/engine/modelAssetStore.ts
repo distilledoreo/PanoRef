@@ -1,8 +1,12 @@
 const DATABASE_NAME = 'panoref-model-assets';
 const STORE_NAME = 'mesh-binaries';
-const DATABASE_VERSION = 1;
+const CHUNK_STORE_NAME = 'mesh-binary-chunks';
+const DATABASE_VERSION = 2;
 const DEFAULT_MAX_CONCURRENT_BLOB_WRITES = 2;
-const TRANSACTION_OVERHEAD_BYTES_PER_ASSET = 4096;
+const MODEL_ASSET_CHUNK_BYTES = 4 * 1024 * 1024;
+const TRANSACTION_OVERHEAD_BYTES_PER_CHUNK = 4096;
+const MODEL_ASSET_MANIFEST_BYTES = 512;
+const CHUNKED_MODEL_ASSET_FORMAT = 'panoref-chunked-v1';
 
 const memoryAssets = new Map<string, ArrayBuffer>();
 
@@ -78,6 +82,12 @@ interface ModelAssetStoreTestHooks {
   storageEstimate?: () => Promise<{ usage?: number; quota?: number }>;
 }
 
+interface ChunkedModelAssetRecord {
+  format: typeof CHUNKED_MODEL_ASSET_FORMAT;
+  byteLength: number;
+  chunkCount: number;
+}
+
 let testHooks: ModelAssetStoreTestHooks | undefined;
 
 function cloneBuffer(buffer: ArrayBuffer): ArrayBuffer {
@@ -96,6 +106,7 @@ function openDatabase(): Promise<IDBDatabase> {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME);
+      if (!request.result.objectStoreNames.contains(CHUNK_STORE_NAME)) request.result.createObjectStore(CHUNK_STORE_NAME);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('Could not open model asset storage.'));
@@ -131,6 +142,7 @@ async function writeModelAsset(
   }
   if (signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
   if (invokeTestHook) await testHooks?.beforeWrite?.(key, bytes);
+  if (signal?.aborted) throw new DOMException('Import cancelled.', 'AbortError');
 
   const backend = backendForCurrentEnvironment();
   if (backend === 'memory') {
@@ -140,34 +152,7 @@ async function writeModelAsset(
 
   const db = await openDatabase();
   try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readwrite');
-      const abortTransaction = () => {
-        try {
-          transaction.abort();
-        } catch {
-          // The transaction may already have completed.
-        }
-      };
-      const onAbort = () => {
-        abortTransaction();
-        reject(new DOMException('Import cancelled.', 'AbortError'));
-      };
-      signal?.addEventListener('abort', onAbort, { once: true });
-      transaction.objectStore(STORE_NAME).put(cloneBuffer(bytes), key);
-      transaction.oncomplete = () => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      };
-      transaction.onerror = () => {
-        signal?.removeEventListener('abort', onAbort);
-        reject(transaction.error ?? new Error('Could not store model geometry.'));
-      };
-      transaction.onabort = () => {
-        signal?.removeEventListener('abort', onAbort);
-        reject(transaction.error ?? new Error('Model geometry storage was cancelled.'));
-      };
-    });
+    await writeIndexedDbModelAsset(db, key, bytes, signal);
     // Cache only after the persistent write commits. This prevents a failed
     // package open from making an unwritten asset look available to the scene.
     registerModelAssetBytes(key, bytes);
@@ -177,6 +162,199 @@ async function writeModelAsset(
   }
 }
 
+async function writeIndexedDbModelAsset(
+  db: IDBDatabase,
+  key: string,
+  bytes: ArrayBuffer,
+  signal?: AbortSignal,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME, CHUNK_STORE_NAME], 'readwrite');
+    const metadataStore = transaction.objectStore(STORE_NAME);
+    const chunkStore = transaction.objectStore(CHUNK_STORE_NAME);
+    let settled = false;
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const resolveOnce = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const rejectOnce = (cause: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(cause instanceof Error ? cause : new Error(String(cause)));
+    };
+    const abortTransaction = () => {
+      try {
+        transaction.abort();
+      } catch {
+        // The transaction may already have completed.
+      }
+    };
+    const onAbort = () => {
+      abortTransaction();
+      rejectOnce(new DOMException('Import cancelled.', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    transaction.oncomplete = resolveOnce;
+    transaction.onerror = () => rejectOnce(transaction.error ?? new Error('Could not store model geometry.'));
+    transaction.onabort = () => rejectOnce(transaction.error ?? new Error('Model geometry storage was cancelled.'));
+
+    const previousRequest = metadataStore.get(key);
+    previousRequest.onerror = () => rejectOnce(previousRequest.error ?? new Error('Could not inspect model geometry storage.'));
+    previousRequest.onsuccess = () => {
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      try {
+        const previous = previousRequest.result as unknown;
+        if (isChunkedModelAssetRecord(previous)) {
+          for (let index = 0; index < previous.chunkCount; index += 1) {
+            chunkStore.delete(modelAssetChunkKey(key, index));
+          }
+        }
+        const chunkCount = chunkCountForBytes(bytes.byteLength);
+        for (let index = 0; index < chunkCount; index += 1) {
+          const start = index * MODEL_ASSET_CHUNK_BYTES;
+          const end = Math.min(bytes.byteLength, start + MODEL_ASSET_CHUNK_BYTES);
+          chunkStore.put(bytes.slice(start, end), modelAssetChunkKey(key, index));
+        }
+        metadataStore.put({
+          format: CHUNKED_MODEL_ASSET_FORMAT,
+          byteLength: bytes.byteLength,
+          chunkCount,
+        } satisfies ChunkedModelAssetRecord, key);
+      } catch (cause) {
+        rejectOnce(cause);
+        abortTransaction();
+      }
+    };
+  });
+}
+
+async function readIndexedDbModelAsset(db: IDBDatabase, key: string): Promise<ArrayBuffer | undefined> {
+  return new Promise<ArrayBuffer | undefined>((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME, CHUNK_STORE_NAME], 'readonly');
+    const metadataStore = transaction.objectStore(STORE_NAME);
+    const chunkStore = transaction.objectStore(CHUNK_STORE_NAME);
+    let settled = false;
+    const resolveOnce = (value: ArrayBuffer | undefined) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const rejectOnce = (cause: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(cause instanceof Error ? cause : new Error(String(cause)));
+    };
+    transaction.onerror = () => rejectOnce(transaction.error ?? new Error('Could not read model geometry.'));
+    transaction.onabort = () => rejectOnce(transaction.error ?? new Error('Could not read model geometry.'));
+
+    const metadataRequest = metadataStore.get(key);
+    metadataRequest.onerror = () => rejectOnce(metadataRequest.error ?? new Error('Could not read model geometry.'));
+    metadataRequest.onsuccess = () => {
+      const stored = metadataRequest.result as unknown;
+      if (!isChunkedModelAssetRecord(stored)) {
+        void toArrayBuffer(stored).then(resolveOnce).catch(rejectOnce);
+        return;
+      }
+      let chunksRequest: IDBRequest<unknown[]>;
+      try {
+        chunksRequest = chunkStore.getAll(
+          IDBKeyRange.bound(modelAssetChunkKey(key, 0), modelAssetChunkKey(key, stored.chunkCount - 1)),
+        ) as IDBRequest<unknown[]>;
+      } catch (cause) {
+        rejectOnce(cause);
+        return;
+      }
+      chunksRequest.onerror = () => rejectOnce(chunksRequest.error ?? new Error('Could not read model geometry chunks.'));
+      chunksRequest.onsuccess = () => {
+        void assembleChunkedModelAsset(stored, chunksRequest.result).then(resolveOnce).catch(rejectOnce);
+      };
+    };
+  });
+}
+
+async function assembleChunkedModelAsset(
+  manifest: ChunkedModelAssetRecord,
+  storedChunks: unknown[],
+): Promise<ArrayBuffer> {
+  if (storedChunks.length !== manifest.chunkCount) {
+    throw new Error(`Model geometry is incomplete: expected ${manifest.chunkCount} chunks, found ${storedChunks.length}.`);
+  }
+  const chunks = await Promise.all(storedChunks.map((chunk) => toArrayBuffer(chunk)));
+  if (chunks.some((chunk) => !chunk)) throw new Error('Model geometry contains an invalid binary chunk.');
+  const chunkBytes = chunks as ArrayBuffer[];
+  const totalBytes = chunkBytes.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  if (totalBytes !== manifest.byteLength) {
+    throw new Error(`Model geometry byte count ${totalBytes} did not match manifest ${manifest.byteLength}.`);
+  }
+  const result = new Uint8Array(manifest.byteLength);
+  let offset = 0;
+  for (const chunk of chunkBytes) {
+    result.set(new Uint8Array(chunk), offset);
+    offset += chunk.byteLength;
+  }
+  return result.buffer;
+}
+
+async function deleteIndexedDbModelAsset(db: IDBDatabase, key: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME, CHUNK_STORE_NAME], 'readwrite');
+    const metadataStore = transaction.objectStore(STORE_NAME);
+    const chunkStore = transaction.objectStore(CHUNK_STORE_NAME);
+    let settled = false;
+    const resolveOnce = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const rejectOnce = (cause: unknown) => {
+      if (settled) return;
+      settled = true;
+      reject(cause instanceof Error ? cause : new Error(String(cause)));
+    };
+    transaction.oncomplete = resolveOnce;
+    transaction.onerror = () => rejectOnce(transaction.error ?? new Error('Could not delete model geometry.'));
+    transaction.onabort = () => rejectOnce(transaction.error ?? new Error('Could not delete model geometry.'));
+
+    const metadataRequest = metadataStore.get(key);
+    metadataRequest.onerror = () => rejectOnce(metadataRequest.error ?? new Error('Could not inspect model geometry storage.'));
+    metadataRequest.onsuccess = () => {
+      const stored = metadataRequest.result as unknown;
+      if (isChunkedModelAssetRecord(stored)) {
+        for (let index = 0; index < stored.chunkCount; index += 1) {
+          chunkStore.delete(modelAssetChunkKey(key, index));
+        }
+      }
+      metadataStore.delete(key);
+    };
+  });
+}
+
+function modelAssetChunkKey(key: string, index: number): IDBValidKey[] {
+  return [key, index];
+}
+
+function chunkCountForBytes(byteLength: number): number {
+  return Math.ceil(byteLength / MODEL_ASSET_CHUNK_BYTES);
+}
+
+function isChunkedModelAssetRecord(value: unknown): value is ChunkedModelAssetRecord {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Partial<ChunkedModelAssetRecord>;
+  return record.format === CHUNKED_MODEL_ASSET_FORMAT
+    && Number.isInteger(record.byteLength)
+    && record.byteLength > 0
+    && Number.isInteger(record.chunkCount)
+    && record.chunkCount > 0;
+}
+
 export async function getModelAsset(key: string): Promise<ArrayBuffer | undefined> {
   const cached = getRegisteredModelAssetBytes(key);
   if (cached) return cached;
@@ -184,12 +362,7 @@ export async function getModelAsset(key: string): Promise<ArrayBuffer | undefine
 
   const db = await openDatabase();
   try {
-    const value = await new Promise<unknown>((resolve, reject) => {
-      const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(key);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error ?? new Error('Could not read model geometry.'));
-    });
-    const bytes = await toArrayBuffer(value);
+    const bytes = await readIndexedDbModelAsset(db, key);
     if (bytes) registerModelAssetBytes(key, bytes);
     return bytes;
   } finally {
@@ -219,13 +392,7 @@ async function deleteModelAssetInternal(key: string, invokeTestHook: boolean): P
 
   const db = await openDatabase();
   try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readwrite');
-      transaction.objectStore(STORE_NAME).delete(key);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error ?? new Error('Could not delete model geometry.'));
-      transaction.onabort = () => reject(transaction.error ?? new Error('Could not delete model geometry.'));
-    });
+    await deleteIndexedDbModelAsset(db, key);
     memoryAssets.delete(key);
   } finally {
     db.close();
@@ -360,11 +527,15 @@ function normalizeWrite(write: AssetBlobWrite): AssetBlobWrite {
 function calculatePreflight(writes: readonly AssetBlobWrite[]): ModelAssetPreflight {
   const totalBlobBytes = writes.reduce((sum, write) => sum + write.size, 0);
   const largestBlobBytes = writes.reduce((largest, write) => Math.max(largest, write.size), 0);
+  const estimatedStorageOverhead = writes.reduce(
+    (sum, write) => sum + MODEL_ASSET_MANIFEST_BYTES + chunkCountForBytes(write.size) * TRANSACTION_OVERHEAD_BYTES_PER_CHUNK,
+    0,
+  );
   return {
     totalBlobBytes,
     largestBlobBytes,
     assetCount: writes.length,
-    estimatedRequiredBytes: totalBlobBytes + writes.length * TRANSACTION_OVERHEAD_BYTES_PER_ASSET,
+    estimatedRequiredBytes: totalBlobBytes + estimatedStorageOverhead,
   };
 }
 
