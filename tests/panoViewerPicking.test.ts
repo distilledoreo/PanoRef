@@ -137,4 +137,10 @@ describe('PanoViewer pointer gesture classification', () => {
   it('never picks in navigate mode', () => {
     expect(shouldPickPanoViewerPointerUp('navigate', true)).toBe(false);
   });
+
+  it('routes clicks to every Region Fit interaction mode', () => {
+    expect(shouldPickPanoViewerPointerUp('draw-region', true)).toBe(true);
+    expect(shouldPickPanoViewerPointerUp('edit-region', true)).toBe(true);
+    expect(shouldPickPanoViewerPointerUp('transform-region', true)).toBe(true);
+  });
 });

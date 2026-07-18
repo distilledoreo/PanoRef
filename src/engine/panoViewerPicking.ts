@@ -159,9 +159,9 @@ export function isPanoViewerClick(
 }
 
 export function shouldPickPanoViewerPointerUp(
-  interactionMode: 'navigate' | 'pick',
+  interactionMode: 'navigate' | 'pick' | 'draw-region' | 'edit-region' | 'transform-region',
   isClick: boolean,
   cancelled = false,
 ): boolean {
-  return interactionMode === 'pick' && isClick && !cancelled;
+  return interactionMode !== 'navigate' && isClick && !cancelled;
 }

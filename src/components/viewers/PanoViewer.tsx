@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Euler, PanoViewState } from '../../domain/types';
+import { Euler, PanoViewState, Vec2 } from '../../domain/types';
 import { panoYawToThreeJsYawDegrees } from '../../engine/sync';
 import {
   isPanoViewerClick,
@@ -9,6 +9,7 @@ import {
   shouldPickPanoViewerPointerUp,
 } from '../../engine/panoViewerPicking';
 import { useThemeStore } from '../../state/useThemeStore';
+import { pointInsidePolygon, unwrapRegionU } from '../../engine/projectionRegionPolygon';
 
 const THEME_COLORS = {
   light: { empty: 0xe4e7e5, background: 0xf4f6f4 },
@@ -28,6 +29,15 @@ export interface PanoViewerMarker {
   state?: 'complete' | 'pending' | 'disabled' | 'conflicting';
 }
 
+export interface PanoViewerRegionVertex { id: string; uv: Vec2; label?: string }
+export interface PanoViewerRegion {
+  id: string;
+  vertices: PanoViewerRegionVertex[];
+  state?: 'complete' | 'active' | 'invalid' | 'disabled';
+  label?: string;
+}
+export type PanoViewerInteractionMode = 'navigate' | 'pick' | 'draw-region' | 'edit-region' | 'transform-region';
+
 export type { PanoViewState };
 
 interface PointerGesture {
@@ -38,6 +48,8 @@ interface PointerGesture {
   lastX: number;
   lastY: number;
   multiplePointers: boolean;
+  regionDragId?: string;
+  lastUv?: Vec2;
 }
 
 export function PanoViewer({
@@ -52,6 +64,10 @@ export function PanoViewer({
   interactionMode = 'navigate',
   onPickUv,
   markers = [],
+  regions = [], activeRegionId, selectedVertexIds = [],
+  onRegionDraftChange, onRegionComplete, onVertexMove, onVertexInsert, onVertexRemove, onVertexSelectionChange,
+  regionDrawShape = 'polygon',
+  onRegionTranslate,
 }: {
   imageUrl?: string;
   view?: PanoViewState;
@@ -61,9 +77,20 @@ export function PanoViewer({
   compareImageUrl?: string;
   compareRotation?: Euler;
   compareOpacity?: number;
-  interactionMode?: 'navigate' | 'pick';
+  interactionMode?: PanoViewerInteractionMode;
   onPickUv?: (uv: [number, number]) => void;
   markers?: PanoViewerMarker[];
+  regions?: PanoViewerRegion[];
+  activeRegionId?: string;
+  selectedVertexIds?: string[];
+  onRegionDraftChange?: (vertices: PanoViewerRegionVertex[]) => void;
+  onRegionComplete?: (vertices: PanoViewerRegionVertex[]) => void;
+  onVertexMove?: (regionId: string, vertexId: string, uv: Vec2) => void;
+  onVertexInsert?: (regionId: string, edgeStartVertexId: string, edgeT: number) => void;
+  onVertexRemove?: (regionId: string, vertexId: string) => void;
+  onVertexSelectionChange?: (vertexIds: string[]) => void;
+  regionDrawShape?: 'polygon' | 'rectangle';
+  onRegionTranslate?: (regionId: string, deltaUv: Vec2) => void;
 }) {
   const theme = useThemeStore((state) => state.theme);
   const [uncontrolledView, setUncontrolledView] = useState(DEFAULT_VIEW);
@@ -95,12 +122,40 @@ export function PanoViewer({
   const onViewChangeRef = useRef(onViewChange);
   const onPickUvRef = useRef(onPickUv);
   const interactionModeRef = useRef(interactionMode);
+  const [draftVertices, setDraftVertices] = useState<PanoViewerRegionVertex[]>([]);
+  const draftVerticesRef = useRef<PanoViewerRegionVertex[]>([]);
+  const lastDraftClickRef = useRef(0);
+  const regionDrawShapeRef = useRef(regionDrawShape);
+  const regionsRef = useRef(regions);
+  const activeRegionIdRef = useRef(activeRegionId);
+  const onRegionTranslateRef = useRef(onRegionTranslate);
 
   viewRef.current = effectiveView;
   controlledRef.current = view !== undefined;
   onViewChangeRef.current = onViewChange;
   onPickUvRef.current = onPickUv;
   interactionModeRef.current = interactionMode;
+  regionDrawShapeRef.current = regionDrawShape;
+  regionsRef.current = regions;
+  activeRegionIdRef.current = activeRegionId;
+  onRegionTranslateRef.current = onRegionTranslate;
+
+  const replaceDraftVertices = useCallback((vertices: PanoViewerRegionVertex[]) => {
+    draftVerticesRef.current = vertices;
+    setDraftVertices(vertices);
+    onRegionDraftChange?.(vertices);
+  }, [onRegionDraftChange]);
+  const completeDraft = useCallback((vertices = draftVerticesRef.current) => {
+    if (vertices.length < 3) return;
+    onRegionComplete?.(vertices);
+    draftVerticesRef.current = [];
+    setDraftVertices([]);
+    lastDraftClickRef.current = 0;
+  }, [onRegionComplete]);
+
+  useEffect(() => {
+    if (interactionMode !== 'draw-region') replaceDraftVertices([]);
+  }, [interactionMode, replaceDraftVertices]);
 
   const emitViewChange = useCallback((update: Partial<PanoViewState>) => {
     const next = { ...viewRef.current, ...update };
@@ -256,6 +311,15 @@ export function PanoViewer({
         lastY: event.clientY,
         multiplePointers: false,
       };
+      if (interactionModeRef.current === 'edit-region' || interactionModeRef.current === 'transform-region') {
+        const rect = container.getBoundingClientRect();
+        const uv = screenPointToPanoUv({ x: event.clientX - rect.left, y: event.clientY - rect.top }, { width: rect.width, height: rect.height }, viewRef.current, activeRotationRef.current);
+        const region = regionsRef.current.find((item) => item.id === activeRegionIdRef.current);
+        if (uv && region) {
+          const loop = unwrapRegionU(region.vertices.map((vertex) => vertex.uv)); let pointU = uv[0]; while (pointU - loop[0][0] > 0.5) pointU -= 1; while (pointU - loop[0][0] < -0.5) pointU += 1;
+          if (pointInsidePolygon([pointU, uv[1]], loop)) { dragRef.current.regionDragId = region.id; dragRef.current.lastUv = uv; }
+        }
+      }
       try {
         container.setPointerCapture(event.pointerId);
       } catch {
@@ -264,6 +328,12 @@ export function PanoViewer({
     };
     const onPointerMove = (event: PointerEvent) => {
       if (!dragRef.current.active || dragRef.current.pointerId !== event.pointerId) return;
+      if (interactionModeRef.current === 'draw-region') return;
+      if (dragRef.current.regionDragId && dragRef.current.lastUv) {
+        const rect = container.getBoundingClientRect(); const uv = screenPointToPanoUv({ x: event.clientX - rect.left, y: event.clientY - rect.top }, { width: rect.width, height: rect.height }, viewRef.current, activeRotationRef.current);
+        if (uv) { let deltaU = uv[0] - dragRef.current.lastUv[0]; if (deltaU > 0.5) deltaU -= 1; if (deltaU < -0.5) deltaU += 1; onRegionTranslateRef.current?.(dragRef.current.regionDragId, [deltaU, uv[1] - dragRef.current.lastUv[1]]); dragRef.current.lastUv = uv; }
+        return;
+      }
       const dx = event.clientX - dragRef.current.lastX;
       const dy = event.clientY - dragRef.current.lastY;
       dragRef.current.lastX = event.clientX;
@@ -284,6 +354,18 @@ export function PanoViewer({
         { x: event.clientX, y: event.clientY },
         gesture.multiplePointers || activePointerIdsRef.current.size > 0,
       );
+      if (interactionModeRef.current === 'draw-region' && regionDrawShapeRef.current === 'rectangle' && !isClick) {
+        const startUv = screenPointToPanoUv({ x: gesture.startX - rect.left, y: gesture.startY - rect.top }, { width: rect.width, height: rect.height }, viewRef.current, activeRotationRef.current);
+        const endUv = screenPointToPanoUv({ x: event.clientX - rect.left, y: event.clientY - rect.top }, { width: rect.width, height: rect.height }, viewRef.current, activeRotationRef.current);
+        if (startUv && endUv) {
+          let endU = endUv[0]; while (endU - startUv[0] > 0.5) endU -= 1; while (endU - startUv[0] < -0.5) endU += 1;
+          const wrap = (u: number) => ((u % 1) + 1) % 1;
+          completeDraft([
+            { id: 'draft-1', uv: [startUv[0], startUv[1]] }, { id: 'draft-2', uv: [wrap(endU), startUv[1]] },
+            { id: 'draft-3', uv: [wrap(endU), endUv[1]] }, { id: 'draft-4', uv: [startUv[0], endUv[1]] },
+          ]);
+        }
+      } else
       if (shouldPickPanoViewerPointerUp(interactionModeRef.current, isClick)) {
         const uv = screenPointToPanoUv(
           { x: event.clientX - rect.left, y: event.clientY - rect.top },
@@ -291,7 +373,16 @@ export function PanoViewer({
           viewRef.current,
           activeRotationRef.current,
         );
-        if (uv) onPickUvRef.current?.(uv);
+        if (uv) {
+          if (interactionModeRef.current === 'draw-region') {
+            const current = draftVerticesRef.current;
+            const firstPoint = current[0] ? panoUvToScreenPoint(current[0].uv, { width: rect.width, height: rect.height }, viewRef.current, activeRotationRef.current) : undefined;
+            const closesFirst = current.length >= 3 && firstPoint?.visible && Math.hypot(firstPoint.x - (event.clientX - rect.left), firstPoint.y - (event.clientY - rect.top)) <= 12;
+            const now = performance.now(); const doubleClick = current.length >= 3 && now - lastDraftClickRef.current < 350;
+            if (closesFirst || doubleClick) completeDraft(current);
+            else { const next = [...current, { id: `draft-${current.length + 1}`, uv }]; replaceDraftVertices(next); lastDraftClickRef.current = now; }
+          } else onPickUvRef.current?.(uv);
+        }
       }
       dragRef.current.active = false;
       try {
@@ -360,6 +451,22 @@ export function PanoViewer({
             fovDegrees: Math.max(18, Math.min(120, viewRef.current.fovDegrees + fovStep)),
           });
           break;
+        case 'Enter':
+          if (interactionModeRef.current === 'draw-region' && draftVerticesRef.current.length >= 3) {
+            event.preventDefault(); completeDraft();
+          }
+          break;
+        case 'Backspace':
+          if (interactionModeRef.current === 'draw-region') {
+            event.preventDefault(); replaceDraftVertices(draftVerticesRef.current.slice(0, -1));
+          }
+          break;
+        case 'Escape':
+          if (interactionModeRef.current === 'draw-region') { event.preventDefault(); replaceDraftVertices([]); }
+          break;
+        case 'Delete':
+          if (activeRegionId && selectedVertexIds.length) selectedVertexIds.forEach((id) => onVertexRemove?.(activeRegionId, id));
+          break;
         default:
           break;
       }
@@ -379,7 +486,44 @@ export function PanoViewer({
       container.removeEventListener('wheel', onWheel);
       container.removeEventListener('keydown', onKeyDown);
     };
-  }, [emitViewChange]);
+  }, [activeRegionId, completeDraft, emitViewChange, onVertexRemove, replaceDraftVertices, selectedVertexIds]);
+
+  const draftRegion: PanoViewerRegion | undefined = draftVertices.length
+    ? { id: '__draft__', vertices: draftVertices, state: 'active' }
+    : undefined;
+  const displayedRegions: PanoViewerRegion[] = draftRegion ? [...regions, draftRegion] : regions;
+  const regionElements = displayedRegions.map((region) => {
+    const points = region.vertices.map((vertex) => ({ vertex, point: panoUvToScreenPoint(vertex.uv, viewportSize, effectiveView, panoRotation) }));
+    const visible = points.filter(({ point }) => point.visible);
+    if (!visible.length) return null;
+    const invalid = region.state === 'invalid'; const disabled = region.state === 'disabled'; const active = region.id === activeRegionId || region.state === 'active';
+    const stroke = invalid ? '#ef4444' : disabled ? '#94a3b8' : active ? '#22d3ee' : '#34d399';
+    const polygonPoints = visible.map(({ point }) => `${point.x},${point.y}`).join(' ');
+    return <React.Fragment key={region.id}>
+      {visible.length === region.vertices.length && <svg className="pointer-events-none absolute inset-0 z-[5] h-full w-full" aria-label={region.label ?? 'Region outline'}><polygon points={polygonPoints} fill={`${stroke}26`} stroke={stroke} strokeWidth="2" /></svg>}
+      {points.map(({ vertex, point }) => point.visible && <button key={vertex.id} type="button" data-region-vertex={vertex.id}
+        className={`absolute z-20 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-surface-base text-[9px] ${selectedVertexIds.includes(vertex.id) ? 'ring-2 ring-cyan-300' : ''}`}
+        style={{ left: point.x, top: point.y, borderColor: stroke }} aria-label={vertex.label ?? `Handle ${vertex.id}`}
+        onPointerDown={(event) => { event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); }}
+        onPointerMove={(event) => {
+          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+          event.stopPropagation();
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          const uv = screenPointToPanoUv({ x: event.clientX - rect.left, y: event.clientY - rect.top }, { width: rect.width, height: rect.height }, effectiveView, panoRotation);
+          if (uv) {
+            const selected = new Set(selectedVertexIds);
+            if (selected.has(vertex.id) && selected.size > 1) {
+              let deltaU = uv[0] - vertex.uv[0]; if (deltaU > 0.5) deltaU -= 1; if (deltaU < -0.5) deltaU += 1;
+              const deltaV = uv[1] - vertex.uv[1];
+              region.vertices.filter((item) => selected.has(item.id)).forEach((item) => onVertexMove?.(region.id, item.id, [((item.uv[0] + deltaU) % 1 + 1) % 1, Math.min(1, Math.max(0, item.uv[1] + deltaV))]));
+            } else onVertexMove?.(region.id, vertex.id, uv);
+          }
+        }}
+        onClick={(event) => { event.stopPropagation(); const next = event.shiftKey ? [...new Set([...selectedVertexIds, vertex.id])] : [vertex.id]; onVertexSelectionChange?.(next); }}
+        onDoubleClick={() => activeRegionId && onVertexInsert?.(activeRegionId, vertex.id, 0.5)}>{vertex.label}</button>)}
+    </React.Fragment>;
+  });
 
   const markerElements = markers.map((marker) => {
     const point = panoUvToScreenPoint(marker.uv, viewportSize, effectiveView, panoRotation);
@@ -415,7 +559,7 @@ export function PanoViewer({
         ? `${label}. 360 panorama viewer. Drag or use arrow keys to look around. Plus and minus change field of view.`
         : '360 panorama viewer. Drag or use arrow keys to look around. Plus and minus change field of view.'}
     >
-      {markerElements}
+      {regionElements}{markerElements}
       {!imageUrl && (
         <div className="pointer-events-none absolute inset-0 z-0 flex flex-col items-center justify-center bg-surface-base text-secondary">
           <p className="text-sm font-medium">No panorama selected</p>
