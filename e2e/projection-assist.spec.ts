@@ -134,6 +134,7 @@ async function openProjectionEditor(page: Page): Promise<Locator> {
   await alignmentChrome.getByRole('button', { name: 'More', exact: true }).click();
   const drawer = page.getByRole('dialog', { name: 'Reference Settings' });
   await expect(drawer).toBeVisible();
+  await drawer.getByText('Advanced · Legacy point correction', { exact: true }).click();
   await drawer.locator('[data-projection-alignment-edit="styled-a"]').click();
   const editor = page.getByRole('dialog', { name: 'Fix local mismatches' });
   await expect(editor).toBeVisible();
@@ -143,7 +144,9 @@ async function openProjectionEditor(page: Page): Promise<Locator> {
 async function openProjectionEditorFromDrawer(page: Page): Promise<Locator> {
   const drawer = page.getByRole('dialog', { name: 'Reference Settings' });
   await expect(drawer).toBeVisible();
-  await drawer.locator('[data-projection-alignment-edit="styled-a"]').click();
+  const edit = drawer.locator('[data-projection-alignment-edit="styled-a"]');
+  if (!(await edit.isVisible())) await drawer.getByText('Advanced · Legacy point correction', { exact: true }).click();
+  await edit.click();
   const editor = page.getByRole('dialog', { name: 'Fix local mismatches' });
   await expect(editor).toBeVisible();
   return editor;

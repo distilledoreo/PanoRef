@@ -527,6 +527,12 @@ describe('resolveProjectionWarpWithStrengthForProject', () => {
     expect(result).toBeDefined(); expect([result!.width, result!.height]).toEqual([256, 128]); expect(result!.strength).toBe(0.6); expect(result!.regionWarpMap).toBeDefined(); expect(result!.regionWeightMap).toBeDefined(); result!.release(); result!.release();
   });
 
+  it('resolves export-quality Region Fit textures at 1024x512', () => {
+    const { project, styledPanoId, grayboxPanoId } = buildProject(); const points: [number, number][] = [[0.45, 0.45], [0.55, 0.45], [0.55, 0.55]];
+    project.settings.projectedStyle!.regionAlignments = [createProjectionRegionAlignment(styledPanoId, grayboxPanoId, [createProjectionRegion(points.map((point, index) => createProjectionRegionVertexPair(point, point, `export-${index}`)))])];
+    const result = resolveProjectionRegionWithStrengthForProject(project, styledPanoId, 'export'); expect([result?.width, result?.height]).toEqual([1024, 512]); result?.release();
+  });
+
   it('rejects Region Fit when capture origins do not match', () => {
     const { project, styledPanoId, grayboxPanoId } = buildProject(); const styled = project.panoRefs.find((pano) => pano.id === styledPanoId)!; styled.origin = [0.3, 1.6, 0];
     const points: [number, number][] = [[0.45, 0.45], [0.55, 0.45], [0.55, 0.55]];

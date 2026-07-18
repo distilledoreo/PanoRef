@@ -37,6 +37,7 @@ export function completeTargetPolygon(draft: ProjectionRegionDraft, points: Vec2
   pendingRegion.order = draft.regions.length;
   return update(draft, { ...draft, pendingRegion, activeRegionId: pendingRegion.id, step: 'adjust-source' });
 }
+export function markTargetRegionDraftStarted(draft: ProjectionRegionDraft): ProjectionRegionDraft { return draft.step === 'draw-target' ? draft : update(draft, { ...draft, step: 'draw-target' }); }
 export const moveSourceVertex = (draft: ProjectionRegionDraft, regionId: string, vertexId: string, sourceUv: Vec2) => mapRegion(draft, regionId, (region) => ({ ...region, vertices: region.vertices.map((vertex) => vertex.id === vertexId ? { ...vertex, sourceUv: [...sourceUv] } : vertex) }));
 export const moveTargetVertex = (draft: ProjectionRegionDraft, regionId: string, vertexId: string, targetUv: Vec2) => mapRegion(draft, regionId, (region) => ({ ...region, vertices: region.vertices.map((vertex) => vertex.id === vertexId ? { ...vertex, targetUv: [...targetUv] } : vertex) }));
 export const translateSourceRegion = (draft: ProjectionRegionDraft, regionId: string, delta: Vec2) => mapRegion(draft, regionId, (region) => translateSourceMask(region, delta));

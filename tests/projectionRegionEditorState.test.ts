@@ -3,7 +3,7 @@ import {
   cancelPendingRegion, commitPendingRegion, completeTargetPolygon, createProjectionRegionDraft,
   draftToProjectionRegionAlignment, insertRegionVertexPair, isProjectionRegionDraftDirty,
   moveRegionDown, moveRegionUp, moveSourceVertex, removeRegion, removeRegionVertexPair,
-  renameRegion, replaceTargetPolygon, rotateSourceRegion, scaleSourceRegion, setRegionEdgeSoftness,
+  renameRegion, replaceTargetPolygon, resetSourceRegion, rotateSourceRegion, scaleSourceRegion, setRegionEdgeSoftness,
   setRegionStrength, toggleRegion, translateSourceRegion, undoRegionAction,
 } from '../src/components/reference/projectionRegionEditorState';
 
@@ -28,6 +28,8 @@ describe('Projection Region editor draft', () => {
     draft = rotateSourceRegion(draft, id, Math.PI / 4);
     expect(draft.pendingRegion!.vertices[0].sourceUv).not.toEqual(draft.pendingRegion!.vertices[0].targetUv);
     expect(draft.pendingRegion!.vertices[0].targetUv).toEqual([0.2, 0.2]);
+    draft = resetSourceRegion(draft, id);
+    expect(draft.pendingRegion!.vertices.map((item) => item.sourceUv)).toEqual(outline);
   });
 
   it('inserts and removes shared topology without dropping below three', () => {

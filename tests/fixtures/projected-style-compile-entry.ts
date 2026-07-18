@@ -692,6 +692,13 @@ function tryWarpTests(
   r = renderWith(m); m.dispose();
   if (r.ok && r.r > ref.r + THRESHOLD && r.b < ref.b - THRESHOLD) push('region_fit_precedence_and_weight', r);
   else push('region_fit_precedence_and_weight', { ...r, ok: false, error: r.error ?? 'Region Fit did not override legacy correction.' });
+  const regionFull = { r: r.r, g: r.g, b: r.b };
+  m = createProjectedStyleMaterial({ texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true, regionWarpMap: puWarp, regionWeightMap: regionWeight, regionWarpMapSize: [1, 1], regionStrength: 0 });
+  r = renderWith(m); m.dispose();
+  if (r.ok && closeChan(r, ref)) push('region_fit_strength_0', r); else push('region_fit_strength_0', { ...r, ok: false, error: r.error ?? 'Zero Region Fit strength changed the sample.' });
+  m = createProjectedStyleMaterial({ texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true, regionWarpMap: puWarp, regionWeightMap: regionWeight, regionWarpMapSize: [1, 1], regionStrength: 0.5 });
+  r = renderWith(m); m.dispose();
+  if (r.ok && between(r.r, ref.r, regionFull.r) && between(r.b, ref.b, regionFull.b) && diffFrom(r, ref) && diffFrom(r, regionFull)) push('region_fit_strength_50', r); else push('region_fit_strength_50', { ...r, ok: false, error: r.error ?? 'Half Region Fit strength was not between before and after.' });
   regionWeight.dispose(); idWarp.dispose(); puWarp.dispose(); nuWarp.dispose();
 
   return results;
