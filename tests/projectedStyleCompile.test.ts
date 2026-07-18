@@ -19,7 +19,7 @@ describe('projected style WebGL compile gate', () => {
     );
     expect(materials).not.toMatch(/material\.specularIntensity\s*\*=/);
     expect(materials).not.toMatch(/#include\s*<lights_physical_fragment>/);
-    expect(materials).toContain('projected-style-v5');
+    expect(materials).toContain('projected-style');
     expect(materials).toContain('#include <aomap_fragment>');
     expect(materials).toContain('#include <color_fragment>');
   });
@@ -99,7 +99,7 @@ describe('projected style WebGL compile gate', () => {
       expect(result.lightingCases.every((c) => c.ok)).toBe(true);
       expect(result.dualCases).toHaveLength(4);
       expect(result.dualCases.every((c) => c.ok)).toBe(true);
-      expect(result.warpCases).toHaveLength(5);
+      expect(result.warpCases).toHaveLength(12);
       expect(result.warpCases.every((c) => c.ok)).toBe(true);
 
       // Verify pixel readback for each dual mode

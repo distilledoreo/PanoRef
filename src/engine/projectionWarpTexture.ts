@@ -7,10 +7,17 @@ const DELTA_U_MAX = 0.5;
 const DELTA_V_MIN = -1.0;
 const DELTA_V_MAX = 1.0;
 
+export interface WarpDiagnostics {
+  maxMarkerErrorRadians: number;
+  conflictCount: number;
+  maximumRotationRadians: number;
+}
+
 interface WarpCacheEntry {
   texture: THREE.DataTexture;
   refCount: number;
   key: string;
+  diagnostics?: WarpDiagnostics;
 }
 
 const warpCache = new Map<string, WarpCacheEntry>();
@@ -55,6 +62,7 @@ export interface WarpTextureResult {
   width: number;
   height: number;
   release: () => void;
+  diagnostics?: WarpDiagnostics;
 }
 
 /** Options for acquiring a projection warp texture. */
@@ -71,6 +79,7 @@ function createTextureFromDisplacement(
   displacement: Float32Array,
   width: number,
   height: number,
+  diagnostics?: WarpDiagnostics,
 ): WarpTextureResult {
   const pixelCount = width * height;
   const data = new Uint8Array(pixelCount * 4);
@@ -96,7 +105,7 @@ function createTextureFromDisplacement(
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
 
-  const entry: WarpCacheEntry = { texture, refCount: 1, key };
+  const entry: WarpCacheEntry = { texture, refCount: 1, key, diagnostics };
   warpCache.set(key, entry);
 
   return {
@@ -104,6 +113,7 @@ function createTextureFromDisplacement(
     width,
     height,
     release: makeRelease(key),
+    diagnostics,
   };
 }
 
@@ -116,6 +126,7 @@ function cachedWarpResult(key: string, width: number, height: number): WarpTextu
     width,
     height,
     release: makeRelease(key),
+    diagnostics: existing.diagnostics,
   };
 }
 
@@ -134,7 +145,12 @@ export function acquireProjectionWarpTexture(
   if (cached) return cached;
 
   const field = solveProjectionWarp(alignment, { sourceYawRadians, targetYawRadians, width, height });
-  return createTextureFromDisplacement(key, field.displacement, width, height);
+  const diagnostics: WarpDiagnostics = {
+    maxMarkerErrorRadians: field.maxMarkerErrorRadians,
+    conflictCount: field.conflictCount,
+    maximumRotationRadians: field.maximumRotationRadians,
+  };
+  return createTextureFromDisplacement(key, field.displacement, width, height, diagnostics);
 }
 
 /** Create a warp texture from a pre-computed displacement array (bypasses solver). */
@@ -211,6 +227,10 @@ export function disposeAllProjectionWarpTextures(): void {
     entry.texture.dispose();
   }
   warpCache.clear();
+  if (identityTexture.texture) {
+    identityTexture.texture.dispose();
+    identityTexture.texture = null;
+  }
 }
 
 const identityTexture: { texture: THREE.DataTexture | null } = { texture: null };

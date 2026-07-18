@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { ProjectionAlignment } from '../src/domain/types';
 import {
   solveProjectionWarp,
+  computeResidualToleranceRadians,
   ProjectionWarpField,
 } from '../src/engine/projectionAlignmentSolver';
 
 const DEG = Math.PI / 180;
+const EPSILON = 1e-7;
 
 function makePair(overrides?: Record<string, unknown>) {
   return {
@@ -70,7 +72,8 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
+    const tolerance = computeResidualToleranceRadians(result.width, result.height);
+    expect(result.maxMarkerErrorRadians).toBeLessThanOrEqual(tolerance + EPSILON);
   }, 30000);
 
   it('several markers reach their targets', () => {
@@ -84,7 +87,8 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
+    const tolerance = computeResidualToleranceRadians(result.width, result.height);
+    expect(result.maxMarkerErrorRadians).toBeLessThanOrEqual(tolerance + EPSILON);
   }, 30000);
 
   it('separate regions remain locally independent', () => {
@@ -98,7 +102,8 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
+    const tolerance = computeResidualToleranceRadians(result.width, result.height);
+    expect(result.maxMarkerErrorRadians).toBeLessThanOrEqual(tolerance + EPSILON);
   }, 30000);
 
   it('distant regions stay near identity', () => {
@@ -120,7 +125,8 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(4 * DEG);
+    const tolerance = computeResidualToleranceRadians(result.width, result.height);
+    expect(result.maxMarkerErrorRadians).toBeLessThanOrEqual(tolerance + EPSILON);
   }, 30000);
 
   it('different source and target yaws work', () => {
@@ -131,7 +137,8 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 30 * DEG,
       sourceYawRadians: 10 * DEG,
     });
-    expect(result.maxMarkerErrorRadians).toBeLessThan(4 * DEG);
+    const tolerance = computeResidualToleranceRadians(result.width, result.height);
+    expect(result.maxMarkerErrorRadians).toBeLessThanOrEqual(tolerance + EPSILON);
   }, 30000);
 
   it('conflict detection works', () => {
@@ -145,7 +152,7 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(result.conflictCount).toBeGreaterThan(0);
+    expect(result.conflictCount).toBe(1);
   }, 30000);
 
   it('disabled markers are ignored', () => {
@@ -212,7 +219,9 @@ describe('solveProjectionWarp', () => {
       targetYawRadians: 0,
       sourceYawRadians: 0,
     });
-    expect(resultSmall.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
-    expect(resultLarge.maxMarkerErrorRadians).toBeLessThan(3 * DEG);
+    const toleranceSmall = computeResidualToleranceRadians(resultSmall.width, resultSmall.height);
+    const toleranceLarge = computeResidualToleranceRadians(resultLarge.width, resultLarge.height);
+    expect(resultSmall.maxMarkerErrorRadians).toBeLessThanOrEqual(toleranceSmall + EPSILON);
+    expect(resultLarge.maxMarkerErrorRadians).toBeLessThanOrEqual(toleranceLarge + EPSILON);
   }, 30000);
 });

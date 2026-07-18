@@ -25,7 +25,7 @@ const STALL_IMPROVEMENT_RATIO = 0.05;
 const MAX_ROTATION_RADIANS = 35 * DEG;
 const IDENTITY_ANCHOR_WEIGHT = 0.06;
 
-function computeResidualToleranceRadians(width: number, height: number): number {
+export function computeResidualToleranceRadians(width: number, height: number): number {
   // Per-texel angular step: equirect horizontal is 2π/width, vertical π/height.
   const horizontalStep = (2 * Math.PI) / width;
   const verticalStep = Math.PI / height;

@@ -420,9 +420,7 @@ if (projectedLighting <= 0.001) {
       );
   };
 
-  material.customProgramCacheKey = () => (
-    `projected-style-v5:${params.settings.fallbackMode}:${hasSecondary ? 'dual' : 'single'}:${params.disposable ? 'd' : 's'}:w${hasWarp ? '1' : '0'}${hasWarpB ? '1' : '0'}`
-  );
+  material.customProgramCacheKey = () => 'projected-style';
 
   (material as THREE.MeshStandardMaterial & { userData: Record<string, unknown> }).userData.projectedStyle = true;
   (material as THREE.MeshStandardMaterial & { userData: Record<string, unknown> }).userData.disposableProjected = Boolean(params.disposable);

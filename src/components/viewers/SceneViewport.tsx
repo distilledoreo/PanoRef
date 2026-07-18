@@ -14,6 +14,7 @@ import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../e
 import {
   resolveProjectedProjectorAssets,
   resolveProjectionWarpWithStrengthForProject,
+  type ResolvedWarpWithStrength,
 } from '../../engine/multiOriginProjection';
 import {
   computeProjectedAppearanceState,
@@ -1464,22 +1465,39 @@ export function SceneViewport({
     // Use the project-aware resolver that returns both the warp texture and
     // the saved alignment strength in one call, replacing the deprecated
     // settings-only resolver and the separate manual strength lookups.
-    const primaryResolved = projectedActive && projectedTexture && projectedPano
-      ? resolveProjectionWarpWithStrengthForProject(project, projectedPano.id, 'runtime')
-      : undefined;
-    const secondaryResolved = dualActive && projectedSecondary
-      ? resolveProjectionWarpWithStrengthForProject(project, projectedSecondary.id, 'runtime')
-      : undefined;
+    // Wrap acquisition in try/catch so a thrown resolver does not leak newly
+    // acquired resources — both warps are released if anything fails before
+    // the successful commit point.
+    let nextPrimary: ResolvedWarpWithStrength | undefined;
+    let nextSecondary: ResolvedWarpWithStrength | undefined;
+    try {
+      nextPrimary = projectedActive && projectedTexture && projectedPano
+        ? resolveProjectionWarpWithStrengthForProject(project, projectedPano.id, 'runtime')
+        : undefined;
+      nextSecondary = dualActive && projectedSecondary
+        ? resolveProjectionWarpWithStrengthForProject(project, projectedSecondary.id, 'runtime')
+        : undefined;
+    } catch (error) {
+      // Release anything that was successfully acquired before the throw.
+      nextPrimary?.warp.release();
+      nextSecondary?.warp.release();
+      oldPrimaryWarp?.release();
+      oldSecondaryWarp?.release();
+      throw error;
+    }
 
-    primaryWarpRef.current = primaryResolved?.warp;
-    secondaryWarpRef.current = secondaryResolved?.warp;
+    primaryWarpRef.current = nextPrimary?.warp;
+    secondaryWarpRef.current = nextSecondary?.warp;
 
     oldPrimaryWarp?.release();
     oldSecondaryWarp?.release();
 
-    const primaryStrength = primaryResolved?.strength;
-    const secondaryStrength = secondaryResolved?.strength;
+    const primaryStrength = nextPrimary?.strength;
+    const secondaryStrength = nextSecondary?.strength;
 
+    // Wrap the commit phase so a buildScene failure releases the newly acquired
+    // warps before the error propagates out of the effect.
+    try {
     sceneRef.current = buildScene(project, {
       selectedShotId,
       hideShotFrustums: Boolean(shotFraming) || !showSceneGuides,
@@ -1512,6 +1530,13 @@ export function SceneViewport({
         }
         : undefined,
     });
+    } catch (error) {
+      // buildScene failed — release the newly acquired warps; old refs were
+      // already released so the effect is in a clean state.
+      nextPrimary?.warp.release();
+      nextSecondary?.warp.release();
+      throw error;
+    }
     if (previewPointRef.current && placementTypeRef.current) {
       updatePreviewMesh(previewPointRef.current);
     }

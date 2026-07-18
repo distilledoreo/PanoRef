@@ -201,24 +201,75 @@ function makeWarpDataTexture(width: number, height: number, du: number, dv: numb
   return texture;
 }
 
+function makeCheckerWarpTexture(width: number, height: number, cellSize: number): THREE.DataTexture {
+  const pixelCount = width * height;
+  const data = new Uint8Array(pixelCount * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      const cx = Math.floor(x / cellSize);
+      const cy = Math.floor(y / cellSize);
+      const du = ((cx + cy) % 2 === 0) ? 0.1 : -0.1;
+      const encodedU = Math.round(((du + 0.5) / 1) * 65535);
+      data[i * 4] = encodedU >> 8;
+      data[i * 4 + 1] = encodedU & 0xff;
+      data[i * 4 + 2] = 128;
+      data[i * 4 + 3] = 0;
+    }
+  }
+  const texture = new THREE.DataTexture(data, width, height);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function makeVerticalGradientTexture(height: number): THREE.DataTexture {
+  const data = new Uint8Array(1 * height * 4);
+  for (let y = 0; y < height; y++) {
+    const v = Math.round((y / (height - 1)) * 255);
+    data[y * 4] = 255 - v;
+    data[y * 4 + 1] = 0;
+    data[y * 4 + 2] = v;
+    data[y * 4 + 3] = 255;
+  }
+  const tex = new THREE.DataTexture(data, 1, height);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 function tryWarpTests(
   renderer: THREE.WebGLRenderer,
 ): Array<{ name: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }> {
-  // Use a horizontal-gradient pano so that a u-shift changes the sampled pixel.
-  const gradSize = 32;
-  const gradData = new Uint8Array(gradSize * 4 * 4); // 4 wide × 1 tall RGBA
-  for (let x = 0; x < 4; x++) {
-    const v = Math.round((x / 3) * 255);
-    gradData[x * 4] = v;
-    gradData[x * 4 + 1] = 0;
-    gradData[x * 4 + 2] = 255 - v;
-    gradData[x * 4 + 3] = 255;
+  const THRESHOLD = 5;
+
+  // Wide horizontal gradient pano (256 wide, blue→red) for U-shift tests.
+  const hGradSize = 256;
+  const hGradData = new Uint8Array(hGradSize * 1 * 4);
+  for (let x = 0; x < hGradSize; x++) {
+    const v = Math.round((x / (hGradSize - 1)) * 255);
+    hGradData[x * 4] = v;
+    hGradData[x * 4 + 1] = 0;
+    hGradData[x * 4 + 2] = 255 - v;
+    hGradData[x * 4 + 3] = 255;
   }
-  const panoTex = new THREE.DataTexture(gradData, 4, 1);
-  panoTex.colorSpace = THREE.SRGBColorSpace;
-  panoTex.wrapS = THREE.RepeatWrapping;
-  panoTex.wrapT = THREE.ClampToEdgeWrapping;
-  panoTex.needsUpdate = true;
+  const hGradTex = new THREE.DataTexture(hGradData, hGradSize, 1);
+  hGradTex.colorSpace = THREE.SRGBColorSpace;
+  hGradTex.wrapS = THREE.RepeatWrapping;
+  hGradTex.wrapT = THREE.ClampToEdgeWrapping;
+  hGradTex.minFilter = THREE.LinearFilter;
+  hGradTex.magFilter = THREE.LinearFilter;
+  hGradTex.needsUpdate = true;
+
+  // Tall vertical gradient pano (256 tall, top=blue, bottom=red) for V-shift tests.
+  const vGradTex = makeVerticalGradientTexture(256);
 
   const origin: [number, number, number] = [0, 1.6, 0];
   const settings: ProjectedStyleSettings = {
@@ -229,144 +280,282 @@ function tryWarpTests(
   const boxPos: [number, number, number] = [0.5, 1.6, 0.5];
   const camPos: [number, number, number] = [-2, 2.6, 5];
 
-  // Reference: no warp
-  const matNoWarp = createProjectedStyleMaterial({
-    texture: panoTex,
-    origin,
-    rotation: [0, 0, 0],
-    settings,
-    fallbackColor: 0x888888,
-    disposable: true,
-  });
-  const refRes = renderAndReadPixel(renderer, matNoWarp, boxPos, camPos);
-  matNoWarp.dispose();
-
-  if (!refRes.ok) {
-    panoTex.dispose();
-    return [{ name: 'warp reference', ok: false, detail: refRes.error }];
+  function renderWith(mat: THREE.MeshStandardMaterial): { r: number; g: number; b: number; ok: boolean; error?: string } {
+    return renderAndReadPixel(renderer, mat, boxPos, camPos);
   }
 
   const results: Array<{ name: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }> = [];
-  const refR = refRes.r;
-  const refG = refRes.g;
-  const refB = refRes.b;
 
-  // Identity warp (du=0, dv=0) with strength 1 → same as no-warp
-  const identityWarp = makeWarpDataTexture(1, 1, 0, 0);
-  const matIdWarp = createProjectedStyleMaterial({
-    texture: panoTex,
-    origin,
-    rotation: [0, 0, 0],
-    settings,
-    fallbackColor: 0x888888,
-    disposable: true,
-    warpMap: identityWarp,
-    warpMapSize: [1, 1],
-    warpStrength: 1,
-  });
-  const idRes = renderAndReadPixel(renderer, matIdWarp, boxPos, camPos);
-  matIdWarp.dispose();
-  identityWarp.dispose();
-
-  if (idRes.ok && Math.abs(idRes.r - refR) <= 5 && Math.abs(idRes.g - refG) <= 5 && Math.abs(idRes.b - refB) <= 5) {
-    results.push({ name: 'identity_warp_strength_1', ok: true, pixelR: idRes.r, pixelG: idRes.g, pixelB: idRes.b });
-  } else {
-    results.push({ name: 'identity_warp_strength_1', ok: false, detail: idRes.error ?? `pixel mismatch: ref=(${refR},${refG},${refB}) got=(${idRes.r},${idRes.g},${idRes.b})`, pixelR: idRes.r, pixelG: idRes.g, pixelB: idRes.b });
+  function push(name: string, res: { r: number; g: number; b: number; ok: boolean; error?: string }) {
+    results.push({ name, ok: res.ok, detail: res.error, pixelR: res.r, pixelG: res.g, pixelB: res.b });
+  }
+  function closeTo(a: number, b: number): boolean { return Math.abs(a - b) <= THRESHOLD; }
+  function closeChan(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): boolean {
+    return closeTo(a.r, b.r) && closeTo(a.g, b.g) && closeTo(a.b, b.b);
+  }
+  function diffFrom(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): boolean {
+    return !closeTo(a.r, b.r) || !closeTo(a.g, b.g) || !closeTo(a.b, b.b);
+  }
+  function between(v: number, lo: number, hi: number): boolean {
+    return v >= Math.min(lo, hi) - THRESHOLD && v <= Math.max(lo, hi) + THRESHOLD;
   }
 
-  // Identity warp with strength 0 → same as no-warp
-  const matIdWarp0 = createProjectedStyleMaterial({
-    texture: panoTex,
-    origin,
-    rotation: [0, 0, 0],
-    settings,
-    fallbackColor: 0x888888,
-    disposable: true,
-    warpMap: identityWarp,
-    warpMapSize: [1, 1],
-    warpStrength: 0,
+  // ── Reference (no warp) on horizontal gradient ──
+  const refMat = createProjectedStyleMaterial({
+    texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
   });
-  const id0Res = renderAndReadPixel(renderer, matIdWarp0, boxPos, camPos);
-  matIdWarp0.dispose();
+  const refRes = renderWith(refMat);
+  refMat.dispose();
+  if (!refRes.ok) { hGradTex.dispose(); vGradTex.dispose(); return [{ name: 'warp_reference', ok: false, detail: refRes.error }]; }
+  const ref = { r: refRes.r, g: refRes.g, b: refRes.b };
 
-  if (id0Res.ok && Math.abs(id0Res.r - refR) <= 5 && Math.abs(id0Res.g - refG) <= 5 && Math.abs(id0Res.b - refB) <= 5) {
-    results.push({ name: 'identity_warp_strength_0', ok: true, pixelR: id0Res.r, pixelG: id0Res.g, pixelB: id0Res.b });
+  // ── Identity (du=0, dv=0) strength 1 => same as ref ──
+  const idWarp = makeWarpDataTexture(1, 1, 0, 0);
+  let m = createProjectedStyleMaterial({
+    texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+    warpMap: idWarp, warpMapSize: [1, 1], warpStrength: 1,
+  });
+  let r = renderWith(m); m.dispose();
+  if (r.ok && closeChan(r, ref)) push('identity_warp_strength_1', r);
+  else push('identity_warp_strength_1', { ...r, ok: false, error: r.error ?? `pixel mismatch: ref=(${ref.r},${ref.g},${ref.b}) got=(${r.r},${r.g},${r.b})` });
+
+  // ── Identity warp strength 0 => same as ref ──
+  m = createProjectedStyleMaterial({
+    texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+    warpMap: idWarp, warpMapSize: [1, 1], warpStrength: 0,
+  });
+  r = renderWith(m); m.dispose();
+  if (r.ok && closeChan(r, ref)) push('identity_warp_strength_0', r);
+  else push('identity_warp_strength_0', { ...r, ok: false, error: r.error ?? `pixel mismatch: ref=(${ref.r},${ref.g},${ref.b}) got=(${r.r},${r.g},${r.b})` });
+
+  // ── Positive U (du=0.25) with strength 1 => differs from ref ──
+  const puWarp = makeWarpDataTexture(1, 1, 0.25, 0);
+  m = createProjectedStyleMaterial({
+    texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+    warpMap: puWarp, warpMapSize: [1, 1], warpStrength: 1,
+  });
+  r = renderWith(m); m.dispose();
+  if (r.ok && diffFrom(r, ref)) push('positive_u_shift', r);
+  else if (r.ok) push('positive_u_shift', { ...r, ok: false, error: `warp did not shift: ref=(${ref.r},${ref.g},${ref.b}) got=(${r.r},${r.g},${r.b})` });
+  else push('positive_u_shift', r);
+
+  // ── Negative U (du=-0.25) with strength 1 => differs from ref ──
+  const nuWarp = makeWarpDataTexture(1, 1, -0.25, 0);
+  m = createProjectedStyleMaterial({
+    texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+    warpMap: nuWarp, warpMapSize: [1, 1], warpStrength: 1,
+  });
+  r = renderWith(m); m.dispose();
+  if (r.ok && diffFrom(r, ref)) push('negative_u_shift', r);
+  else if (r.ok) push('negative_u_shift', { ...r, ok: false, error: `negative U did not shift: ref=(${ref.r},${ref.g},${ref.b}) got=(${r.r},${r.g},${r.b})` });
+  else push('negative_u_shift', r);
+
+  // ── Positive U shift with strength 0 => same as ref ──
+  m = createProjectedStyleMaterial({
+    texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+    warpMap: puWarp, warpMapSize: [1, 1], warpStrength: 0,
+  });
+  r = renderWith(m); m.dispose();
+  if (r.ok && closeChan(r, ref)) push('positive_u_shift_strength_0', r);
+  else push('positive_u_shift_strength_0', { ...r, ok: false, error: r.error ?? `pixel mismatch: ref=(${ref.r},${ref.g},${ref.b}) got=(${r.r},${r.g},${r.b})` });
+
+  // ── Positive U shift with strength 0.5 => between ref and full ──
+  // Re-render full shift for comparison
+  m = createProjectedStyleMaterial({
+    texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+    warpMap: puWarp, warpMapSize: [1, 1], warpStrength: 1,
+  });
+  const fullRes = renderWith(m); m.dispose();
+  m = createProjectedStyleMaterial({
+    texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+    warpMap: puWarp, warpMapSize: [1, 1], warpStrength: 0.5,
+  });
+  r = renderWith(m); m.dispose();
+  if (r.ok && fullRes.ok) {
+    const rOk = between(r.r, ref.r, fullRes.r) && between(r.g, ref.g, fullRes.g) && between(r.b, ref.b, fullRes.b);
+    const notExtreme = diffFrom(r, ref) && diffFrom(r, fullRes);
+    push('positive_u_shift_strength_0.5', { ...r, ok: rOk && notExtreme,
+      error: !rOk ? `not between ref(${ref.r},${ref.g},${ref.b}) and full(${fullRes.r},${fullRes.g},${fullRes.b}): got(${r.r},${r.g},${r.b})` : !notExtreme ? 'matches an extreme' : undefined });
   } else {
-    results.push({ name: 'identity_warp_strength_0', ok: false, detail: id0Res.error ?? `pixel mismatch: ref=(${refR},${refG},${refB}) got=(${id0Res.r},${id0Res.g},${id0Res.b})`, pixelR: id0Res.r, pixelG: id0Res.g, pixelB: id0Res.b });
+    push('positive_u_shift_strength_0.5', { ...r, ok: false, error: r.error ?? fullRes.error ?? 'full shift render failed' });
   }
 
-  // Non-zero shift warp with strength 1 → should differ from no-warp
-  const shiftWarp = makeWarpDataTexture(1, 1, 0.25, 0);
-  const matShift = createProjectedStyleMaterial({
-    texture: panoTex,
-    origin,
-    rotation: [0, 0, 0],
-    settings,
-    fallbackColor: 0x888888,
-    disposable: true,
-    warpMap: shiftWarp,
-    warpMapSize: [1, 1],
-    warpStrength: 1,
+  // ── V shift tests use the vertical gradient ──
+  // Reference on vertical gradient
+  const vRefMat = createProjectedStyleMaterial({
+    texture: vGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
   });
-  const shiftRes = renderAndReadPixel(renderer, matShift, boxPos, camPos);
-  matShift.dispose();
-
-  if (shiftRes.ok && (Math.abs(shiftRes.r - refR) > 5 || Math.abs(shiftRes.g - refG) > 5 || Math.abs(shiftRes.b - refB) > 5)) {
-    results.push({ name: 'nonzero_shift_warp_strength_1', ok: true, pixelR: shiftRes.r, pixelG: shiftRes.g, pixelB: shiftRes.b });
-  } else if (shiftRes.ok) {
-    results.push({ name: 'nonzero_shift_warp_strength_1', ok: false, detail: `warp did not shift pixel: ref=(${refR},${refG},${refB}) got=(${shiftRes.r},${shiftRes.g},${shiftRes.b})`, pixelR: shiftRes.r, pixelG: shiftRes.g, pixelB: shiftRes.b });
+  const vRefRes = renderWith(vRefMat);
+  vRefMat.dispose();
+  if (!vRefRes.ok) {
+    results.push({ name: 'positive_v_shift', ok: false, detail: vRefRes.error, pixelR: 0, pixelG: 0, pixelB: 0 });
+    results.push({ name: 'negative_v_shift', ok: false, detail: vRefRes.error, pixelR: 0, pixelG: 0, pixelB: 0 });
+    results.push({ name: 'vertical_clamping', ok: false, detail: vRefRes.error, pixelR: 0, pixelG: 0, pixelB: 0 });
   } else {
-    results.push({ name: 'nonzero_shift_warp_strength_1', ok: false, detail: shiftRes.error, pixelR: shiftRes.r, pixelG: shiftRes.g, pixelB: shiftRes.b });
+    const vRef = { r: vRefRes.r, g: vRefRes.g, b: vRefRes.b };
+
+    // Positive V shift (dv=0.25) => closer to bottom (red)
+    const pvWarp = makeWarpDataTexture(1, 1, 0, 0.25);
+    m = createProjectedStyleMaterial({
+      texture: vGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+      warpMap: pvWarp, warpMapSize: [1, 1], warpStrength: 1,
+    });
+    r = renderWith(m); m.dispose();
+    if (r.ok && diffFrom(r, vRef)) push('positive_v_shift', r);
+    else if (r.ok) push('positive_v_shift', { ...r, ok: false, error: `V shift (dv=0.25) did not change: ref=(${vRef.r},${vRef.g},${vRef.b}) got=(${r.r},${r.g},${r.b})` });
+    else push('positive_v_shift', r);
+
+    // Negative V shift (dv=-0.25) => closer to top (blue)
+    const nvWarp = makeWarpDataTexture(1, 1, 0, -0.25);
+    m = createProjectedStyleMaterial({
+      texture: vGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+      warpMap: nvWarp, warpMapSize: [1, 1], warpStrength: 1,
+    });
+    r = renderWith(m); m.dispose();
+    if (r.ok && diffFrom(r, vRef)) push('negative_v_shift', r);
+    else if (r.ok) push('negative_v_shift', { ...r, ok: false, error: `negative V shift (dv=-0.25) did not change: ref=(${vRef.r},${vRef.g},${vRef.b}) got=(${r.r},${r.g},${r.b})` });
+    else push('negative_v_shift', r);
+
+    // Vertical clamping: dv=1.0 => clamped to bottom (red)
+    const cvWarp = makeWarpDataTexture(1, 1, 0, 1.0);
+    m = createProjectedStyleMaterial({
+      texture: vGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+      warpMap: cvWarp, warpMapSize: [1, 1], warpStrength: 1,
+    });
+    r = renderWith(m); m.dispose();
+    if (r.ok && diffFrom(r, vRef)) push('vertical_clamping', r);
+    else if (r.ok) push('vertical_clamping', { ...r, ok: false, error: `V=1.0 clamping same: ref=(${vRef.r},${vRef.g},${vRef.b}) got=(${r.r},${r.g},${r.b})` });
+    else push('vertical_clamping', r);
+
+    pvWarp.dispose(); nvWarp.dispose(); cvWarp.dispose();
   }
 
-  // Non-zero shift warp with strength 0 → same as no-warp
-  const matShift0 = createProjectedStyleMaterial({
-    texture: panoTex,
-    origin,
-    rotation: [0, 0, 0],
-    settings,
-    fallbackColor: 0x888888,
-    disposable: true,
-    warpMap: shiftWarp,
-    warpMapSize: [1, 1],
-    warpStrength: 0,
-  });
-  const shift0Res = renderAndReadPixel(renderer, matShift0, boxPos, camPos);
-  matShift0.dispose();
-
-  if (shift0Res.ok && Math.abs(shift0Res.r - refR) <= 5 && Math.abs(shift0Res.g - refG) <= 5 && Math.abs(shift0Res.b - refB) <= 5) {
-    results.push({ name: 'nonzero_shift_warp_strength_0', ok: true, pixelR: shift0Res.r, pixelG: shift0Res.g, pixelB: shift0Res.b });
-  } else {
-    results.push({ name: 'nonzero_shift_warp_strength_0', ok: false, detail: shift0Res.error ?? `pixel mismatch: ref=(${refR},${refG},${refB}) got=(${shift0Res.r},${shift0Res.g},${shift0Res.b})`, pixelR: shift0Res.r, pixelG: shift0Res.g, pixelB: shift0Res.b });
+  // ── Horizontal seam wrapping ──
+  // Split pano: left half blue, right half red; Nearest filtering to keep boundary sharp.
+  const splitW = 64;
+  const splitData = new Uint8Array(splitW * 1 * 4);
+  for (let x = 0; x < splitW; x++) {
+    splitData[x * 4] = x < splitW / 2 ? 0 : 255;
+    splitData[x * 4 + 1] = 0;
+    splitData[x * 4 + 2] = x < splitW / 2 ? 255 : 0;
+    splitData[x * 4 + 3] = 255;
   }
+  const splitTex = new THREE.DataTexture(splitData, splitW, 1);
+  splitTex.colorSpace = THREE.SRGBColorSpace;
+  splitTex.wrapS = THREE.RepeatWrapping;
+  splitTex.wrapT = THREE.ClampToEdgeWrapping;
+  splitTex.minFilter = THREE.NearestFilter;
+  splitTex.magFilter = THREE.NearestFilter;
+  splitTex.needsUpdate = true;
 
-  // Non-zero shift warp with strength 0.5: verify the warp path stays active
-  // at an intermediate strength value (pixel should match ref or full).
-  const matShiftHalf = createProjectedStyleMaterial({
-    texture: panoTex,
-    origin,
-    rotation: [0, 0, 0],
-    settings,
-    fallbackColor: 0x888888,
-    disposable: true,
-    warpMap: shiftWarp,
-    warpMapSize: [1, 1],
-    warpStrength: 0.5,
+  // Box at (+Z) samples near u=0.5 (blue/red boundary in split texture).
+  const sp = { box: [0, 1.6, 1] as [number, number, number], cam: [-2, 2.6, 5] as [number, number, number] };
+  const spRefMat = createProjectedStyleMaterial({
+    texture: splitTex, origin, rotation: [0, 0, 0], settings: { ...settings, blendMode: 'primary_only' }, fallbackColor: 0x888888, disposable: true,
   });
-  const shiftHalfRes = renderAndReadPixel(renderer, matShiftHalf, boxPos, camPos);
-  matShiftHalf.dispose();
+  const spRef = renderAndReadPixel(renderer, spRefMat, sp.box, sp.cam);
+  spRefMat.dispose();
 
-  if (shiftHalfRes.ok) {
-    const matchesRef = Math.abs(shiftHalfRes.r - refR) <= 5 && Math.abs(shiftHalfRes.g - refG) <= 5 && Math.abs(shiftHalfRes.b - refB) <= 5;
-    const matchesFull = Math.abs(shiftHalfRes.r - shiftRes.r) <= 5 && Math.abs(shiftHalfRes.g - shiftRes.g) <= 5 && Math.abs(shiftHalfRes.b - shiftRes.b) <= 5;
-    results.push({ name: 'nonzero_shift_warp_strength_0.5', ok: matchesRef || matchesFull, pixelR: shiftHalfRes.r, pixelG: shiftHalfRes.g, pixelB: shiftHalfRes.b });
+  if (spRef.ok) {
+    const sr = { r: spRef.r, g: spRef.g, b: spRef.b };
+    // Shift du=0.5 wraps u=0.5→u=0.0 crossing the seam (blue/red boundary).
+    const seamWarp = makeWarpDataTexture(1, 1, 0.5, 0);
+    m = createProjectedStyleMaterial({
+      texture: splitTex, origin, rotation: [0, 0, 0], settings: { ...settings, blendMode: 'primary_only' }, fallbackColor: 0x888888, disposable: true,
+      warpMap: seamWarp, warpMapSize: [1, 1], warpStrength: 1,
+    });
+    r = renderAndReadPixel(renderer, m, sp.box, sp.cam);
+    m.dispose(); seamWarp.dispose();
+    if (r.ok && diffFrom(r, sr)) push('horizontal_seam_wrap', r);
+    else if (r.ok) push('horizontal_seam_wrap', { ...r, ok: false, error: `seam wrap unchanged: ref=(${sr.r},${sr.g},${sr.b}) got=(${r.r},${r.g},${r.b})` });
+    else push('horizontal_seam_wrap', r);
   } else {
-    results.push({ name: 'nonzero_shift_warp_strength_0.5', ok: false, detail: shiftHalfRes.error, pixelR: shiftHalfRes.r, pixelG: shiftHalfRes.g, pixelB: shiftHalfRes.b });
+    results.push({ name: 'horizontal_seam_wrap', ok: false, detail: spRef.error, pixelR: 0, pixelG: 0, pixelB: 0 });
   }
+  splitTex.dispose();
 
-  panoTex.dispose();
-  identityWarp.dispose();
-  shiftWarp.dispose();
+  // ── Primary warp independence ──
+  // Primary: horizontal gradient. Secondary: solid green. Blend: primary_dominant.
+  // Warping primary should change the output.
+  const priGrad = hGradTex;
+  const secSolid = makeSolidDataTexture(0, 255, 0);
+  const so: [number, number, number] = [10, 1.6, 0];
+  const dualS: ProjectedStyleSettings = { ...defaultProjectedStyleSettings, lightingContribution: 0, blendMode: 'primary_dominant' };
+
+  const piIdWarp = makeWarpDataTexture(1, 1, 0, 0);
+  const piShiftWarp = makeWarpDataTexture(1, 1, 0.25, 0);
+
+  // No-warp reference
+  const piRefMat = createProjectedStyleMaterial({
+    texture: priGrad, origin, rotation: [0, 0, 0], settings: dualS, fallbackColor: 0x888888, disposable: true,
+    secondaryTexture: secSolid, secondaryOrigin: so, secondaryRotation: [0, 0, 0],
+    warpMap: piIdWarp, warpMapSize: [1, 1], warpStrength: 1,
+    warpMapB: piIdWarp, warpMapSizeB: [1, 1], warpStrengthB: 1,
+  });
+  const piRef = renderWith(piRefMat);
+  piRefMat.dispose();
+
+  if (piRef.ok) {
+    const piResMat = createProjectedStyleMaterial({
+      texture: priGrad, origin, rotation: [0, 0, 0], settings: dualS, fallbackColor: 0x888888, disposable: true,
+      secondaryTexture: secSolid, secondaryOrigin: so, secondaryRotation: [0, 0, 0],
+      warpMap: piShiftWarp, warpMapSize: [1, 1], warpStrength: 1,
+      warpMapB: piIdWarp, warpMapSizeB: [1, 1], warpStrengthB: 1,
+    });
+    r = renderWith(piResMat);
+    piResMat.dispose();
+    if (r.ok && diffFrom(r, piRef)) push('primary_warp_independent', r);
+    else if (r.ok) push('primary_warp_independent', { ...r, ok: false, error: `primary warp no effect in dual: ref=(${piRef.r},${piRef.g},${piRef.b}) got=(${r.r},${r.g},${r.b})` });
+    else push('primary_warp_independent', r);
+  } else {
+    results.push({ name: 'primary_warp_independent', ok: false, detail: piRef.error, pixelR: 0, pixelG: 0, pixelB: 0 });
+  }
+  secSolid.dispose(); piIdWarp.dispose(); piShiftWarp.dispose();
+
+  // ── Secondary warp independence ──
+  // Primary: solid gray. Secondary: horizontal gradient. Blend: secondary_only.
+  // Warping secondary should change the output.
+  const priSolid = makeSolidDataTexture(128, 128, 128);
+  const secGrad = hGradTex;
+  const soS: ProjectedStyleSettings = { ...defaultProjectedStyleSettings, lightingContribution: 0, blendMode: 'secondary_only' };
+
+  const siIdWarp = makeWarpDataTexture(1, 1, 0, 0);
+  const siShiftWarp = makeWarpDataTexture(1, 1, 0.25, 0);
+
+  // No-warp reference
+  const siRefMat = createProjectedStyleMaterial({
+    texture: priSolid, origin, rotation: [0, 0, 0], settings: soS, fallbackColor: 0x888888, disposable: true,
+    secondaryTexture: secGrad, secondaryOrigin: origin, secondaryRotation: [0, 0, 0],
+    warpMap: siIdWarp, warpMapSize: [1, 1], warpStrength: 1,
+    warpMapB: siIdWarp, warpMapSizeB: [1, 1], warpStrengthB: 1,
+  });
+  const siRef = renderWith(siRefMat);
+  siRefMat.dispose();
+
+  const siBoxPos2: [number, number, number] = [0, 1.6, 0.5];
+  const siCamPos2: [number, number, number] = [-2, 2.6, 5];
+
+  if (siRef.ok) {
+    const siResMat = createProjectedStyleMaterial({
+      texture: priSolid, origin, rotation: [0, 0, 0], settings: soS, fallbackColor: 0x888888, disposable: true,
+      secondaryTexture: secGrad, secondaryOrigin: origin, secondaryRotation: [0, 0, 0],
+      warpMap: siIdWarp, warpMapSize: [1, 1], warpStrength: 1,
+      warpMapB: siShiftWarp, warpMapSizeB: [1, 1], warpStrengthB: 1,
+    });
+    r = renderAndReadPixel(renderer, siResMat, siBoxPos2, siCamPos2);
+    siResMat.dispose();
+    if (r.ok && diffFrom(r, siRef)) push('secondary_warp_independent', r);
+    else if (r.ok) push('secondary_warp_independent', { ...r, ok: false, error: `secondary warp no effect in secondary_only: ref=(${siRef.r},${siRef.g},${siRef.b}) got=(${r.r},${r.g},${r.b})` });
+    else push('secondary_warp_independent', r);
+  } else {
+    results.push({ name: 'secondary_warp_independent', ok: false, detail: siRef.error, pixelR: 0, pixelG: 0, pixelB: 0 });
+  }
+  priSolid.dispose(); siIdWarp.dispose(); siShiftWarp.dispose();
+
+  // ── Cleanup ──
+  hGradTex.dispose(); vGradTex.dispose();
+  idWarp.dispose(); puWarp.dispose(); nuWarp.dispose();
+
   return results;
 }
 
