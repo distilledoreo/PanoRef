@@ -214,6 +214,14 @@ export function setDraftStrength(draft: ProjectionAlignmentDraft, strength: numb
   return mutateDraft(draft, { ...draft, strength: nextStrength });
 }
 
+export function setDraftTarget(
+  draft: ProjectionAlignmentDraft,
+  targetGrayboxPanoId: string,
+): ProjectionAlignmentDraft {
+  if (draft.targetGrayboxPanoId === targetGrayboxPanoId) return draft;
+  return mutateDraft(draft, { ...draft, targetGrayboxPanoId });
+}
+
 function comparableEquals(a: DraftComparable, b: DraftComparable): boolean {
   if (
     a.sourcePanoId !== b.sourcePanoId
