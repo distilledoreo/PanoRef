@@ -205,6 +205,33 @@ export interface ProjectionAlignment {
   updatedAt: string;
 }
 
+export interface ProjectionRegionVertexPair {
+  id: string;
+  targetUv: Vec2;
+  sourceUv: Vec2;
+}
+
+export interface ProjectionRegion {
+  id: string;
+  name: string;
+  order: number;
+  enabled: boolean;
+  vertices: ProjectionRegionVertexPair[];
+  edgeSoftness: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectionRegionAlignment {
+  version: 1;
+  method: 'paired-mask-region-v1';
+  sourcePanoId: string;
+  targetGrayboxPanoId: string;
+  regions: ProjectionRegion[];
+  strength: number;
+  updatedAt: string;
+}
+
 /** Project-level projector configuration (no GPU resources). */
 export interface ProjectedStyleSettings {
   /** Primary pano reference id; omit to auto-pick canonical styled pano. */
@@ -219,6 +246,8 @@ export interface ProjectedStyleSettings {
   fallbackMode: 'clay' | 'neutral';
   /** Per-pano projection alignments. Indexed by sourcePanoId. */
   alignments?: ProjectionAlignment[];
+  /** Recommended localized, paired-mask correction. At most one per source pano. */
+  regionAlignments?: ProjectionRegionAlignment[];
 }
 
 export interface PromptOverrides {

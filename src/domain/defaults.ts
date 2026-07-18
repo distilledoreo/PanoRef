@@ -7,6 +7,9 @@ import {
   PanoReference,
   ProjectAsset,
   ProjectionAlignment,
+  ProjectionRegion,
+  ProjectionRegionAlignment,
+  ProjectionRegionVertexPair,
   ProjectionControlPair,
   SceneObject,
   SceneObjectType,
@@ -116,6 +119,7 @@ export function normalizeProjectedStyleSettings(
       : defaultProjectedStyleSettings.lightingContribution,
     fallbackMode: settings?.fallbackMode === 'neutral' ? 'neutral' : 'clay',
     alignments: normalizeProjectionAlignments(settings?.alignments),
+    regionAlignments: normalizeProjectionRegionAlignments(settings?.regionAlignments),
   };
 }
 
@@ -127,6 +131,100 @@ function isValidVec2(v: unknown): v is Vec2 {
 
 function clampUvCoord(value: number): number {
   return Math.min(1, Math.max(0, value));
+}
+
+function wrapU(value: number): number {
+  return ((value % 1) + 1) % 1;
+}
+
+function normalizeRegionVertex(raw: unknown): ProjectionRegionVertexPair | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const vertex = raw as Partial<ProjectionRegionVertexPair>;
+  if (typeof vertex.id !== 'string' || vertex.id.length === 0) return null;
+  if (!isValidVec2(vertex.targetUv) || !isValidVec2(vertex.sourceUv)) return null;
+  return {
+    id: vertex.id,
+    targetUv: [wrapU(vertex.targetUv[0]), clampUvCoord(vertex.targetUv[1])],
+    sourceUv: [wrapU(vertex.sourceUv[0]), clampUvCoord(vertex.sourceUv[1])],
+  };
+}
+
+export const MAX_REGION_EDGE_SOFTNESS = 0.25;
+
+export function normalizeProjectionRegion(region: unknown, fallbackOrder = 0): ProjectionRegion | null {
+  if (!region || typeof region !== 'object') return null;
+  const raw = region as Partial<ProjectionRegion>;
+  if (typeof raw.id !== 'string' || raw.id.length === 0 || !Array.isArray(raw.vertices)) return null;
+  const vertices = raw.vertices.map(normalizeRegionVertex).filter((vertex): vertex is ProjectionRegionVertexPair => Boolean(vertex));
+  const order = Number(raw.order);
+  const softness = Number(raw.edgeSoftness);
+  return {
+    id: raw.id,
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : 'Region',
+    order: Number.isFinite(order) ? order : fallbackOrder,
+    enabled: raw.enabled !== false,
+    vertices,
+    edgeSoftness: Number.isFinite(softness) ? Math.min(MAX_REGION_EDGE_SOFTNESS, Math.max(0, softness)) : 0.03,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '',
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : '',
+  };
+}
+
+export function normalizeProjectionRegionAlignment(alignment: unknown): ProjectionRegionAlignment | null {
+  if (!alignment || typeof alignment !== 'object') return null;
+  const raw = alignment as Partial<ProjectionRegionAlignment>;
+  if (raw.version !== 1 || raw.method !== 'paired-mask-region-v1') return null;
+  if (typeof raw.sourcePanoId !== 'string' || !raw.sourcePanoId || typeof raw.targetGrayboxPanoId !== 'string' || !raw.targetGrayboxPanoId) return null;
+  if (!Array.isArray(raw.regions)) return null;
+  const regions = raw.regions
+    .map((region, index) => normalizeProjectionRegion(region, index))
+    .filter((region): region is ProjectionRegion => Boolean(region))
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+    .map((region, order) => ({ ...region, order }));
+  const strength = Number(raw.strength);
+  return {
+    version: 1,
+    method: 'paired-mask-region-v1',
+    sourcePanoId: raw.sourcePanoId,
+    targetGrayboxPanoId: raw.targetGrayboxPanoId,
+    regions,
+    strength: Number.isFinite(strength) ? Math.min(1, Math.max(0, strength)) : 1,
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : '',
+  };
+}
+
+export function normalizeProjectionRegionAlignments(value: unknown): ProjectionRegionAlignment[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const bySource = new Map<string, ProjectionRegionAlignment>();
+  for (const raw of value) {
+    const alignment = normalizeProjectionRegionAlignment(raw);
+    if (alignment) bySource.set(alignment.sourcePanoId, alignment);
+  }
+  const result = [...bySource.values()];
+  return result.length ? result : undefined;
+}
+
+export function findProjectionRegionAlignmentForPano(settings: ProjectedStyleSettings, sourcePanoId: string): ProjectionRegionAlignment | undefined {
+  return settings.regionAlignments?.find((alignment) => alignment.sourcePanoId === sourcePanoId);
+}
+
+export function setProjectionRegionAlignmentForPano(settings: ProjectedStyleSettings, sourcePanoId: string, alignment: ProjectionRegionAlignment | undefined): ProjectedStyleSettings {
+  const others = (settings.regionAlignments ?? []).filter((item) => item.sourcePanoId !== sourcePanoId);
+  const regionAlignments = alignment ? [...others, alignment] : others;
+  return { ...settings, regionAlignments: regionAlignments.length ? regionAlignments : undefined };
+}
+
+export function createProjectionRegionVertexPair(targetUv: Vec2, sourceUv: Vec2 = targetUv, id = createId('region-vertex')): ProjectionRegionVertexPair {
+  return { id, targetUv: [...targetUv], sourceUv: [...sourceUv] };
+}
+
+export function createProjectionRegion(vertices: ProjectionRegionVertexPair[], name = 'Region'): ProjectionRegion {
+  const timestamp = nowIso();
+  return { id: createId('projection-region'), name, order: 0, enabled: true, vertices, edgeSoftness: 0.03, createdAt: timestamp, updatedAt: timestamp };
+}
+
+export function createProjectionRegionAlignment(sourcePanoId: string, targetGrayboxPanoId: string, regions: ProjectionRegion[] = []): ProjectionRegionAlignment {
+  return { version: 1, method: 'paired-mask-region-v1', sourcePanoId, targetGrayboxPanoId, regions, strength: 1, updatedAt: nowIso() };
 }
 
 function normalizePair(
