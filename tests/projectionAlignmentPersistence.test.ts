@@ -164,7 +164,10 @@ describe('Projection Assist persistence and stale-data boundaries', () => {
     expect(editor).toContain('targets.length === 1 ? targets[0].id : undefined');
     expect(editor).toContain('staleTarget');
     expect(editor).toContain('Changing the graybox clears matches');
-    expect(editor).toContain('Discard these local matches');
+    expect(editor).toContain('Discard unsaved matches for');
+    expect(editor).toContain('draft.pairs.length > 0 || Boolean(draft.pendingTargetUv)');
+    expect(editor).toContain('enabledPairCount > 0 && !draft.pendingTargetUv');
+    expect(editor).toContain('conflictingPairIds');
     expect(editor).toContain('openerRef.current?.focus();');
     expect(editor).toContain("event.key.toLowerCase() === 'z'");
     expect(editor).toContain('setPreviewMode(false)');

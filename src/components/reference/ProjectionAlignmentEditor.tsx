@@ -19,7 +19,12 @@ import {
   ProjectionAlignment,
 } from '../../domain/types';
 import { listEligibleProjectedStylePanos } from '../../engine/projectedStyle';
-import { projectionAlignmentStatusForPano } from '../../engine/projectionAlignmentStatus';
+import {
+  projectionAlignmentDiagnosticsForAlignment,
+  projectionAlignmentDiagnosticsKey,
+  type ProjectionAlignmentDiagnostics,
+} from '../../engine/projectionAlignmentDiagnostics';
+import { projectionAlignmentStatusForAlignment } from '../../engine/projectionAlignmentStatus';
 import { PanoViewer, PanoViewerMarker } from '../viewers/PanoViewer';
 import { Field, IconButton, Select } from '../common/Field';
 import {
@@ -124,7 +129,10 @@ export function ProjectionAlignmentEditor({
   const [draftsBySource, setDraftsBySource] = useState<Record<string, ProjectionAlignmentDraft>>({});
   const [sharedView, setSharedView] = useState(DEFAULT_SHARED_VIEW);
   const [selectedPairId, setSelectedPairId] = useState<string | undefined>();
-  const [savedStatus, setSavedStatus] = useState<ReturnType<typeof projectionAlignmentStatusForPano>>();
+  const [draftDiagnosticsState, setDraftDiagnosticsState] = useState<{
+    key: string;
+    value?: ProjectionAlignmentDiagnostics;
+  }>({ key: '' });
   const [previewMode, setPreviewMode] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [mobilePane, setMobilePane] = useState<'graybox' | 'styled'>('graybox');
@@ -153,17 +161,39 @@ export function ProjectionAlignmentEditor({
   const staleTarget = Boolean(draft.targetGrayboxPanoId) && !targetPano;
   const pickStep = alignmentPickStep(draft);
   const dirty = isProjectionAlignmentDraftDirty(draft);
+  const dirtySourceIds = (Object.entries(draftsBySource) as Array<[string, ProjectionAlignmentDraft]>)
+    .filter(([, sourceDraft]) => isProjectionAlignmentDraftDirty(sourceDraft))
+    .map(([sourceId]) => sourceId);
   const savedAlignment = sourcePano
     ? findProjectionAlignmentForPano(
         normalizeProjectedStyleSettings(project.settings.projectedStyle),
         sourcePano.id,
       )
     : undefined;
+  const draftAlignment = draftToProjectionAlignment(draft);
+  const draftDiagnosticsKey = projectionAlignmentDiagnosticsKey(project, sourcePanoId, draftAlignment);
+  const draftDiagnostics = draftDiagnosticsState.key === draftDiagnosticsKey
+    ? draftDiagnosticsState.value
+    : undefined;
   const enabledPairCount = draft.pairs.filter((pair) => pair.enabled).length;
-  const canApply = Boolean(
-    (targetPano && draft.pairs.length > 0)
-    || (savedAlignment && draft.pairs.length === 0 && dirty),
+  const draftStatus = draftAlignment
+    ? projectionAlignmentStatusForAlignment(project, sourcePanoId, draftAlignment, draftDiagnostics)
+    : {
+        state: 'none' as const,
+        pairCount: draft.pairs.length,
+        enabledPairCount,
+        conflictCount: 0,
+        message: draft.pendingTargetUv ? 'Match pending' : 'No local fit',
+      };
+  const canApplyAlignment = Boolean(targetPano) && enabledPairCount > 0 && !draft.pendingTargetUv;
+  const canRemoveSavedAlignment = Boolean(
+    savedAlignment
+    && draft.pairs.length === 0
+    && !draft.pendingTargetUv
+    && dirty,
   );
+  const canApply = canApplyAlignment || canRemoveSavedAlignment;
+  const applyLabel = canRemoveSavedAlignment ? 'Remove local fit' : 'Use improved projection';
 
   useEffect(() => {
     if (!open) return;
@@ -171,15 +201,16 @@ export function ProjectionAlignmentEditor({
     const nextSourceId = nextSources.some((pano) => pano.id === initialSourcePanoId)
       ? initialSourcePanoId
       : nextSources[0]?.id ?? initialSourcePanoId;
-    const nextDrafts: Record<string, ProjectionAlignmentDraft> = {};
-    for (const pano of nextSources) {
-      nextDrafts[pano.id] = initialDraftForSource(project, pano, targetPanos);
-    }
+    const nextSource = nextSources.find((pano) => pano.id === nextSourceId);
+    const nextDraft = nextSource
+      ? initialDraftForSource(project, nextSource, targetPanos)
+      : createProjectionAlignmentDraft(nextSourceId);
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSourcePanoId(nextSourceId);
-    setDraftsBySource(nextDrafts);
+    setDraftsBySource(nextSource ? { [nextSourceId]: nextDraft } : {});
     setSharedView(DEFAULT_SHARED_VIEW);
     setSelectedPairId(undefined);
+    setDraftDiagnosticsState({ key: '' });
     setPreviewMode(false);
     setMobilePane('graybox');
     const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
@@ -199,9 +230,20 @@ export function ProjectionAlignmentEditor({
   }, []);
 
   useEffect(() => {
-    if (!open || !sourcePanoId) return;
-    setSavedStatus(projectionAlignmentStatusForPano(project, sourcePanoId));
-  }, [open, project, sourcePanoId]);
+    let cancelled = false;
+    if (!open || !draftAlignment) {
+      setDraftDiagnosticsState({ key: draftDiagnosticsKey });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const value = projectionAlignmentDiagnosticsForAlignment(project, draftAlignment);
+    if (!cancelled) setDraftDiagnosticsState({ key: draftDiagnosticsKey, value });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, draftDiagnosticsKey]);
 
   const updateDraft = (update: (current: ProjectionAlignmentDraft) => ProjectionAlignmentDraft) => {
     setDraftsBySource((current) => {
@@ -213,22 +255,36 @@ export function ProjectionAlignmentEditor({
   };
 
   const closeEditor = () => {
-    if (dirty && !safeConfirm('Discard these local matches? Your saved projection will not change.')) return;
+    if (
+      dirtySourceIds.length > 0
+      && !safeConfirm(`Discard unsaved matches for ${dirtySourceIds.length === 1 ? 'this panorama' : `${dirtySourceIds.length} panoramas`}? Your saved projection will not change.`)
+    ) return;
     onClose();
   };
 
   const handleSourceChange = (nextSourceId: string) => {
     if (nextSourceId === sourcePanoId) return;
-    if (dirty && !safeConfirm('Switch panorama? Unsaved matches stay local to the current panorama.')) return;
+    if (
+      dirtySourceIds.length > 0
+      && !safeConfirm('Switch panorama? Unsaved matches for the current panorama will be discarded.')
+    ) return;
+    const nextSource = sourcePanos.find((pano) => pano.id === nextSourceId);
+    if (!nextSource) return;
     setSourcePanoId(nextSourceId);
+    setDraftsBySource({
+      [nextSourceId]: initialDraftForSource(project, nextSource, targetPanos),
+    });
     setSelectedPairId(undefined);
   };
 
   const handleTargetChange = (nextTargetId: string) => {
     if (nextTargetId === draft.targetGrayboxPanoId) return;
-    if (draft.pairs.length > 0 && !safeConfirm('Changing the graybox clears matches because their points refer to the old image. Continue?')) return;
+    const hasPendingPoints = draft.pairs.length > 0 || Boolean(draft.pendingTargetUv);
+    if (hasPendingPoints && !safeConfirm('Changing the graybox clears matches because their points refer to the old image. Continue?')) return;
     updateDraft((current) => {
-      const cleared = current.pairs.length > 0 ? clearDraftPairs(current) : current;
+      const cleared = current.pairs.length > 0 || current.pendingTargetUv
+        ? clearDraftPairs(current)
+        : current;
       return setDraftTarget(cleared, nextTargetId);
     });
     setSelectedPairId(undefined);
@@ -314,13 +370,13 @@ export function ProjectionAlignmentEditor({
     );
   }
 
-  const conflicting = savedStatus?.state === 'conflicting';
+  const conflictingPairIds = new Set(draftDiagnostics?.conflictingPairIds ?? []);
   const targetMarkers: PanoViewerMarker[] = [
     ...draft.pairs.map((pair, index) => ({
       id: `target-${pair.id}`,
       uv: pair.targetUv,
       label: String(index + 1),
-      state: markerState(pair, conflicting),
+      state: markerState(pair, conflictingPairIds.has(pair.id)),
     })),
     ...(draft.pendingTargetUv
       ? [{ id: 'pending-target', uv: draft.pendingTargetUv, label: '•', state: 'pending' as const }]
@@ -330,7 +386,7 @@ export function ProjectionAlignmentEditor({
     id: `source-${pair.id}`,
     uv: pair.sourceUv,
     label: String(index + 1),
-    state: markerState(pair, conflicting),
+    state: markerState(pair, conflictingPairIds.has(pair.id)),
   }));
   const instruction = pickStep === 'target'
     ? 'Click a feature in the graybox.'
@@ -383,8 +439,8 @@ export function ProjectionAlignmentEditor({
           </Field>
           <div className="min-w-28 pb-1 text-right">
             <div className="text-xs font-semibold text-primary">{enabledPairCount} match{enabledPairCount === 1 ? '' : 'es'}</div>
-            <div className={`mt-0.5 text-[11px] ${savedStatus?.state === 'conflicting' || staleTarget ? 'text-amber-700 dark:text-amber-300' : 'text-secondary'}`}>
-              {staleTarget ? 'Needs attention' : savedStatus?.message ?? (draft.pairs.length > 0 ? 'Draft' : 'No local fit')}
+            <div className={`mt-0.5 text-[11px] ${draftStatus.state === 'conflicting' || staleTarget ? 'text-amber-700 dark:text-amber-300' : 'text-secondary'}`}>
+              {staleTarget ? 'Needs attention' : draftStatus.message}
             </div>
           </div>
           <div className="order-last flex w-full rounded-lg border border-subtle bg-surface-base p-1 md:hidden" aria-label="Choose panorama to view">
@@ -485,7 +541,7 @@ export function ProjectionAlignmentEditor({
           ) : (
             <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
               {draft.pairs.map((pair, index) => {
-                const isConflicting = conflicting && pair.enabled;
+                const isConflicting = conflictingPairIds.has(pair.id);
                 return (
                   <div
                     key={pair.id}
@@ -555,9 +611,9 @@ export function ProjectionAlignmentEditor({
               Preview on geometry
             </IconButton>
             <button type="button" onClick={closeEditor} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-secondary transition hover:text-primary">Cancel</button>
-            <IconButton onClick={handleApply} disabled={!canApply} highlighted aria-label={draft.pairs.length === 0 ? 'Remove local fit' : 'Use improved projection'}>
+            <IconButton onClick={handleApply} disabled={!canApply} highlighted aria-label={applyLabel}>
               <Check className="h-4 w-4" />
-              {draft.pairs.length === 0 ? 'Remove local fit' : 'Use improved projection'}
+              {applyLabel}
             </IconButton>
           </div>
         </footer>

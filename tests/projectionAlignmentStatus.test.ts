@@ -10,6 +10,7 @@ import {
 } from '../src/domain/defaults';
 import { LocationProject, PanoReference } from '../src/domain/types';
 import { disposeAllProjectionWarpTextures, projectionWarpTextureCacheSize } from '../src/engine/projectionWarpTexture';
+import { projectionAlignmentDiagnosticsForPano } from '../src/engine/projectionAlignmentDiagnostics';
 import { projectionAlignmentStatusForPano } from '../src/engine/projectionAlignmentStatus';
 
 function makeProject() {
@@ -65,7 +66,8 @@ describe('Projection Assist alignment status', () => {
 
   it('reports ready and includes enabled match count', () => {
     const { project, source } = makeProject();
-    const status = projectionAlignmentStatusForPano(project, source.id);
+    const diagnostics = projectionAlignmentDiagnosticsForPano(project, source.id);
+    const status = projectionAlignmentStatusForPano(project, source.id, diagnostics);
     expect(status.state).toBe('ready');
     expect(status.message).toBe('1 match');
     expect(status.enabledPairCount).toBe(1);
@@ -112,19 +114,21 @@ describe('Projection Assist alignment status', () => {
     });
   });
 
-  it('reports conflicts from cached warp diagnostics', () => {
+  it('reports conflicts from deferred pure diagnostics and identifies only conflicting pairs', () => {
     const { project, source, target } = makeProject();
     setAlignment(project, source, target, [
       createProjectionControlPair({ id: 'a', order: 0, targetUv: [0.5, 0.5], sourceUv: [0.5, 0.5] }),
       createProjectionControlPair({ id: 'b', order: 1, targetUv: [0.505, 0.5], sourceUv: [0.7, 0.5] }),
     ]);
-    const status = projectionAlignmentStatusForPano(project, source.id);
+    const diagnostics = projectionAlignmentDiagnosticsForPano(project, source.id);
+    const status = projectionAlignmentStatusForPano(project, source.id, diagnostics);
     expect(status.state).toBe('conflicting');
     expect(status.conflictCount).toBe(1);
     expect(status.message).toBe('1 match conflict');
+    expect(diagnostics?.conflictingPairIds).toEqual(['a', 'b']);
   });
 
-  it('releases the status acquisition resource', () => {
+  it('does not acquire a disposable runtime texture during ordinary status resolution', () => {
     const { project, source } = makeProject();
     expect(projectionWarpTextureCacheSize()).toBe(0);
     projectionAlignmentStatusForPano(project, source.id);
@@ -143,4 +147,3 @@ describe('Projection Assist alignment status', () => {
     expect(secondaryStatus.enabledPairCount).toBe(2);
   });
 });
-

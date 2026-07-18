@@ -49,11 +49,11 @@ export interface ProjectedStyleSettings {
 
 ## Projection Assist lifecycle
 
-`ProjectionAlignmentEditor` keeps a draft per source panorama. The draft contains the target, ordered pairs, enabled state, and strength. `ProjectionAlignmentEditorState` provides pure transitions for target/source picking, undo, removal, enabling, clearing, target changes, and dirty-state checks.
+`ProjectionAlignmentEditor` keeps one active draft per editor session. The draft contains the target, ordered pairs, enabled state, and strength. Switching sources after editing confirms and discards the current draft before loading the next source, so no hidden source draft can be lost or omitted from Apply. `ProjectionAlignmentEditorState` provides pure transitions for target/source picking, undo, removal, enabling, clearing, target changes, and dirty-state checks.
 
 The editor’s preview path uses `createProjectionAlignmentPreviewProject()` to shallow-clone the project and replace only the selected source alignment in the clone. It never calls a store mutation. Before renders the source-isolated saved project; After renders the draft clone. Apply is the only path that calls the parent settings change.
 
-The production panel exposes a card for each active projector. Cards resolve status from the same project-aware warp acquisition used by the viewport, expose source-specific strength, and remove only the selected source entry. The 3D marker overlay is separate development-only tooling behind `showAlignmentDebugOverlay` and `import.meta.env.DEV`.
+The production panel exposes a card for each active projector. Cards resolve structural status synchronously, then refresh conflict diagnostics in an effect using preview-resolution pure solver math; ordinary React rendering does not acquire and dispose a runtime warp texture. Cards expose source-specific strength and remove only the selected source entry. The 3D marker overlay is separate development-only tooling behind `showAlignmentDebugOverlay` and `import.meta.env.DEV`.
 
 ### Blend Modes
 - `primary_only` (0) — only primary projector
@@ -100,7 +100,8 @@ Two ref slots: `primaryOwnershipRef`, `secondaryOwnershipRef`. Effects keyed on 
 - `src/domain/defaults.ts` — `normalizeProjectedStyleSettings()`
 - `src/engine/projectedStyle.ts` — `resolveProjectedStylePano()`, eligibility
 - `src/engine/multiOriginProjection.ts` — projector resolution, blend weights
-- `src/engine/projectionAlignmentStatus.ts` — ready, stale, and conflict status from project-aware resolution
+- `src/engine/projectionAlignmentStatus.ts` — structural ready/stale status with deferred diagnostics support
+- `src/engine/projectionAlignmentDiagnostics.ts` — preview-resolution pure diagnostics and pair-specific conflict IDs
 - `src/engine/projectionAlignmentDebug.ts` — development-only 3D marker overlay
 - `src/engine/projectedStyleMaterials.ts` — texture cache, material creation, ownership
 - `src/engine/projectedStyleMath.ts` — pure math + GLSL strings

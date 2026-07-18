@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { LocationProject, PanoReference, ProjectedStyleSettings, ProjectionAlignment } from '../../domain/types';
 import {
   findProjectionAlignmentForPano,
@@ -16,7 +16,15 @@ import {
   canUseDualProjectorBlend,
   resolveProjectors,
 } from '../../engine/multiOriginProjection';
-import { projectionAlignmentStatusForPano, type ProjectionAlignmentStatus } from '../../engine/projectionAlignmentStatus';
+import {
+  projectionAlignmentDiagnosticsForAlignment,
+  projectionAlignmentDiagnosticsKey,
+  type ProjectionAlignmentDiagnostics,
+} from '../../engine/projectionAlignmentDiagnostics';
+import {
+  projectionAlignmentStatusForAlignment,
+  type ProjectionAlignmentStatus,
+} from '../../engine/projectionAlignmentStatus';
 import { ProjectionAlignmentEditor } from '../reference/ProjectionAlignmentEditor';
 import { Field, Select, TextInput } from './Field';
 
@@ -61,9 +69,43 @@ function ProjectorAlignmentCard({
   onStrengthChange: (strength: number) => void;
   onRemove: () => void;
 }) {
+  const diagnosticsKey = useMemo(
+    () => projectionAlignmentDiagnosticsKey(project, pano.id, alignment),
+    [project, pano.id, alignment],
+  );
+  const [diagnosticsState, setDiagnosticsState] = useState<{
+    key: string;
+    value?: ProjectionAlignmentDiagnostics;
+  }>({ key: '' });
+  const diagnostics = diagnosticsState.key === diagnosticsKey ? diagnosticsState.value : undefined;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!alignment) {
+      setDiagnosticsState({ key: diagnosticsKey });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const value = projectionAlignmentDiagnosticsForAlignment(project, alignment);
+    if (!cancelled) setDiagnosticsState({ key: diagnosticsKey, value });
+    return () => {
+      cancelled = true;
+    };
+  }, [diagnosticsKey]);
+
   const status = useMemo(
-    () => projectionAlignmentStatusForPano(project, pano.id),
-    [project, pano.id],
+    () => alignment
+      ? projectionAlignmentStatusForAlignment(project, pano.id, alignment, diagnostics)
+      : {
+          state: 'none' as const,
+          pairCount: 0,
+          enabledPairCount: 0,
+          conflictCount: 0,
+          message: 'No local fit',
+        },
+    [project, pano.id, alignment, diagnostics],
   );
   const hasAsset = Boolean(project.assets.assets[pano.imageAssetId]?.uri);
   const canEdit = pano.type !== 'graybox_render' && hasAsset;

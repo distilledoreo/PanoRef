@@ -1,6 +1,6 @@
 import { findProjectionAlignmentForPano, normalizeProjectedStyleSettings } from '../domain/defaults';
 import { LocationProject, ProjectionAlignment } from '../domain/types';
-import { resolveProjectionWarpWithStrengthForProject } from './multiOriginProjection';
+import type { ProjectionAlignmentDiagnostics } from './projectionAlignmentDiagnostics';
 
 export type ProjectionAlignmentState =
   | 'none'
@@ -39,18 +39,13 @@ function alignmentCounts(alignment: ProjectionAlignment) {
   };
 }
 
-/**
- * Resolve the user-facing state from the same project-aware cached acquisition
- * used by the viewport. The acquisition is always released before returning.
- */
-export function projectionAlignmentStatusForPano(
+/** Resolve the structural and optionally deferred diagnostic state for one source alignment. */
+export function projectionAlignmentStatusForAlignment(
   project: LocationProject,
   sourcePanoId: string,
+  alignment: ProjectionAlignment,
+  diagnostics?: ProjectionAlignmentDiagnostics,
 ): ProjectionAlignmentStatus {
-  const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
-  const alignment = findProjectionAlignmentForPano(settings, sourcePanoId);
-  if (!alignment) return emptyStatus('none', 'No local fit');
-
   const counts = alignmentCounts(alignment);
   if (counts.enabledPairCount === 0) {
     return emptyStatus('none', 'No local fit', counts.pairCount, counts.enabledPairCount);
@@ -83,50 +78,40 @@ export function projectionAlignmentStatusForPano(
     );
   }
 
-  let resolved: ReturnType<typeof resolveProjectionWarpWithStrengthForProject> | undefined;
-  try {
-    resolved = resolveProjectionWarpWithStrengthForProject(project, sourcePanoId, 'runtime');
-    if (!resolved) {
-      return emptyStatus(
-        'stale',
-        'Local fit needs attention',
-        counts.pairCount,
-        counts.enabledPairCount,
-      );
-    }
-
-    const diagnostics = resolved.warp.diagnostics;
-    const conflictCount = diagnostics?.conflictCount ?? 0;
-    const maxMarkerErrorRadians = diagnostics?.maxMarkerErrorRadians;
-    if (conflictCount > 0) {
-      return {
-        state: 'conflicting',
-        pairCount: counts.pairCount,
-        enabledPairCount: counts.enabledPairCount,
-        conflictCount,
-        maxMarkerErrorRadians,
-        message: `${conflictCount} match${conflictCount === 1 ? '' : 'es'} conflict`,
-      };
-    }
-
+  const conflictCount = diagnostics?.conflictCount ?? 0;
+  if (conflictCount > 0) {
     return {
-      state: 'ready',
+      state: 'conflicting',
       pairCount: counts.pairCount,
       enabledPairCount: counts.enabledPairCount,
-      conflictCount: 0,
-      maxMarkerErrorRadians,
-      message: matchLabel(counts.enabledPairCount),
+      conflictCount,
+      maxMarkerErrorRadians: diagnostics?.maxMarkerErrorRadians,
+      message: `${conflictCount} match${conflictCount === 1 ? '' : 'es'} conflict`,
     };
-  } catch {
-    return {
-      state: 'error',
-      pairCount: counts.pairCount,
-      enabledPairCount: counts.enabledPairCount,
-      conflictCount: 0,
-      message: 'Local fit could not be evaluated',
-    };
-  } finally {
-    resolved?.warp.release();
   }
+
+  return {
+    state: 'ready',
+    pairCount: counts.pairCount,
+    enabledPairCount: counts.enabledPairCount,
+    conflictCount: 0,
+    maxMarkerErrorRadians: diagnostics?.maxMarkerErrorRadians,
+    message: matchLabel(counts.enabledPairCount),
+  };
 }
 
+/**
+ * Resolve the user-facing state without acquiring a runtime warp texture.
+ * Conflict diagnostics can be supplied by a deferred preview-resolution
+ * computation when a panel or editor needs them.
+ */
+export function projectionAlignmentStatusForPano(
+  project: LocationProject,
+  sourcePanoId: string,
+  diagnostics?: ProjectionAlignmentDiagnostics,
+): ProjectionAlignmentStatus {
+  const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const alignment = findProjectionAlignmentForPano(settings, sourcePanoId);
+  if (!alignment) return emptyStatus('none', 'No local fit');
+  return projectionAlignmentStatusForAlignment(project, sourcePanoId, alignment, diagnostics);
+}
