@@ -125,6 +125,8 @@ export function ProjectionAlignmentEditor({
   const [selectedPairId, setSelectedPairId] = useState<string | undefined>();
   const [savedStatus, setSavedStatus] = useState<ReturnType<typeof projectionAlignmentStatusForPano>>();
   const [previewRequested, setPreviewRequested] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobilePane, setMobilePane] = useState<'graybox' | 'styled'>('graybox');
 
   const sourcePano = sourcePanos.find((pano) => pano.id === sourcePanoId);
   const activeDraft = draftsBySource[sourcePanoId];
@@ -163,6 +165,7 @@ export function ProjectionAlignmentEditor({
     setSharedView(DEFAULT_SHARED_VIEW);
     setSelectedPairId(undefined);
     setPreviewRequested(false);
+    setMobilePane('graybox');
     const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
     firstFocusable?.focus();
     return () => {
@@ -170,6 +173,14 @@ export function ProjectionAlignmentEditor({
       openerRef.current = null;
     };
   }, [open, project, initialSourcePanoId, sourcePanos, targetPanos]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener?.('change', update);
+    return () => media.removeEventListener?.('change', update);
+  }, []);
 
   useEffect(() => {
     if (!open || !sourcePanoId) return;
@@ -210,11 +221,13 @@ export function ProjectionAlignmentEditor({
   const handleTargetPick = (uv: [number, number]) => {
     if (pickStep !== 'target') return;
     updateDraft((current) => addTargetPick(current, uv));
+    setMobilePane('styled');
   };
 
   const handleSourcePick = (uv: [number, number]) => {
     if (pickStep !== 'source') return;
     updateDraft((current) => completeSourcePick(current, uv));
+    setMobilePane('graybox');
   };
 
   const handleApply = () => {
@@ -334,6 +347,24 @@ export function ProjectionAlignmentEditor({
               {staleTarget ? 'Needs attention' : savedStatus?.message ?? (draft.pairs.length > 0 ? 'Draft' : 'No local fit')}
             </div>
           </div>
+          <div className="order-last flex w-full rounded-lg border border-subtle bg-surface-base p-1 md:hidden" aria-label="Choose panorama to view">
+            <button
+              type="button"
+              onClick={() => setMobilePane('graybox')}
+              className={`min-h-10 flex-1 rounded-md px-3 py-2 text-xs font-semibold ${mobilePane === 'graybox' ? 'bg-accent text-white' : 'text-secondary'}`}
+              aria-pressed={mobilePane === 'graybox'}
+            >
+              Graybox
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobilePane('styled')}
+              className={`min-h-10 flex-1 rounded-md px-3 py-2 text-xs font-semibold ${mobilePane === 'styled' ? 'bg-accent text-white' : 'text-secondary'}`}
+              aria-pressed={mobilePane === 'styled'}
+            >
+              Styled
+            </button>
+          </div>
           <button
             type="button"
             onClick={closeEditor}
@@ -344,8 +375,8 @@ export function ProjectionAlignmentEditor({
           </button>
         </header>
 
-        <main className="grid min-h-0 flex-1 grid-cols-2 gap-2 bg-surface-base p-2 sm:gap-3 sm:p-3">
-          <section className="flex min-h-0 min-w-0 flex-col rounded-xl border border-subtle bg-surface-raised" data-projection-viewer="graybox">
+        <main className="grid min-h-0 flex-1 grid-cols-1 gap-2 bg-surface-base p-2 sm:gap-3 sm:p-3 md:grid-cols-2">
+          <section className={`${isMobile && mobilePane !== 'graybox' ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-col rounded-xl border border-subtle bg-surface-raised md:flex`} data-projection-viewer="graybox" data-mobile-viewer={mobilePane === 'graybox' ? 'active' : 'inactive'}>
             <div className="flex shrink-0 items-center justify-between border-b border-subtle px-3 py-2">
               <div>
                 <h3 className="text-sm font-semibold text-primary">Graybox</h3>
@@ -374,7 +405,7 @@ export function ProjectionAlignmentEditor({
             </div>
           </section>
 
-          <section className="flex min-h-0 min-w-0 flex-col rounded-xl border border-subtle bg-surface-raised" data-projection-viewer="styled">
+          <section className={`${isMobile && mobilePane !== 'styled' ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-col rounded-xl border border-subtle bg-surface-raised md:flex`} data-projection-viewer="styled" data-mobile-viewer={mobilePane === 'styled' ? 'active' : 'inactive'}>
             <div className="flex shrink-0 items-center justify-between border-b border-subtle px-3 py-2">
               <div>
                 <h3 className="text-sm font-semibold text-primary">Styled panorama</h3>
@@ -452,7 +483,7 @@ export function ProjectionAlignmentEditor({
           )}
         </section>
 
-        <footer className="shrink-0 border-t border-subtle bg-surface-raised px-4 py-3 sm:px-5">
+        <footer className="sticky bottom-0 z-10 shrink-0 border-t border-subtle bg-surface-raised px-4 py-3 sm:px-5">
           <div className="flex flex-wrap items-center gap-3">
             <div className="mr-auto min-w-[14rem]" aria-live="polite">
               <p className="text-sm font-medium text-primary">{instruction}</p>
