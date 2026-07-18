@@ -1,7 +1,9 @@
-import React from 'react';
-import { LocationProject, ProjectedStyleSettings } from '../../domain/types';
+import React, { useMemo, useState } from 'react';
+import { LocationProject, PanoReference, ProjectedStyleSettings, ProjectionAlignment } from '../../domain/types';
 import {
+  findProjectionAlignmentForPano,
   normalizeProjectedStyleSettings,
+  setProjectionAlignmentForPano,
 } from '../../domain/defaults';
 import {
   listEligibleProjectedStylePanos,
@@ -14,6 +16,8 @@ import {
   canUseDualProjectorBlend,
   resolveProjectors,
 } from '../../engine/multiOriginProjection';
+import { projectionAlignmentStatusForPano, type ProjectionAlignmentStatus } from '../../engine/projectionAlignmentStatus';
+import { ProjectionAlignmentEditor } from '../reference/ProjectionAlignmentEditor';
 import { Field, Select, TextInput } from './Field';
 
 const BLEND_OPTIONS: ProjectorBlendMode[] = [
@@ -22,6 +26,110 @@ const BLEND_OPTIONS: ProjectorBlendMode[] = [
   'primary_dominant',
   'secondary_dominant',
 ];
+
+function safeConfirm(message: string): boolean {
+  return typeof window === 'undefined' || window.confirm(message);
+}
+
+function alignmentActionLabel(status: ProjectionAlignmentStatus): string {
+  if (status.state === 'none') return 'Fix local mismatches';
+  if (status.state === 'stale') return 'Repair local fit';
+  if (status.state === 'conflicting' || status.state === 'error') return 'Review matches';
+  return 'Edit local fit';
+}
+
+function alignmentStatusClass(status: ProjectionAlignmentStatus): string {
+  if (status.state === 'ready') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200';
+  if (status.state === 'none') return 'bg-surface-base text-secondary';
+  return 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-200';
+}
+
+function ProjectorAlignmentCard({
+  project,
+  pano,
+  role,
+  alignment,
+  onEdit,
+  onStrengthChange,
+  onRemove,
+}: {
+  project: LocationProject;
+  pano: PanoReference;
+  role: 'Primary' | 'Secondary';
+  alignment?: ProjectionAlignment;
+  onEdit: () => void;
+  onStrengthChange: (strength: number) => void;
+  onRemove: () => void;
+}) {
+  const status = useMemo(
+    () => projectionAlignmentStatusForPano(project, pano.id),
+    [project, pano.id],
+  );
+  const hasAsset = Boolean(project.assets.assets[pano.imageAssetId]?.uri);
+  const canEdit = pano.type !== 'graybox_render' && hasAsset;
+  const strengthPercent = Math.round((alignment?.strength ?? 1) * 100);
+  const statusLabel = status.state === 'conflicting' ? 'Some matches conflict' : status.message;
+
+  return (
+    <section
+      className="rounded-lg border border-subtle bg-surface-base p-3"
+      data-projection-alignment-card={pano.id}
+      data-projector-role={role.toLowerCase()}
+    >
+      <div className="flex items-start gap-3">
+        <div className="mr-auto min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-secondary">{role} local fit</div>
+          <h4 className="mt-0.5 truncate text-sm font-semibold text-primary">{pano.name}</h4>
+          <p className="mt-0.5 text-[11px] text-secondary">
+            Capture origin: {pano.origin.map((value) => value.toFixed(1)).join(', ')} m
+          </p>
+        </div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${alignmentStatusClass(status)}`}
+          data-projection-alignment-status={status.state}
+        >
+          {statusLabel}
+        </span>
+      </div>
+
+      {alignment && (
+        <Field label={`Local fit strength (${strengthPercent}%)`}>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={strengthPercent}
+            onChange={(event) => onStrengthChange(Number(event.target.value) / 100)}
+            className="w-full accent-[var(--accent)]"
+            aria-label={`${role} local fit strength`}
+          />
+        </Field>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onEdit}
+          disabled={!canEdit}
+          className="inline-flex min-h-10 items-center justify-center rounded-lg border border-subtle px-3 py-2 text-xs font-semibold text-primary transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+          data-projection-alignment-edit={pano.id}
+        >
+          {canEdit ? alignmentActionLabel(status) : 'Needs an image asset'}
+        </button>
+        {alignment && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="inline-flex min-h-10 items-center justify-center rounded-lg px-3 py-2 text-xs font-medium text-secondary transition hover:text-red-600"
+            data-projection-alignment-remove={pano.id}
+          >
+            Remove local fit
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
 
 export function ProjectedStylePanel({
   project,
@@ -38,12 +146,36 @@ export function ProjectedStylePanel({
   const resolved = resolveProjectors(project, settings);
   const dualAvailable = allPanos.length >= 2;
   const dualReady = canUseDualProjectorBlend(project, settings);
+  const [editorSourcePanoId, setEditorSourcePanoId] = useState<string>();
 
   const update = (partial: Partial<ProjectedStyleSettings>) => {
     onChange(normalizeProjectedStyleSettings({ ...settings, ...partial }));
   };
 
   const secondaryCandidates = allPanos.filter((pano) => pano.id !== (settings.panoId ?? active?.id));
+  const primaryAlignment = resolved.primary
+    ? findProjectionAlignmentForPano(settings, resolved.primary.id)
+    : undefined;
+  const secondaryAlignment = resolved.secondary
+    ? findProjectionAlignmentForPano(settings, resolved.secondary.id)
+    : undefined;
+  const secondaryActive = Boolean(resolved.secondary && resolved.blendMode !== 'primary_only');
+
+  const openAlignmentEditor = (sourcePanoId: string) => setEditorSourcePanoId(sourcePanoId);
+  const applyAlignment = (sourcePanoId: string, alignment: ProjectionAlignment | undefined) => {
+    const nextSettings = setProjectionAlignmentForPano(settings, sourcePanoId, alignment);
+    onChange(nextSettings);
+    setEditorSourcePanoId(undefined);
+  };
+  const changeAlignmentStrength = (sourcePanoId: string, strength: number) => {
+    const alignment = findProjectionAlignmentForPano(settings, sourcePanoId);
+    if (!alignment) return;
+    applyAlignment(sourcePanoId, { ...alignment, strength });
+  };
+  const removeAlignment = (pano: PanoReference) => {
+    if (!safeConfirm(`Remove local matches for ${pano.name}?`)) return;
+    applyAlignment(pano.id, undefined);
+  };
 
   return (
     <div className="space-y-3" data-projected-style-panel>
@@ -158,6 +290,39 @@ export function ProjectedStylePanel({
         </p>
       )}
 
+      {(resolved.primary || secondaryActive) && (
+        <section className="space-y-2" aria-label="Projection Assist local fits">
+          <div>
+            <h4 className="text-sm font-semibold text-primary">Projection Assist</h4>
+            <p className="mt-1 text-xs leading-relaxed text-secondary">
+              Match each projector to the graybox it should follow. Fits belong to their source panorama and stay independent when you switch or blend projectors.
+            </p>
+          </div>
+          {resolved.primary && (
+            <ProjectorAlignmentCard
+              project={project}
+              pano={resolved.primary}
+              role="Primary"
+              alignment={primaryAlignment}
+              onEdit={() => openAlignmentEditor(resolved.primary!.id)}
+              onStrengthChange={(strength) => changeAlignmentStrength(resolved.primary!.id, strength)}
+              onRemove={() => removeAlignment(resolved.primary!)}
+            />
+          )}
+          {secondaryActive && resolved.secondary && (
+            <ProjectorAlignmentCard
+              project={project}
+              pano={resolved.secondary}
+              role="Secondary"
+              alignment={secondaryAlignment}
+              onEdit={() => openAlignmentEditor(resolved.secondary!.id)}
+              onStrengthChange={(strength) => changeAlignmentStrength(resolved.secondary!.id, strength)}
+              onRemove={() => removeAlignment(resolved.secondary!)}
+            />
+          )}
+        </section>
+      )}
+
       <Field label={`Opacity (${Math.round(settings.opacity * 100)}%)`}>
         <input
           type="range"
@@ -202,6 +367,14 @@ export function ProjectedStylePanel({
           <option value="neutral">Neutral</option>
         </Select>
       </Field>
+
+      <ProjectionAlignmentEditor
+        open={Boolean(editorSourcePanoId)}
+        project={project}
+        initialSourcePanoId={editorSourcePanoId ?? ''}
+        onApply={applyAlignment}
+        onClose={() => setEditorSourcePanoId(undefined)}
+      />
 
     </div>
   );

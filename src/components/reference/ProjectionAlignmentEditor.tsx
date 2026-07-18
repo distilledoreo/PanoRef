@@ -134,6 +134,21 @@ export function ProjectionAlignmentEditor({
   const draft = activeDraft ?? (sourcePano
     ? initialDraftForSource(project, sourcePano, targetPanos)
     : createProjectionAlignmentDraft(sourcePanoId));
+  const previewProject = useMemo(() => {
+    const normalized = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+    return {
+      ...project,
+      settings: {
+        ...project.settings,
+        projectedStyle: {
+          ...normalized,
+          panoId: sourcePanoId || normalized.panoId,
+          secondaryPanoId: undefined,
+          blendMode: 'primary_only' as const,
+        },
+      },
+    };
+  }, [project, sourcePanoId]);
   const targetPano = targetPanos.find((pano) => pano.id === draft.targetGrayboxPanoId);
   const staleTarget = Boolean(draft.targetGrayboxPanoId) && !targetPano;
   const pickStep = alignmentPickStep(draft);
@@ -287,7 +302,7 @@ export function ProjectionAlignmentEditor({
           className="flex h-full max-h-[min(900px,calc(100vh-1rem))] w-full max-w-[1500px] flex-col overflow-hidden rounded-2xl border border-subtle bg-surface-raised shadow-soft sm:max-h-[calc(100vh-2rem)]"
         >
           <ProjectionAlignmentPreview
-            project={project}
+            project={previewProject}
             draft={draft}
             onBack={() => setPreviewMode(false)}
             onApply={handleApply}
