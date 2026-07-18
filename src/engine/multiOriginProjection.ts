@@ -8,7 +8,7 @@ import {
 import { findProjectionAlignmentForPano, normalizeProjectedStyleSettings } from '../domain/defaults';
 import { isEligibleProjectedStylePano, listEligibleProjectedStylePanos } from './projectedStyle';
 import { solveProjectionWarp } from './projectionAlignmentSolver';
-import { createWarpTexture, type WarpTextureResult } from './projectionWarpTexture';
+import { createWarpTexture, findWarpTexture, type WarpTextureResult } from './projectionWarpTexture';
 import { degreesToRadians, length, subtract } from './sync';
 
 /**
@@ -253,6 +253,7 @@ export function resolveProjectionWarpForPano(
   settings: ProjectedStyleSettings,
   sourcePanoId: string,
   sourceRotation: Euler,
+  panoRefs: PanoReference[],
   width = 256,
   height = 128,
 ): WarpTextureResult | undefined {
@@ -260,8 +261,14 @@ export function resolveProjectionWarpForPano(
   if (!alignment) return undefined;
 
   const sourceYawRadians = degreesToRadians(sourceRotation[1] ?? 0);
+  const targetPano = panoRefs.find((p) => p.id === alignment.targetGrayboxPanoId);
+  const targetYawRadians = degreesToRadians(targetPano?.rotation?.[1] ?? 0);
+
+  const cached = findWarpTexture(alignment, sourceYawRadians, targetYawRadians, width, height);
+  if (cached) return cached;
+
   const field = solveProjectionWarp(alignment, {
-    targetYawRadians: 0,
+    targetYawRadians,
     sourceYawRadians,
     width,
     height,
@@ -270,7 +277,7 @@ export function resolveProjectionWarpForPano(
   return createWarpTexture(
     alignment,
     sourceYawRadians,
-    0,
+    targetYawRadians,
     field.displacement,
     width,
     height,

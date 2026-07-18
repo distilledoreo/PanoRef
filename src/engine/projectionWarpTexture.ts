@@ -54,6 +54,29 @@ export interface WarpTextureResult {
   release: () => void;
 }
 
+/**
+ * Look up an existing warp texture from the cache without solving.
+ * Returns undefined when no cached entry exists.
+ */
+export function findWarpTexture(
+  alignment: ProjectionAlignment,
+  sourceYawRadians: number,
+  targetYawRadians: number,
+  width: number,
+  height: number,
+): WarpTextureResult | undefined {
+  const key = buildWarpCacheKey(alignment, sourceYawRadians, targetYawRadians, width, height);
+  const entry = warpCache.get(key);
+  if (!entry) return undefined;
+  entry.refCount += 1;
+  return {
+    texture: entry.texture,
+    width,
+    height,
+    release: () => releaseWarpTexture(key),
+  };
+}
+
 export function createWarpTexture(
   alignment: ProjectionAlignment,
   sourceYawRadians: number,

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Euler, ProjectedStyleSettings, Vec3 } from '../domain/types';
 import { PROJECTED_STYLE_GLSL } from './projectedStyleMath';
 import { degreesToRadians } from './sync';
+import { getIdentityWarpTexture } from './projectionWarpTexture';
 
 /**
  * Shared equirect texture cache keyed by image URL.
@@ -163,21 +164,7 @@ export function projectedStyleTextureRefCount(imageUrl: string): number {
   return textureCache.get(imageUrl)?.refCount ?? 0;
 }
 
-export const identityWarpTexture: { texture: THREE.DataTexture | null } = { texture: null };
-
-function getIdentityWarpTextureForShader(): THREE.DataTexture {
-  if (!identityWarpTexture.texture) {
-    const data = new Uint8Array([128, 0, 128, 0]);
-    identityWarpTexture.texture = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
-    identityWarpTexture.texture.wrapS = THREE.RepeatWrapping;
-    identityWarpTexture.texture.wrapT = THREE.ClampToEdgeWrapping;
-    identityWarpTexture.texture.minFilter = THREE.NearestFilter;
-    identityWarpTexture.texture.magFilter = THREE.NearestFilter;
-    identityWarpTexture.texture.generateMipmaps = false;
-    identityWarpTexture.texture.needsUpdate = true;
-  }
-  return identityWarpTexture.texture;
-}
+export const identityWarpTexture = { texture: getIdentityWarpTexture() };
 
 export interface ProjectedMaterialParams {
   texture: THREE.Texture;
@@ -259,10 +246,10 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
     shader.uniforms.projectedLighting = { value: lightingContribution };
     shader.uniforms.projectedFallbackColor = { value: fallback };
     shader.uniforms.projectedUseNeutralFallback = { value: useNeutralFallback ? 1 : 0 };
-    shader.uniforms.projectedWarpMap = { value: params.warpMap ?? getIdentityWarpTextureForShader() };
+    shader.uniforms.projectedWarpMap = { value: params.warpMap ?? getIdentityWarpTexture() };
     shader.uniforms.projectedWarpMapSize = { value: [warpMapSize[0], warpMapSize[1]] };
     shader.uniforms.projectedWarpStrength = { value: warpStrength };
-    shader.uniforms.projectedWarpMapB = { value: params.warpMapB ?? getIdentityWarpTextureForShader() };
+    shader.uniforms.projectedWarpMapB = { value: params.warpMapB ?? getIdentityWarpTexture() };
     shader.uniforms.projectedWarpMapSizeB = { value: [warpMapSizeB[0], warpMapSizeB[1]] };
     shader.uniforms.projectedWarpStrengthB = { value: warpStrengthB };
 

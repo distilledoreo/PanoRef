@@ -207,11 +207,13 @@ export function ProjectedStylePanel({
         </Select>
       </Field>
 
-      <AlignmentSection
-        settings={settings}
-        primaryPanoId={active?.id}
-        onSettingsChange={onChange}
-      />
+      {import.meta.env.DEV && (
+        <AlignmentSection
+          settings={settings}
+          primaryPanoId={active?.id}
+          onSettingsChange={onChange}
+        />
+      )}
     </div>
   );
 }

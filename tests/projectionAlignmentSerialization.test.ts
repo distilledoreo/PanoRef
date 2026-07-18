@@ -96,17 +96,18 @@ describe('projection alignment serialization', () => {
     expect(normalized![0].pairs[1].id).toBe('valid-2');
   });
 
-  it('duplicate source IDs are deduplicated', () => {
+  it('duplicate source IDs are preserved', () => {
     const a1 = makeAlignment({ sourcePanoId: 'pano-1', pairs: [makePair({ id: 'p1' })] });
     const a2 = makeAlignment({ sourcePanoId: 'pano-1', pairs: [makePair({ id: 'p2' })] });
     const a3 = makeAlignment({ sourcePanoId: 'pano-2', pairs: [makePair({ id: 'p3' })] });
     const normalized = normalizeProjectionAlignments([a1, a2, a3]);
-    expect(normalized).toHaveLength(2);
-    const forPano1 = normalized!.find((a) => a.sourcePanoId === 'pano-1');
-    const forPano2 = normalized!.find((a) => a.sourcePanoId === 'pano-2');
-    expect(forPano1).toBeDefined();
-    expect(forPano2).toBeDefined();
-    expect(forPano1!.pairs[0].id).toBe('p2');
+    expect(normalized).toHaveLength(3);
+    expect(normalized![0].sourcePanoId).toBe('pano-1');
+    expect(normalized![0].pairs[0].id).toBe('p1');
+    expect(normalized![1].sourcePanoId).toBe('pano-1');
+    expect(normalized![1].pairs[0].id).toBe('p2');
+    expect(normalized![2].sourcePanoId).toBe('pano-2');
+    expect(normalized![2].pairs[0].id).toBe('p3');
   });
 
   it('updating one panorama alignment preserves the other', () => {
@@ -171,15 +172,15 @@ describe('projection alignment serialization', () => {
     expect(normalized![0].updatedAt).toBe('');
   });
 
-  it('UV coordinates are clamped to 0-1', () => {
+  it('UV coordinates pass through without clamping', () => {
     const alignment = makeAlignment({
       pairs: [makePair({ targetUv: [-0.1, 1.5], sourceUv: [2.0, -0.5] })],
     });
     const normalized = normalizeProjectionAlignments([alignment]);
-    expect(normalized![0].pairs[0].targetUv[0]).toBe(0);
-    expect(normalized![0].pairs[0].targetUv[1]).toBe(1);
-    expect(normalized![0].pairs[0].sourceUv[0]).toBe(1);
-    expect(normalized![0].pairs[0].sourceUv[1]).toBe(0);
+    expect(normalized![0].pairs[0].targetUv[0]).toBe(-0.1);
+    expect(normalized![0].pairs[0].targetUv[1]).toBe(1.5);
+    expect(normalized![0].pairs[0].sourceUv[0]).toBe(2.0);
+    expect(normalized![0].pairs[0].sourceUv[1]).toBe(-0.5);
   });
 
   it('strength is clamped to 0-1', () => {

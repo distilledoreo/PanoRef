@@ -122,7 +122,7 @@ export function normalizeProjectedStyleSettings(
 // --- Projection Alignment ---
 
 function isValidVec2(v: unknown): v is Vec2 {
-  return Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number';
+  return Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && Number.isFinite(v[0]) && typeof v[1] === 'number' && Number.isFinite(v[1]);
 }
 
 function clampUvCoord(value: number): number {
@@ -139,8 +139,8 @@ function normalizePair(
   return {
     id: pair.id,
     order: typeof pair.order === 'number' && Number.isFinite(pair.order) ? pair.order : 0,
-    targetUv: [clampUvCoord(pair.targetUv[0]), clampUvCoord(pair.targetUv[1])],
-    sourceUv: [clampUvCoord(pair.sourceUv[0]), clampUvCoord(pair.sourceUv[1])],
+    targetUv: [pair.targetUv[0], pair.targetUv[1]],
+    sourceUv: [pair.sourceUv[0], pair.sourceUv[1]],
     enabled: pair.enabled !== false,
   };
 }
@@ -161,8 +161,6 @@ function normalizeAlignment(
     if (p) pairs.push(p);
   }
 
-  if (pairs.length === 0) return null;
-
   const strength = typeof alignment.strength === 'number' && Number.isFinite(alignment.strength)
     ? Math.min(1, Math.max(0, alignment.strength))
     : 1;
@@ -182,15 +180,7 @@ export function normalizeProjectionAlignments(
   alignments: unknown,
 ): ProjectionAlignment[] | undefined {
   if (!Array.isArray(alignments) || alignments.length === 0) return undefined;
-
-  const seen = new Map<string, ProjectionAlignment>();
-  for (const raw of alignments) {
-    const a = normalizeAlignment(raw);
-    if (a) {
-      seen.set(a.sourcePanoId, a);
-    }
-  }
-  const result = [...seen.values()];
+  const result = alignments.map((raw) => normalizeAlignment(raw)).filter(Boolean) as ProjectionAlignment[];
   return result.length > 0 ? result : undefined;
 }
 
@@ -233,8 +223,8 @@ export function createProjectionControlPair(
   return {
     id,
     order: overrides?.order ?? 0,
-    targetUv: overrides?.targetUv ?? [0.5, 0.5],
-    sourceUv: overrides?.sourceUv ?? [0.5, 0.5],
+    targetUv: overrides?.targetUv!,
+    sourceUv: overrides?.sourceUv!,
     enabled: overrides?.enabled ?? true,
   };
 }
@@ -242,14 +232,14 @@ export function createProjectionControlPair(
 export function createProjectionAlignment(
   sourcePanoId: string,
   targetGrayboxPanoId: string,
-  pairs?: ProjectionControlPair[],
+  pairs: ProjectionControlPair[],
 ): ProjectionAlignment {
   return {
     version: 1,
     solver: 'spherical-rbf-v1',
     sourcePanoId,
     targetGrayboxPanoId,
-    pairs: pairs ?? [createProjectionControlPair({ order: 0 })],
+    pairs,
     strength: 1,
     updatedAt: new Date().toISOString(),
   };

@@ -359,7 +359,7 @@ describe('wendlandC2', () => {
 
   it('known values: r=0.5', () => {
     const v = wendlandC2(0.5);
-    const expected = Math.pow(0.5, 3) * (1 + 3 * 0.5);
+    const expected = Math.pow(0.5, 4) * (4 * 0.5 + 1);
     expect(v).toBeCloseTo(expected);
   });
 

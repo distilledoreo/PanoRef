@@ -1467,12 +1467,14 @@ export function SceneViewport({
         projectedSettings,
         projectedPano.id,
         projectedPano.rotation,
+        project.panoRefs,
       );
       if (dualActive && projectedSecondary) {
         secondaryWarpRef.current = resolveProjectionWarpForPano(
           projectedSettings,
           projectedSecondary.id,
           projectedSecondary.rotation,
+          project.panoRefs,
         );
       }
     }

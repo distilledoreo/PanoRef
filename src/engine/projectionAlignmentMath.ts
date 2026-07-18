@@ -184,7 +184,6 @@ export function applyInverseYawRotation(direction: Vec3, yawRadians: number): Ve
 export function wendlandC2(r: number): number {
   if (r <= 0) return 1;
   if (r >= 1) return 0;
-  const oneMinusR = 1 - r;
-  const term = oneMinusR * oneMinusR * oneMinusR;
-  return term * (1 + 3 * r);
+  const q = 1 - r;
+  return q * q * q * q * (4 * r + 1);
 }

@@ -14,6 +14,7 @@ import { resolveProjectionWarpForPano } from '../src/engine/multiOriginProjectio
 import { createProjectedStyleMaterial } from '../src/engine/projectedStyleMaterials';
 import { equirectUvToUnitDirection, unitDirectionToEquirectUv } from '../src/engine/projectionAlignmentMath';
 import { degreesToRadians } from '../src/engine/sync';
+import type { PanoReference } from '../src/domain/types';
 
 const DEG = Math.PI / 180;
 
@@ -39,8 +40,8 @@ function makeSettings(overrides?: Partial<ProjectedStyleSettings>): ProjectedSty
 
 describe('projection alignment integration', () => {
   it('helper creates control pair with unique id', () => {
-    const a = createProjectionControlPair({ order: 0 });
-    const b = createProjectionControlPair({ order: 1 });
+    const a = createProjectionControlPair({ order: 0, targetUv: [0.5, 0.5], sourceUv: [0.5, 0.5] });
+    const b = createProjectionControlPair({ order: 1, targetUv: [0.5, 0.5], sourceUv: [0.5, 0.5] });
 
     expect(a.id).toBeTruthy();
     expect(b.id).toBeTruthy();
@@ -70,8 +71,8 @@ describe('projection alignment integration', () => {
   it('findProjectionAlignmentForPano finds by sourcePanoId', () => {
     const settings = makeSettings({
       alignments: [
-        createProjectionAlignment('pano-a', 'graybox'),
-        createProjectionAlignment('pano-b', 'graybox'),
+        createProjectionAlignment('pano-a', 'graybox', [createProjectionControlPair({ order: 0, targetUv: [0.5, 0.5], sourceUv: [0.5, 0.5] })]),
+        createProjectionAlignment('pano-b', 'graybox', [createProjectionControlPair({ order: 0, targetUv: [0.5, 0.5], sourceUv: [0.5, 0.5] })]),
       ],
     });
 
@@ -82,7 +83,7 @@ describe('projection alignment integration', () => {
 
   it('setProjectionAlignmentForPano adds new alignment', () => {
     const settings = makeSettings();
-    const alignment = createProjectionAlignment('pano-a', 'graybox');
+    const alignment = createProjectionAlignment('pano-a', 'graybox', [createProjectionControlPair({ order: 0, targetUv: [0.5, 0.5], sourceUv: [0.5, 0.5] })]);
     const updated = setProjectionAlignmentForPano(settings, 'pano-a', alignment);
 
     expect(updated.alignments).toHaveLength(1);
@@ -105,7 +106,7 @@ describe('projection alignment integration', () => {
   });
 
   it('setProjectionAlignmentForPano removes alignment when undefined', () => {
-    const a1 = createProjectionAlignment('pano-a', 'graybox');
+    const a1 = createProjectionAlignment('pano-a', 'graybox', [createProjectionControlPair({ order: 0, targetUv: [0.5, 0.5], sourceUv: [0.5, 0.5] })]);
     const settings = makeSettings({ alignments: [a1] });
 
     const updated = setProjectionAlignmentForPano(settings, 'pano-a', undefined);
@@ -192,7 +193,10 @@ describe('solver to warp texture integration', () => {
       ],
     });
     const rotation: Euler = [0, 10, 0];
-    const result = resolveProjectionWarpForPano(settings, 'pano-styled-1', rotation, 16, 8);
+    const panoRefs: PanoReference[] = [
+      { id: 'pano-graybox-1', rotation: [0, 0, 0] } as PanoReference,
+    ];
+    const result = resolveProjectionWarpForPano(settings, 'pano-styled-1', rotation, panoRefs, 16, 8);
 
     expect(result).toBeDefined();
     expect(result!.texture).toBeDefined();
@@ -204,7 +208,7 @@ describe('solver to warp texture integration', () => {
   it('resolveProjectionWarpForPano returns undefined for unknown pano', () => {
     const settings = makeSettings();
     const rotation: Euler = [0, 0, 0];
-    const result = resolveProjectionWarpForPano(settings, 'unknown-pano', rotation);
+    const result = resolveProjectionWarpForPano(settings, 'unknown-pano', rotation, []);
     expect(result).toBeUndefined();
   });
 });

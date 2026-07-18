@@ -48,6 +48,7 @@ async function loadProjectedSceneOptions(
     assets.settings,
     assets.primary.id,
     assets.primary.rotation,
+    project.panoRefs,
   );
   let secondaryWarp: WarpTextureResult | undefined;
   if (secondaryTexture && assets.secondary) {
@@ -55,6 +56,7 @@ async function loadProjectedSceneOptions(
       assets.settings,
       assets.secondary.id,
       assets.secondary.rotation,
+      project.panoRefs,
     );
   }
 

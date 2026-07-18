@@ -123,6 +123,45 @@ function clampRotationMagnitude(
   }
 }
 
+function sampleRotationFieldBilinear(
+  field: Float32Array,
+  width: number,
+  height: number,
+  uv: Vec2,
+): Vec3 {
+  const tx = uv[0] * (width - 1);
+  const ty = uv[1] * (height - 1);
+  const ix = Math.floor(tx);
+  const iy = Math.floor(ty);
+  const fx = tx - ix;
+  const fy = ty - iy;
+
+  const ix0 = Math.max(0, Math.min(width - 1, ix));
+  const ix1 = Math.max(0, Math.min(width - 1, ix + 1));
+  const iy0 = Math.max(0, Math.min(height - 1, iy));
+  const iy1 = Math.max(0, Math.min(height - 1, iy + 1));
+
+  const s00 = iy0 * width + ix0;
+  const s01 = iy0 * width + ix1;
+  const s10 = iy1 * width + ix0;
+  const s11 = iy1 * width + ix1;
+
+  const wx0 = 1 - fx;
+  const wx1 = fx;
+  const wy0 = 1 - fy;
+  const wy1 = fy;
+
+  const result: Vec3 = [0, 0, 0];
+  for (let c = 0; c < 3; c++) {
+    result[c] =
+      field[s00 * 3 + c] * wx0 * wy0 +
+      field[s01 * 3 + c] * wx1 * wy0 +
+      field[s10 * 3 + c] * wx0 * wy1 +
+      field[s11 * 3 + c] * wx1 * wy1;
+  }
+  return result;
+}
+
 export function solveProjectionWarp(
   alignment: ProjectionAlignment | undefined,
   options: ProjectionAlignmentSolveOptions,
@@ -196,10 +235,7 @@ export function solveProjectionWarp(
     for (let mi = 0; mi < markerCount; mi++) {
       const marker = markers[mi];
       const texelUv = unitDirectionToEquirectUv(marker.targetGrayboxLocalDir);
-      const tx = Math.round(texelUv[0] * (width - 1));
-      const ty = Math.round(texelUv[1] * (height - 1));
-      const idx = (ty * width + tx) * 3;
-      const currentRot: Vec3 = [rotationField[idx], rotationField[idx + 1], rotationField[idx + 2]];
+      const currentRot = sampleRotationFieldBilinear(rotationField, width, height, texelUv);
 
       const currentDir = rotateDirectionByAxisAngleVector(marker.naturalSourceDir, currentRot);
       const error = angularDistanceRadians(currentDir, marker.desiredSourceDir);
@@ -217,10 +253,7 @@ export function solveProjectionWarp(
     for (let mi = 0; mi < markerCount; mi++) {
       const marker = markers[mi];
       const texelUv = unitDirectionToEquirectUv(marker.targetGrayboxLocalDir);
-      const tx = Math.round(texelUv[0] * (width - 1));
-      const ty = Math.round(texelUv[1] * (height - 1));
-      const idx = (ty * width + tx) * 3;
-      const currentRot: Vec3 = [rotationField[idx], rotationField[idx + 1], rotationField[idx + 2]];
+      const currentRot = sampleRotationFieldBilinear(rotationField, width, height, texelUv);
 
       const currentDir = rotateDirectionByAxisAngleVector(marker.naturalSourceDir, currentRot);
       const error = angularDistanceRadians(currentDir, marker.desiredSourceDir);
