@@ -5,6 +5,7 @@ import {
   screenPointToPanoUv,
   shouldPickPanoViewerPointerUp,
 } from '../src/engine/panoViewerPicking';
+import { choosePanoGestureOwner, unwrapPanoUToReference } from '../src/components/viewers/PanoViewer';
 
 const viewport = { width: 1000, height: 500 };
 const identityRotation: [number, number, number] = [0, 0, 0];
@@ -119,6 +120,20 @@ describe('PanoViewer picking math', () => {
 });
 
 describe('PanoViewer pointer gesture classification', () => {
+  it('assigns exclusive owners for navigation, masks, bodies, and handles', () => {
+    expect(choosePanoGestureOwner('navigate', undefined, false, false)).toBe('view');
+    expect(choosePanoGestureOwner('move-outline', undefined, true, false)).toBe('region-transform');
+    expect(choosePanoGestureOwner('edit-handles', 'handle', false, false)).toBe('region-handle');
+    expect(choosePanoGestureOwner('edit-handles', undefined, false, false)).toBe('none');
+    expect(choosePanoGestureOwner('edit-handles', undefined, false, true)).toBe('view');
+    expect(choosePanoGestureOwner('draw-region', undefined, false, false)).toBe('region-mask');
+  });
+
+  it('keeps an active horizontal drag continuous across the panorama seam', () => {
+    expect(unwrapPanoUToReference(0.01, 0.99)).toBeCloseTo(1.01, 6);
+    expect(unwrapPanoUToReference(0.99, 0.01)).toBeCloseTo(-0.01, 6);
+  });
+
   it('picks a click at or under the five-pixel threshold', () => {
     expect(isPanoViewerClick({ x: 10, y: 10 }, { x: 13, y: 14 })).toBe(true);
     expect(shouldPickPanoViewerPointerUp('pick', true)).toBe(true);

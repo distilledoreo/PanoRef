@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -23,10 +23,12 @@ import {
 } from "../../domain/defaults";
 import { diagnoseProjectionRegionPolygon } from "../../engine/projectionRegionPolygon";
 import { projectionRegionDiagnosticsForAlignment } from "../../engine/projectionRegionDiagnostics";
+import { degreesToRadians } from "../../engine/sync";
 import { PanoViewer, type PanoViewerRegion } from "../viewers/PanoViewer";
 import { SceneViewport } from "../viewers/SceneViewport";
 import {
   cancelPendingRegion,
+  commitRegionGesture,
   commitPendingRegion,
   completeTargetPolygon,
   createProjectionRegionDraft,
@@ -35,7 +37,7 @@ import {
   isProjectionRegionDraftDirty,
   moveRegionDown,
   moveRegionUp,
-  moveSourceVertex,
+  moveSourceVertexTransient,
   removeRegion,
   removeRegionVertexPair,
   renameRegion,
@@ -44,14 +46,16 @@ import {
   scaleSourceRegion,
   setRegionEdgeSoftness,
   setRegionStrength,
-  moveTargetVertex,
+  moveTargetVertexTransient,
   replaceTargetPolygon,
   toggleRegion,
+  translateSourceRegionTransient,
   translateSourceRegion,
   undoRegionAction,
   type ProjectionRegionDraft,
 } from "./projectionRegionEditorState";
 import { createProjectionRegionPreviewProject } from "./projectionRegionPreviewProject";
+import { ProjectionRegionResultPreview } from "./ProjectionRegionResultPreview";
 
 const DEFAULT_VIEW: PanoViewState = {
   yawDegrees: 0,
@@ -143,12 +147,20 @@ export function ProjectionRegionEditor({
   const [previewComparison, setPreviewComparison] = useState<
     "before" | "after"
   >("after");
+  const [beforeHeld, setBeforeHeld] = useState(false);
+  const [previewUpdating, setPreviewUpdating] = useState(false);
+  const [previewProject, setPreviewProject] = useState<LocationProject>(() =>
+    createProjectionRegionPreviewProject(project, draft),
+  );
+  const previewGenerationRef = useRef(0);
   const [showOutlines, setShowOutlines] = useState(true);
   const [showSupport, setShowSupport] = useState(false);
   const [numbered, setNumbered] = useState(true);
   const [targetDraftDirty, setTargetDraftDirty] = useState(false);
   const [redrawRegionId, setRedrawRegionId] = useState<string>();
   const [editTarget, setEditTarget] = useState(false);
+  const [regionTool, setRegionTool] = useState<"navigate" | "move-outline" | "edit-handles">("navigate");
+  const gestureStartRef = useRef<ProjectionRegionDraft>();
   useEffect(() => {
     if (open) {
       setSourceId(initialSourcePanoId);
@@ -165,12 +177,45 @@ export function ProjectionRegionEditor({
       );
       setMobilePane("review");
       setPreview(false);
+      setRegionTool("navigate");
     }
   }, [open, initialSourcePanoId]);
-  const previewProject = useMemo(
+  const previewDraftProject = useMemo(
     () => createProjectionRegionPreviewProject(project, draft),
     [project, draft],
   );
+  useEffect(() => {
+    const generation = ++previewGenerationRef.current;
+    setPreviewUpdating(true);
+    const timeoutId = window.setTimeout(() => {
+      if (generation !== previewGenerationRef.current) return;
+      setPreviewProject(previewDraftProject);
+      setPreviewUpdating(false);
+    }, 90);
+    return () => window.clearTimeout(timeoutId);
+  }, [previewDraftProject]);
+  useEffect(() => {
+    if (!preview) {
+      setBeforeHeld(false);
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "b") return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input,textarea,select,[contenteditable='true']")) return;
+      event.preventDefault();
+      setBeforeHeld(true);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === "b") setBeforeHeld(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [preview]);
   if (!open || !source) return null;
   const target = targets.find((pano) => pano.id === draft.targetGrayboxPanoId);
   const active =
@@ -181,11 +226,17 @@ export function ProjectionRegionEditor({
     : undefined;
   const alignment = draftToProjectionRegionAlignment(draft);
   const alignmentDiagnostics = projectionRegionDiagnosticsForAlignment(
-    previewProject,
+    previewDraftProject,
     alignment,
+  );
+  const previewAlignment = findProjectionRegionAlignmentForPano(
+    normalizeProjectedStyleSettings(previewProject.settings.projectedStyle),
+    sourceId,
   );
   const canApply =
     !targetDraftDirty && !draft.pendingRegion && alignmentDiagnostics.valid;
+  const canPreview = Boolean(target && (draft.regions.length || draft.pendingRegion));
+  const effectivePreviewComparison = beforeHeld ? "before" : previewComparison;
   const close = () => {
     if (
       (!targetDraftDirty && !isProjectionRegionDraftDirty(draft)) ||
@@ -202,12 +253,32 @@ export function ProjectionRegionEditor({
     setRedrawRegionId(undefined);
     setTargetDraftDirty(false);
     setTool("move");
+    setRegionTool("move-outline");
     setMobilePane("styled");
   };
   const addRectangle = () => {
     setTool("rectangle");
     setMobilePane("graybox");
   };
+  const beginRegionGesture = () => {
+    gestureStartRef.current = draft;
+  };
+  const endRegionGesture = () => {
+    const before = gestureStartRef.current;
+    gestureStartRef.current = undefined;
+    previewGenerationRef.current += 1;
+    setDraft((current) => {
+      const next = commitRegionGesture(current, before);
+      setPreviewProject(createProjectionRegionPreviewProject(project, next));
+      setPreviewUpdating(false);
+      return next;
+    });
+  };
+  const sourceInteractionMode = regionTool === "move-outline"
+    ? "move-outline"
+    : regionTool === "edit-handles"
+      ? "edit-handles"
+      : "navigate";
   return (
     <div
       role="dialog"
@@ -288,11 +359,12 @@ export function ProjectionRegionEditor({
           </select>
         </label>
         <button
+          aria-label={preview ? "Edit regions" : "Preview"}
           onClick={() => setPreview(!preview)}
-          disabled={!canApply}
+          disabled={!preview && !canPreview}
           className="rounded-lg border border-subtle px-3 py-2 text-sm disabled:opacity-40"
         >
-          {preview ? "Edit regions" : "Preview"}
+          {preview ? "Edit outline" : "Result"}
         </button>
         <button
           aria-label="Close Region Fit editor"
@@ -329,14 +401,14 @@ export function ProjectionRegionEditor({
               aria-label="Preview comparison"
             >
               <button
-                aria-pressed={previewComparison === "before"}
+                aria-pressed={effectivePreviewComparison === "before"}
                 onClick={() => setPreviewComparison("before")}
                 className="rounded px-3 py-1 text-xs"
               >
                 Before
               </button>
               <button
-                aria-pressed={previewComparison === "after"}
+                aria-pressed={effectivePreviewComparison === "after"}
                 onClick={() => setPreviewComparison("after")}
                 className="rounded px-3 py-1 text-xs"
               >
@@ -361,7 +433,9 @@ export function ProjectionRegionEditor({
                 Show support regions
               </label>
             )}
-            <span className="ml-auto text-xs text-secondary">
+            <span className="ml-auto text-xs text-secondary" aria-live="polite">
+              {previewUpdating ? "Updating preview… " : ""}
+              {beforeHeld ? "Holding B · " : ""}
               {alignmentDiagnostics.message}
             </span>
           </div>
@@ -369,34 +443,35 @@ export function ProjectionRegionEditor({
             {previewMode === "geometry" ? (
               <SceneViewport
                 project={
-                  previewComparison === "after" ? previewProject : project
+                  effectivePreviewComparison === "after" ? previewProject : project
                 }
                 appearance="projected"
               />
             ) : (
-              <PanoViewer
+              <ProjectionRegionResultPreview
                 imageUrl={imageUrl(
                   project,
-                  previewComparison === "after" ? source : target,
+                  effectivePreviewComparison === "after" ? source : target,
                 )}
-                panoRotation={
-                  (previewComparison === "after" ? source : target)?.rotation
+                alignment={
+                  effectivePreviewComparison === "after" ? previewAlignment : undefined
                 }
-                view={view}
-                onViewChange={(change) =>
-                  setView((current) => ({ ...current, ...change }))
-                }
-                interactionMode="navigate"
+                sourceYawRadians={degreesToRadians(source?.rotation[1] ?? 0)}
+                targetYawRadians={degreesToRadians(target?.rotation[1] ?? 0)}
+                sourceOrigin={source?.origin}
+                targetOrigin={target?.origin}
+                strength={draft.strength}
                 regions={
                   showOutlines
                     ? viewerRegions(
-                        draft,
-                        previewComparison === "after" ? "source" : "target",
+                        showSupport ? draft : { ...draft, activeRegionId: undefined },
+                        effectivePreviewComparison === "after" ? "source" : "target",
                         numbered,
                       )
                     : []
                 }
-                activeRegionId={showSupport ? draft.activeRegionId : undefined}
+                showOutlines={showOutlines}
+                statusLabel={effectivePreviewComparison === "after" ? "After" : "Before"}
               />
             )}
           </div>
@@ -471,7 +546,7 @@ export function ProjectionRegionEditor({
                     tool === "polygon" || tool === "rectangle"
                       ? "draw-region"
                       : editTarget
-                        ? "edit-region"
+                        ? "edit-handles"
                         : "navigate"
                   }
                   regionDrawShape={
@@ -483,9 +558,11 @@ export function ProjectionRegionEditor({
                   onVertexSelectionChange={setSelectedIds}
                   onVertexMove={(regionId, vertexId, uv) =>
                     setDraft((current) =>
-                      moveTargetVertex(current, regionId, vertexId, uv),
+                      moveTargetVertexTransient(current, regionId, vertexId, uv),
                     )
                   }
+                  onRegionGestureStart={beginRegionGesture}
+                  onRegionGestureEnd={endRegionGesture}
                   onRegionDraftChange={(vertices) =>
                     setTargetDraftDirty(vertices.length > 0)
                   }
@@ -501,10 +578,61 @@ export function ProjectionRegionEditor({
                   Move the outline around the matching region in the styled
                   panorama.
                 </span>
+                <div className="flex rounded border border-subtle p-1" aria-label="Styled preview mode">
+                  <button
+                    type="button"
+                    aria-pressed={!preview}
+                    onClick={() => setPreview(false)}
+                    className="rounded px-2 py-1 text-xs"
+                  >
+                    Edit outline
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={preview && previewMode === "mapped"}
+                    disabled={!canPreview}
+                    onClick={() => {
+                      setPreviewMode("mapped");
+                      setPreview(true);
+                    }}
+                    className="rounded px-2 py-1 text-xs disabled:opacity-40"
+                  >
+                    Result
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Preview on geometry"
+                    disabled={!canPreview}
+                    onClick={() => {
+                      setPreviewMode("geometry");
+                      setPreview(true);
+                    }}
+                    className="rounded px-2 py-1 text-xs disabled:opacity-40"
+                  >
+                    Geometry
+                  </button>
+                </div>
+                <div className="flex rounded border border-subtle p-1" aria-label="Region Fit tool">
+                  {([
+                    ["navigate", "Navigate"],
+                    ["move-outline", "Move outline"],
+                    ["edit-handles", "Edit handles"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={regionTool === value}
+                      onClick={() => setRegionTool(value)}
+                      className="rounded px-2 py-1 text-xs"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 {active && (
                   <>
                     <button
-                      aria-label="Move outline"
+                      aria-label="Nudge outline"
                       onClick={() =>
                         setDraft((current) =>
                           translateSourceRegion(current, active.id, [0.01, 0]),
@@ -512,7 +640,7 @@ export function ProjectionRegionEditor({
                       }
                       className="rounded border px-2 py-1 text-xs"
                     >
-                      Move
+                      Nudge
                     </button>
                     <button
                       aria-label="Scale outline"
@@ -568,21 +696,23 @@ export function ProjectionRegionEditor({
                   onViewChange={(change) =>
                     setView((current) => ({ ...current, ...change }))
                   }
-                  interactionMode={active ? "edit-region" : "navigate"}
+                   interactionMode={active ? sourceInteractionMode : "navigate"}
                   regions={viewerRegions(draft, "source", numbered)}
                   activeRegionId={draft.activeRegionId}
-                  onRegionTranslate={(regionId, delta) =>
-                    setDraft((current) =>
-                      translateSourceRegion(current, regionId, delta),
-                    )
-                  }
+                   onRegionTranslate={(regionId, delta) =>
+                     setDraft((current) =>
+                       translateSourceRegionTransient(current, regionId, delta),
+                     )
+                   }
+                   onRegionGestureStart={beginRegionGesture}
+                   onRegionGestureEnd={endRegionGesture}
                   selectedVertexIds={selectedIds}
                   onVertexSelectionChange={setSelectedIds}
-                  onVertexMove={(regionId, vertexId, uv) =>
-                    setDraft((current) =>
-                      moveSourceVertex(current, regionId, vertexId, uv),
-                    )
-                  }
+                   onVertexMove={(regionId, vertexId, uv) =>
+                     setDraft((current) =>
+                       moveSourceVertexTransient(current, regionId, vertexId, uv),
+                     )
+                   }
                   onVertexInsert={(regionId, vertexId, edgeT) =>
                     setDraft((current) =>
                       insertRegionVertexPair(
@@ -716,9 +846,10 @@ export function ProjectionRegionEditor({
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
                         onClick={() => {
-                          setDraft({ ...draft, activeRegionId: region.id });
-                          setMobilePane("styled");
-                          setEditTarget(false);
+                           setDraft({ ...draft, activeRegionId: region.id });
+                           setMobilePane("styled");
+                           setRegionTool("move-outline");
+                           setEditTarget(false);
                         }}
                         className="text-xs text-accent"
                       >

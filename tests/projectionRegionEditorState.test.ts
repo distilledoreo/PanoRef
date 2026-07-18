@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   cancelPendingRegion, commitPendingRegion, completeTargetPolygon, createProjectionRegionDraft,
-  draftToProjectionRegionAlignment, insertRegionVertexPair, isProjectionRegionDraftDirty,
+  commitRegionGesture, draftToProjectionRegionAlignment, insertRegionVertexPair, isProjectionRegionDraftDirty,
   moveRegionDown, moveRegionUp, moveSourceVertex, removeRegion, removeRegionVertexPair,
   renameRegion, replaceTargetPolygon, resetSourceRegion, rotateSourceRegion, scaleSourceRegion, setRegionEdgeSoftness,
-  setRegionStrength, toggleRegion, translateSourceRegion, undoRegionAction,
+  setRegionStrength, toggleRegion, translateSourceRegion, translateSourceRegionTransient, undoRegionAction,
 } from '../src/components/reference/projectionRegionEditorState';
 
 const outline: [number, number][] = [[0.2, 0.2], [0.4, 0.2], [0.4, 0.4], [0.2, 0.4]];
@@ -67,5 +67,16 @@ describe('Projection Region editor draft', () => {
     expect(draft.regions.find((region) => region.id === first)?.vertices).toHaveLength(3);
     expect(removeRegion(draft, first).regions).toHaveLength(1);
     expect(isProjectionRegionDraftDirty(draft)).toBe(true);
+  });
+
+  it('coalesces a pointer gesture into one undo entry after transient updates', () => {
+    const initial = commitPendingRegion(pending());
+    const regionId = initial.regions[0].id;
+    let dragged = translateSourceRegionTransient(initial, regionId, [0.01, 0]);
+    dragged = translateSourceRegionTransient(dragged, regionId, [0.02, 0]);
+    const committed = commitRegionGesture(dragged, initial);
+    const undone = undoRegionAction(committed);
+    expect(undone.regions[0].vertices.map((vertex) => vertex.sourceUv)).toEqual(initial.regions[0].vertices.map((vertex) => vertex.sourceUv));
+    expect(undoRegionAction(undone).pendingRegion).toBeDefined();
   });
 });

@@ -20,10 +20,16 @@ const cloneDraft = (draft: ProjectionRegionDraft): ProjectionRegionDraft => ({ .
 const comparable = (draft: ProjectionRegionDraft) => JSON.stringify(cloneDraft(draft));
 function register(draft: ProjectionRegionDraft, baseline = comparable(draft), undo: ProjectionRegionDraft[] = []): ProjectionRegionDraft { metadata.set(draft, { baseline, undo: undo.map(cloneDraft) }); return draft; }
 function update(draft: ProjectionRegionDraft, next: ProjectionRegionDraft): ProjectionRegionDraft { const meta = metadata.get(draft); return register(next, meta?.baseline ?? comparable(draft), [...(meta?.undo ?? []), cloneDraft(draft)].slice(-100)); }
+function updateTransient(draft: ProjectionRegionDraft, next: ProjectionRegionDraft): ProjectionRegionDraft { const meta = metadata.get(draft); return register(next, meta?.baseline ?? comparable(draft), meta?.undo ?? []); }
 function mapRegion(draft: ProjectionRegionDraft, regionId: string, mapper: (region: ProjectionRegion) => ProjectionRegion): ProjectionRegionDraft {
   if (draft.pendingRegion?.id === regionId) return update(draft, { ...draft, pendingRegion: mapper(draft.pendingRegion) });
   if (!draft.regions.some((region) => region.id === regionId)) return draft;
   return update(draft, { ...draft, regions: draft.regions.map((region) => region.id === regionId ? mapper(region) : cloneRegion(region)) });
+}
+function mapRegionTransient(draft: ProjectionRegionDraft, regionId: string, mapper: (region: ProjectionRegion) => ProjectionRegion): ProjectionRegionDraft {
+  if (draft.pendingRegion?.id === regionId) return updateTransient(draft, { ...draft, pendingRegion: mapper(draft.pendingRegion) });
+  if (!draft.regions.some((region) => region.id === regionId)) return draft;
+  return updateTransient(draft, { ...draft, regions: draft.regions.map((region) => region.id === regionId ? mapper(region) : cloneRegion(region)) });
 }
 
 export function createProjectionRegionDraft(sourcePanoId: string, targetGrayboxPanoId = '', alignment?: ProjectionRegionAlignment): ProjectionRegionDraft {
@@ -41,6 +47,9 @@ export function markTargetRegionDraftStarted(draft: ProjectionRegionDraft): Proj
 export const moveSourceVertex = (draft: ProjectionRegionDraft, regionId: string, vertexId: string, sourceUv: Vec2) => mapRegion(draft, regionId, (region) => ({ ...region, vertices: region.vertices.map((vertex) => vertex.id === vertexId ? { ...vertex, sourceUv: [...sourceUv] } : vertex) }));
 export const moveTargetVertex = (draft: ProjectionRegionDraft, regionId: string, vertexId: string, targetUv: Vec2) => mapRegion(draft, regionId, (region) => ({ ...region, vertices: region.vertices.map((vertex) => vertex.id === vertexId ? { ...vertex, targetUv: [...targetUv] } : vertex) }));
 export const translateSourceRegion = (draft: ProjectionRegionDraft, regionId: string, delta: Vec2) => mapRegion(draft, regionId, (region) => translateSourceMask(region, delta));
+export const moveSourceVertexTransient = (draft: ProjectionRegionDraft, regionId: string, vertexId: string, sourceUv: Vec2) => mapRegionTransient(draft, regionId, (region) => ({ ...region, vertices: region.vertices.map((vertex) => vertex.id === vertexId ? { ...vertex, sourceUv: [...sourceUv] } : vertex) }));
+export const moveTargetVertexTransient = (draft: ProjectionRegionDraft, regionId: string, vertexId: string, targetUv: Vec2) => mapRegionTransient(draft, regionId, (region) => ({ ...region, vertices: region.vertices.map((vertex) => vertex.id === vertexId ? { ...vertex, targetUv: [...targetUv] } : vertex) }));
+export const translateSourceRegionTransient = (draft: ProjectionRegionDraft, regionId: string, delta: Vec2) => mapRegionTransient(draft, regionId, (region) => translateSourceMask(region, delta));
 export const scaleSourceRegion = (draft: ProjectionRegionDraft, regionId: string, scale: number) => mapRegion(draft, regionId, (region) => scaleSourceMask(region, scale));
 export const rotateSourceRegion = (draft: ProjectionRegionDraft, regionId: string, radians: number) => mapRegion(draft, regionId, (region) => rotateSourceMask(region, radians));
 export const resetSourceRegion = (draft: ProjectionRegionDraft, regionId: string) => mapRegion(draft, regionId, cloneTargetIntoSource);
@@ -58,5 +67,16 @@ export const moveRegionDown = (draft: ProjectionRegionDraft, regionId: string) =
 export const setRegionEdgeSoftness = (draft: ProjectionRegionDraft, regionId: string, value: number) => mapRegion(draft, regionId, (region) => ({ ...region, edgeSoftness: Math.min(MAX_REGION_EDGE_SOFTNESS, Math.max(0, Number.isFinite(value) ? value : region.edgeSoftness)) }));
 export function setRegionStrength(draft: ProjectionRegionDraft, strength: number): ProjectionRegionDraft { const value = Math.min(1, Math.max(0, Number.isFinite(strength) ? strength : draft.strength)); return value === draft.strength ? draft : update(draft, { ...draft, strength: value }); }
 export function undoRegionAction(draft: ProjectionRegionDraft): ProjectionRegionDraft { const meta = metadata.get(draft); if (!meta?.undo.length) return draft; const previous = cloneDraft(meta.undo.at(-1)!); return register(previous, meta.baseline, meta.undo.slice(0, -1)); }
+export function commitRegionGesture(draft: ProjectionRegionDraft, before: ProjectionRegionDraft | undefined): ProjectionRegionDraft {
+  if (!before || comparable(draft) === comparable(before)) return draft;
+  const meta = metadata.get(draft);
+  return register(draft, meta?.baseline ?? comparable(draft), [...(meta?.undo ?? []), cloneDraft(before)].slice(-100));
+}
 export function isProjectionRegionDraftDirty(draft: ProjectionRegionDraft): boolean { return comparable(draft) !== (metadata.get(draft)?.baseline ?? comparable(draft)); }
 export function draftToProjectionRegionAlignment(draft: ProjectionRegionDraft): ProjectionRegionAlignment | undefined { if (!draft.targetGrayboxPanoId || draft.pendingRegion || !draft.regions.length) return undefined; return { ...createProjectionRegionAlignment(draft.sourcePanoId, draft.targetGrayboxPanoId, draft.regions.map(cloneRegion)), strength: draft.strength }; }
+export function draftToProjectionRegionAlignmentForPreview(draft: ProjectionRegionDraft): ProjectionRegionAlignment | undefined {
+  if (!draft.targetGrayboxPanoId) return undefined;
+  const regions = draft.pendingRegion ? [...draft.regions, draft.pendingRegion] : draft.regions;
+  if (!regions.length) return undefined;
+  return { ...createProjectionRegionAlignment(draft.sourcePanoId, draft.targetGrayboxPanoId, regions.map(cloneRegion)), strength: draft.strength };
+}

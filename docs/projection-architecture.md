@@ -12,7 +12,7 @@
 | 6 | **Package Export — Video** | `includeProjectedCameraMoveVideo` | `renderShotCameraMoveMp4({appearance:'projected'})` | Same as #4 |
 | 7 | **Package Export — Frames** | `includeProjectedCameraMoveReferenceFrames` | `renderViewportProjected()` per frame | Same as #2 |
 | 8 | **Test Harness** | `runProjectedStyleCompileGate()` | Direct `createProjectedStyleMaterial()` in test code | Explicit `.dispose()` after readback |
-| 9 | **Projection Assist Preview** | User opens **Preview** | `ProjectionRegionEditor` creates an immutable Region Fit project snapshot; `SceneViewport` renders it with `appearance='projected'` | Snapshot is discarded on Back, Cancel, or editor close |
+| 9 | **Projection Assist Preview** | User opens **Result** or **Geometry** | `ProjectionRegionEditor` creates an immutable Region Fit project snapshot; `ProjectionRegionResultPreview` renders a debounced 256×128 2D result and `SceneViewport` renders the same snapshot with `appearance='projected'` | Snapshot is discarded on Back, Cancel, or editor close |
 
 ## Projector Resolution Chain
 
@@ -51,11 +51,11 @@ export interface ProjectedStyleSettings {
 
 ## Projection Assist Region Fit lifecycle
 
-`ProjectionRegionEditor` owns a non-persistent `ProjectionRegionDraft`. Closing a graybox polygon creates exactly one `ProjectionRegion`, clones its target positions into styled positions, and preserves shared vertex IDs permanently. Editor transitions provide paired insertion/deletion, styled-only transforms, undo, ordering, softness, enabled state, and dirty-state checks. Pending regions cannot be converted to a persisted alignment.
+`ProjectionRegionEditor` owns a non-persistent `ProjectionRegionDraft`. Closing a graybox polygon creates exactly one `ProjectionRegion`, clones its target positions into styled positions, and preserves shared vertex IDs permanently. Editor transitions provide paired insertion/deletion, styled-only transforms, undo, ordering, softness, enabled state, and dirty-state checks. Pending regions are included in the immutable preview snapshot so the Result/Geometry surfaces stay live, but pending regions cannot be converted to a persisted alignment or enabled for Apply. Pointer gestures have an explicit view/mask/outline/handle owner, capture the pointer, use seam-safe unwrapped U coordinates, and coalesce the full drag into one undo entry. Navigate, Move outline, and Edit handles are exclusive tools; hold `B` temporarily shows Before.
 
 `projectionRegionCoordinates.ts` converts target and source directions through their respective yaw into one tangent plane. `projectionRegionMesh.ts` triangulates the shared topology and adds an identity transition cage. `projectionRegionTexture.ts` rasterizes deterministic ordered mappings and caches them without overall strength. Diagnostics use the same pure coordinate/mesh checks without acquiring GPU textures.
 
-The editor preview path uses `createProjectionRegionPreviewProject()` to clone the project and replace only the selected source Region Fit. Apply is the only parent settings mutation. Primary and secondary entries remain source-owned and resolve independently in the live viewport and shared export renderer.
+The editor preview path uses `createProjectionRegionPreviewProject()` to clone the project and replace only the selected source Region Fit. The 2D result uses the same preview-quality displacement texture (`256×128`) as the projection resolver, ignores stale debounced snapshots, and reports invalid or missing-image status without mutating the project. Apply is the only parent settings mutation. Primary and secondary entries remain source-owned and resolve independently in the live viewport and shared export renderer.
 
 ## Legacy point-correction lifecycle
 

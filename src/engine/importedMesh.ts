@@ -7,6 +7,7 @@ export const PANOREF_MESH_MIME = 'application/vnd.panoref.graybox-mesh';
 export const PANOREF_MESH_VERSION = 2;
 export const MAX_PACKED_MESH_BYTES = IMPORT_BUDGET_POLICY.maxPackedAssetBytes;
 export const MODEL_ASSET_URI_PREFIX = 'panoref-idb:';
+export const MISSING_MODEL_ASSET_URI_PREFIX = 'panoref-missing:';
 
 const HEADER_BYTES = 40;
 const MAGIC = [0x50, 0x52, 0x47, 0x4d] as const; // PRGM
@@ -197,6 +198,10 @@ function decodeGeometry(asset: ProjectAsset): THREE.BufferGeometry {
         if (!stored) throw new Error('The binary model asset is unavailable. Reopen the project package or reimport the source model.');
         return new Uint8Array(stored);
       })()
+      : asset.uri.startsWith(MISSING_MODEL_ASSET_URI_PREFIX)
+        ? (() => {
+          throw new Error(`Model asset "${asset.name}" is missing and must be relinked. The saved browser-session blob URL was not durable.`);
+        })()
       : (() => { throw new Error('Unsupported imported mesh asset encoding.'); })();
   if (bytes.byteLength < HEADER_BYTES || bytes.byteLength > MAX_PACKED_MESH_BYTES) {
     throw new Error('Imported mesh asset size is invalid.');

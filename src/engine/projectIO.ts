@@ -1,12 +1,12 @@
-import { Euler, LocationProject, PanoReference, SceneObject, Shot, Vec3 } from '../domain/types';
+import { Euler, LocationProject, PanoReference, ProjectAsset, SceneObject, Shot, Vec3 } from '../domain/types';
 import {
   DEFAULT_CAMERA_HEIGHT_METERS,
   normalizeProjectSettings,
   normalizeProjectWorkflow,
 } from '../domain/defaults';
 import JSZip from 'jszip';
-import { MODEL_ASSET_URI_PREFIX } from './importedMesh';
-import { deleteModelAsset, getModelAsset, putModelAsset } from './modelAssetStore';
+import { MISSING_MODEL_ASSET_URI_PREFIX, MODEL_ASSET_URI_PREFIX } from './importedMesh';
+import { deleteModelAsset, getModelAsset, restoreModelAssetWrites } from './modelAssetStore';
 
 const PROJECT_MANIFEST = 'project.json';
 const DEFAULT_SCENE_PANO_ORIGIN: Vec3 = [0, DEFAULT_CAMERA_HEIGHT_METERS, 0];
@@ -57,6 +57,10 @@ export function parseProject(json: string): LocationProject {
       panoRefs: parsed.panoRefs.map(normalizePanoReference),
       shots: parsed.shots.map(normalizeShot),
       landmarks: Array.isArray(parsed.landmarks) ? parsed.landmarks : [],
+      assets: {
+        ...parsed.assets,
+        assets: normalizeProjectAssets(parsed.assets.assets),
+      },
       settings: normalizeProjectSettings(parsed.settings),
       workflow: normalizeProjectWorkflow(parsed.workflow),
     };
@@ -176,14 +180,30 @@ export async function readProjectFile(file: File): Promise<LocationProject> {
   const manifest = zip.file(PROJECT_MANIFEST);
   if (!manifest) throw new Error(`Invalid project package: missing ${PROJECT_MANIFEST}.`);
   const project = parseProject(await manifest.async('text'));
+  const writes = [] as Array<{
+    assetId: string;
+    storageKey: string;
+    filename: string;
+    mimeType: string;
+    size: number;
+    bytes: ArrayBuffer;
+  }>;
   for (const asset of Object.values(project.assets.assets)) {
     if (asset.type !== 'model' || !asset.uri.startsWith(MODEL_ASSET_URI_PREFIX)) continue;
     const key = asset.uri.slice(MODEL_ASSET_URI_PREFIX.length);
     const entry = zip.file(`model-assets/${encodeURIComponent(key)}.bin`);
     if (!entry) throw new Error(`Project package is missing binary model asset ${asset.name}.`);
     const bytes = await entry.async('arraybuffer');
-    await putModelAsset(key, bytes);
+    writes.push({
+      assetId: asset.id,
+      storageKey: key,
+      filename: asset.name,
+      mimeType: asset.mimeType ?? 'application/octet-stream',
+      size: bytes.byteLength,
+      bytes,
+    });
   }
+  await restoreModelAssetWrites(writes, { projectId: project.id, projectName: project.name });
   return project;
 }
 
@@ -290,4 +310,20 @@ function withoutOrphanedModelAssets(project: LocationProject): LocationProject {
     ...project,
     assets: { assets },
   };
+}
+
+function normalizeProjectAssets(assets: Record<string, ProjectAsset>): Record<string, ProjectAsset> {
+  return Object.fromEntries(Object.entries(assets).map(([id, asset]) => {
+    if (asset.type !== 'model' || !asset.uri.startsWith('blob:')) return [id, asset];
+    return [id, {
+      ...asset,
+      uri: `${MISSING_MODEL_ASSET_URI_PREFIX}${asset.id}`,
+      metadata: {
+        ...asset.metadata,
+        missingAsset: true,
+        relinkRequired: true,
+        missingReason: 'This browser-session blob URL was not durable project data.',
+      },
+    }];
+  }));
 }

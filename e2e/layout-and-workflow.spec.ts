@@ -1,4 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import JSZip from 'jszip';
+import { createDefaultProject, createTransform } from '../src/domain/defaults';
+import { encodeBinaryGrayboxMesh, MODEL_ASSET_URI_PREFIX } from '../src/engine/importedMesh';
 
 async function enterContinuityStage(page: Page) {
   // Skip splash video so it never blocks pointer events mid-test.
@@ -103,6 +106,40 @@ function multiNodeGltfBuffer() {
     scenes: [{ nodes: [0, 1] }],
     scene: 0,
   }));
+}
+
+async function reopenableModelPackage() {
+  const createdAt = '2026-07-18T00:00:00.000Z';
+  const project = createDefaultProject();
+  project.name = 'Reopenable imported model';
+  const key = 'e2e/reopenable-mesh';
+  const packed = encodeBinaryGrayboxMesh(
+    new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    new Uint32Array([0, 1, 2]),
+  );
+  project.assets.assets['reopenable-mesh'] = {
+    id: 'reopenable-mesh',
+    type: 'model',
+    name: 'reopenable-triangle.panoref-mesh',
+    uri: `${MODEL_ASSET_URI_PREFIX}${key}`,
+    mimeType: 'application/vnd.panoref.graybox-mesh',
+    createdAt,
+  };
+  project.scene.objects.push({
+    id: 'reopenable-object',
+    name: 'Reopenable triangle',
+    type: 'imported_model',
+    transform: createTransform(),
+    dimensions: [1, 1, 0.001],
+    category: 'architecture',
+    locked: false,
+    visible: true,
+    modelAssetId: 'reopenable-mesh',
+  });
+  const zip = new JSZip();
+  zip.file('project.json', JSON.stringify(project));
+  zip.file(`model-assets/${encodeURIComponent(key)}.bin`, packed.buffer);
+  return zip.generateAsync({ type: 'nodebuffer' });
 }
 
 test.describe('layout and core chrome', () => {
@@ -223,6 +260,19 @@ test.describe('layout and core chrome', () => {
     await dialog.getByText('Close', { exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(page.getByRole('textbox', { name: 'Selected object name' })).toHaveValue('triangle');
+  });
+
+  test('reopens a binary-backed imported-model project package', async ({ page }) => {
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await page.locator('[data-project-import-input]').setInputFiles({
+      name: 'reopenable-model.panoref-project',
+      mimeType: 'application/zip',
+      buffer: await reopenableModelPackage(),
+    });
+    await expect(page.locator('[data-project-import-status="success"]')).toBeVisible();
+    await page.getByTitle('Scene layers').click();
+    await expect(page.getByText('Reopenable triangle', { exact: true })).toBeVisible();
   });
 
   test('imports separate multi-node scenes with one report card per source file', async ({ page }) => {

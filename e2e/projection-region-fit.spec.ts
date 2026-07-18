@@ -8,6 +8,7 @@ async function addRectangle(editor: Locator, mobile: boolean) {
   await editor.getByRole('button', { name: 'Add region' }).click();
   await editor.getByRole('button', { name: 'Rectangle', exact: true }).click();
   const viewer = editor.locator('section').filter({ hasText: /Draw around the region/ }).getByRole('application');
+  await expect(viewer).toHaveAttribute('data-pano-interaction-mode', 'draw-region');
   const box = await viewer.boundingBox(); expect(box).toBeTruthy();
   if (box) await viewer.dragTo(viewer, { sourcePosition: { x: box.width * 0.4, y: box.height * 0.4 }, targetPosition: { x: box.width * 0.6, y: box.height * 0.6 } });
   if (mobile) { await expect(editor.getByRole('button', { name: 'Styled', exact: true })).toHaveClass(/bg-accent/); await editor.getByRole('button', { name: 'Review', exact: true }).click(); }
@@ -73,6 +74,38 @@ test.describe('Projection Assist Region Fit rendered workflow', () => {
 
   test('confirms source changes and keeps incomplete regions unapplied', async ({ page }) => {
     await enter(page); const editor = await openRegionEditor(page); await addRectangle(editor, false);
-    await expect(editor.getByRole('button', { name: /Apply/ })).toBeDisabled(); page.once('dialog', (dialog) => dialog.dismiss()); await editor.getByRole('combobox', { name: 'Styled panorama' }).selectOption('styled-b'); await expect(editor.getByRole('combobox', { name: 'Styled panorama' })).toHaveValue('styled-a');
+    await expect(editor.getByRole('button', { name: /Apply/ })).toBeDisabled();
+    await expect(editor.getByRole('button', { name: 'Preview', exact: true })).toBeEnabled();
+    await editor.getByRole('button', { name: 'Result', exact: true }).click();
+    await expect(editor.locator('[data-projection-region-result]')).toBeVisible();
+    await expect(editor.locator('[data-projection-region-preview-quality="256x128"]')).toBeVisible();
+    await page.keyboard.down('b');
+    await expect(editor.getByText(/Holding B/)).toBeVisible();
+    await expect(editor.getByRole('button', { name: 'Before', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.up('b');
+    await editor.getByRole('button', { name: 'Edit regions', exact: true }).click();
+    const styledViewer = editor.locator('section').filter({ hasText: /Move the outline around/ }).getByRole('application');
+    const styledBox = await styledViewer.boundingBox(); expect(styledBox).toBeTruthy();
+    if (styledBox) {
+      await editor.getByRole('button', { name: 'Edit handles', exact: true }).click();
+      const handle = editor.locator('section').filter({ hasText: /Move the outline around/ }).locator('[data-region-vertex]').first();
+      const handleBox = await handle.boundingBox(); expect(handleBox).toBeTruthy();
+      if (handleBox) {
+        const beforeHandleStyle = await handle.getAttribute('style');
+        await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(handleBox.x + handleBox.width / 2 + 24, handleBox.y + handleBox.height / 2 + 8);
+        await page.mouse.up();
+        await expect.poll(() => handle.getAttribute('style')).not.toBe(beforeHandleStyle);
+      }
+      await editor.getByRole('button', { name: 'Move outline', exact: true }).click();
+      const beforeTransformStyle = await handle.getAttribute('style');
+      await page.mouse.move(styledBox.x + styledBox.width / 2, styledBox.y + styledBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(styledBox.x + styledBox.width / 2 + 20, styledBox.y + styledBox.height / 2 + 6);
+      await page.mouse.up();
+      await expect.poll(() => handle.getAttribute('style')).not.toBe(beforeTransformStyle);
+    }
+    page.once('dialog', (dialog) => dialog.dismiss()); await editor.getByRole('combobox', { name: 'Styled panorama' }).selectOption('styled-b'); await expect(editor.getByRole('combobox', { name: 'Styled panorama' })).toHaveValue('styled-a');
   });
 });
