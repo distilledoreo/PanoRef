@@ -99,7 +99,7 @@ describe('projected style WebGL compile gate', () => {
       expect(result.lightingCases.every((c) => c.ok)).toBe(true);
       expect(result.dualCases).toHaveLength(4);
       expect(result.dualCases.every((c) => c.ok)).toBe(true);
-      expect(result.warpCases).toHaveLength(12);
+      expect(result.warpCases).toHaveLength(13);
       expect(result.warpCases.every((c) => c.ok)).toBe(true);
 
       // Verify pixel readback for each dual mode

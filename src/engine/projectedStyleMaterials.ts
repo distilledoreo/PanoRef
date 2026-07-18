@@ -164,7 +164,9 @@ export function projectedStyleTextureRefCount(imageUrl: string): number {
   return textureCache.get(imageUrl)?.refCount ?? 0;
 }
 
-export const identityWarpTexture = { texture: getIdentityWarpTexture() };
+export function identityWarpTexture(): { texture: THREE.DataTexture } {
+  return { texture: getIdentityWarpTexture() };
+}
 
 export interface ProjectedMaterialParams {
   texture: THREE.Texture;
@@ -355,7 +357,7 @@ vec3 sampleProjectedPano(sampler2D map, vec3 origin, float yaw, vec3 worldPos,
   }
   vec3 direction = applyInversePanoYaw(normalize(offset), yaw);
   vec2 panoUv = equirectUvFromDirection(direction);
-  if (warpStrength > 0.001) {
+  if (warpStrength > 0.0) {
     vec2 warpDelta = sampleWarpMap(warpMap, warpSize, panoUv);
     panoUv.x = fract(panoUv.x + warpDelta.x * warpStrength);
     panoUv.y = clamp(panoUv.y + warpDelta.y * warpStrength, 0.0, 1.0);

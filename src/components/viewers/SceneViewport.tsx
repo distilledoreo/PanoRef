@@ -1454,20 +1454,16 @@ export function SceneViewport({
 
   useEffect(() => {
     previewMeshRef.current = null;
-    if (sceneRef.current) disposeScene(sceneRef.current);
     clearTransformGizmo();
 
-    // Acquire new warp maps first, then release old ones (swap pattern)
-    // to avoid destroying a texture that is still needed for the same key.
+    // Preserve old state until all new resources are acquired and the scene
+    // has been built successfully.  If anything fails the old state remains
+    // intact (no leak, no dangling refs).
+    const oldScene = sceneRef.current;
     const oldPrimaryWarp = primaryWarpRef.current;
     const oldSecondaryWarp = secondaryWarpRef.current;
 
-    // Use the project-aware resolver that returns both the warp texture and
-    // the saved alignment strength in one call, replacing the deprecated
-    // settings-only resolver and the separate manual strength lookups.
-    // Wrap acquisition in try/catch so a thrown resolver does not leak newly
-    // acquired resources — both warps are released if anything fails before
-    // the successful commit point.
+    // Acquire new warp maps, but do NOT commit them yet.
     let nextPrimary: ResolvedWarpWithStrength | undefined;
     let nextSecondary: ResolvedWarpWithStrength | undefined;
     try {
@@ -1478,65 +1474,66 @@ export function SceneViewport({
         ? resolveProjectionWarpWithStrengthForProject(project, projectedSecondary.id, 'runtime')
         : undefined;
     } catch (error) {
-      // Release anything that was successfully acquired before the throw.
       nextPrimary?.warp.release();
       nextSecondary?.warp.release();
-      oldPrimaryWarp?.release();
-      oldSecondaryWarp?.release();
       throw error;
     }
-
-    primaryWarpRef.current = nextPrimary?.warp;
-    secondaryWarpRef.current = nextSecondary?.warp;
-
-    oldPrimaryWarp?.release();
-    oldSecondaryWarp?.release();
 
     const primaryStrength = nextPrimary?.strength;
     const secondaryStrength = nextSecondary?.strength;
 
-    // Wrap the commit phase so a buildScene failure releases the newly acquired
-    // warps before the error propagates out of the effect.
+    // Build the scene with the newly acquired warp resources.  If this fails
+    // we release only the new acquisitions — the old state is untouched.
+    let nextScene: THREE.Scene | undefined;
     try {
-    sceneRef.current = buildScene(project, {
-      selectedShotId,
-      hideShotFrustums: Boolean(shotFraming) || !showSceneGuides,
-      showSceneGuides: shotFraming ? false : showSceneGuides,
-      showPanoOrigin: shotFraming ? false : (showSceneGuides || originPlacementActive),
-      showHelpers: shotFraming ? false : showSceneGuides,
-      theme,
-      fogDistance: shotFraming ? undefined : renderDistance,
-      appearance: projectedActive ? 'projected' : 'clay',
-      projected: projectedActive && projectedTexture && projectedPano
-        ? {
-          texture: projectedTexture,
-          origin: projectedPano.origin,
-          rotation: projectedPano.rotation,
-          settings: projectedSettings,
-          disposableMaterials: true,
-          secondaryTexture: dualActive ? projectedSecondaryTexture ?? undefined : undefined,
-          secondaryOrigin: dualActive ? projectedSecondary?.origin : undefined,
-          secondaryRotation: dualActive ? projectedSecondary?.rotation : undefined,
-          warpMap: primaryWarpRef.current?.texture,
-          warpMapSize: primaryWarpRef.current
-            ? [primaryWarpRef.current.width, primaryWarpRef.current.height]
-            : undefined,
-          warpStrength: primaryStrength,
-          warpMapB: secondaryWarpRef.current?.texture,
-          warpMapSizeB: secondaryWarpRef.current
-            ? [secondaryWarpRef.current.width, secondaryWarpRef.current.height]
-            : undefined,
-          warpStrengthB: secondaryStrength,
-        }
-        : undefined,
-    });
+      nextScene = buildScene(project, {
+        selectedShotId,
+        hideShotFrustums: Boolean(shotFraming) || !showSceneGuides,
+        showSceneGuides: shotFraming ? false : showSceneGuides,
+        showPanoOrigin: shotFraming ? false : (showSceneGuides || originPlacementActive),
+        showHelpers: shotFraming ? false : showSceneGuides,
+        theme,
+        fogDistance: shotFraming ? undefined : renderDistance,
+        appearance: projectedActive ? 'projected' : 'clay',
+        projected: projectedActive && projectedTexture && projectedPano
+          ? {
+            texture: projectedTexture,
+            origin: projectedPano.origin,
+            rotation: projectedPano.rotation,
+            settings: projectedSettings,
+            disposableMaterials: true,
+            secondaryTexture: dualActive ? projectedSecondaryTexture ?? undefined : undefined,
+            secondaryOrigin: dualActive ? projectedSecondary?.origin : undefined,
+            secondaryRotation: dualActive ? projectedSecondary?.rotation : undefined,
+            warpMap: nextPrimary?.warp?.texture,
+            warpMapSize: nextPrimary?.warp
+              ? [nextPrimary.warp.width, nextPrimary.warp.height]
+              : undefined,
+            warpStrength: primaryStrength,
+            warpMapB: nextSecondary?.warp?.texture,
+            warpMapSizeB: nextSecondary?.warp
+              ? [nextSecondary.warp.width, nextSecondary.warp.height]
+              : undefined,
+            warpStrengthB: secondaryStrength,
+          }
+          : undefined,
+      });
     } catch (error) {
-      // buildScene failed — release the newly acquired warps; old refs were
-      // already released so the effect is in a clean state.
+      // buildScene failed — release only the newly acquired warps; old state
+      // (scene, warps, refs) is still valid.
       nextPrimary?.warp.release();
       nextSecondary?.warp.release();
       throw error;
     }
+
+    // ── Commit: everything succeeded, swap in the new state. ──
+    sceneRef.current = nextScene;
+    primaryWarpRef.current = nextPrimary?.warp;
+    secondaryWarpRef.current = nextSecondary?.warp;
+
+    if (oldScene) disposeScene(oldScene);
+    oldPrimaryWarp?.release();
+    oldSecondaryWarp?.release();
     if (previewPointRef.current && placementTypeRef.current) {
       updatePreviewMesh(previewPointRef.current);
     }
