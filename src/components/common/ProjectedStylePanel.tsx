@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LocationProject, PanoReference, ProjectedStyleSettings, ProjectionAlignment } from '../../domain/types';
+import { LocationProject, PanoReference, ProjectedStyleSettings, ProjectionAlignment, ProjectionRegionAlignment } from '../../domain/types';
 import {
   findProjectionAlignmentForPano,
+  findProjectionRegionAlignmentForPano,
   normalizeProjectedStyleSettings,
   setProjectionAlignmentForPano,
+  setProjectionRegionAlignmentForPano,
 } from '../../domain/defaults';
 import {
   listEligibleProjectedStylePanos,
@@ -26,6 +28,7 @@ import {
   type ProjectionAlignmentStatus,
 } from '../../engine/projectionAlignmentStatus';
 import { ProjectionAlignmentEditor } from '../reference/ProjectionAlignmentEditor';
+import { ProjectionRegionEditor } from '../reference/ProjectionRegionEditor';
 import { Field, Select, TextInput } from './Field';
 
 const BLEND_OPTIONS: ProjectorBlendMode[] = [
@@ -189,6 +192,7 @@ export function ProjectedStylePanel({
   const dualAvailable = allPanos.length >= 2;
   const dualReady = canUseDualProjectorBlend(project, settings);
   const [editorSourcePanoId, setEditorSourcePanoId] = useState<string>();
+  const [regionEditorSourcePanoId, setRegionEditorSourcePanoId] = useState<string>();
 
   const update = (partial: Partial<ProjectedStyleSettings>) => {
     onChange(normalizeProjectedStyleSettings({ ...settings, ...partial }));
@@ -202,6 +206,8 @@ export function ProjectedStylePanel({
     ? findProjectionAlignmentForPano(settings, resolved.secondary.id)
     : undefined;
   const secondaryActive = Boolean(resolved.secondary && resolved.blendMode !== 'primary_only');
+  const primaryRegion = resolved.primary ? findProjectionRegionAlignmentForPano(settings, resolved.primary.id) : undefined;
+  const secondaryRegion = resolved.secondary ? findProjectionRegionAlignmentForPano(settings, resolved.secondary.id) : undefined;
 
   const openAlignmentEditor = (sourcePanoId: string) => setEditorSourcePanoId(sourcePanoId);
   const applyAlignment = (sourcePanoId: string, alignment: ProjectionAlignment | undefined) => {
@@ -218,6 +224,8 @@ export function ProjectedStylePanel({
     if (!safeConfirm(`Remove local matches for ${pano.name}?`)) return;
     applyAlignment(pano.id, undefined);
   };
+  const applyRegionAlignment = (sourcePanoId: string, alignment: ProjectionRegionAlignment | undefined) => { onChange(setProjectionRegionAlignmentForPano(settings, sourcePanoId, alignment)); setRegionEditorSourcePanoId(undefined); };
+  const regionCard = (pano: PanoReference, role: string, alignment?: ProjectionRegionAlignment) => <div className="rounded-lg border border-subtle bg-surface-base p-3" data-region-fit-card={pano.id}><div className="flex items-center gap-2"><div className="mr-auto"><div className="text-[11px] font-semibold uppercase text-secondary">{role} Region Fit</div><div className="text-sm font-semibold text-primary">{pano.name}</div></div><span className="rounded-full bg-surface-raised px-2 py-1 text-xs">{alignment ? `${alignment.regions.filter((region) => region.enabled).length} regions` : 'No Region Fit'}</span></div><p className="mt-2 text-xs text-secondary">{alignment ? 'Localized paired outlines are active.' : 'Add a region to align part of the styled panorama with the graybox.'}</p><button type="button" onClick={() => setRegionEditorSourcePanoId(pano.id)} className="mt-3 min-h-10 rounded-lg border border-subtle px-3 py-2 text-xs font-semibold hover:border-accent">{alignment ? 'Edit Region Fit' : 'Add region'}</button></div>;
 
   return (
     <div className="space-y-3" data-projected-style-panel>
@@ -341,7 +349,10 @@ export function ProjectedStylePanel({
             </p>
           </div>
           {resolved.primary && (
-            <ProjectorAlignmentCard
+            regionCard(resolved.primary, 'Primary', primaryRegion)
+          )}
+          {secondaryActive && resolved.secondary && regionCard(resolved.secondary, 'Secondary', secondaryRegion)}
+          <details className="rounded-lg border border-subtle p-3"><summary className="cursor-pointer text-xs font-semibold text-secondary">Advanced · Legacy point correction</summary><p className="mt-2 text-xs text-secondary">Experimental · intended for very small local nudges</p><div className="mt-2 space-y-2">{resolved.primary && <ProjectorAlignmentCard
               project={project}
               pano={resolved.primary}
               role="Primary"
@@ -349,8 +360,7 @@ export function ProjectedStylePanel({
               onEdit={() => openAlignmentEditor(resolved.primary!.id)}
               onStrengthChange={(strength) => changeAlignmentStrength(resolved.primary!.id, strength)}
               onRemove={() => removeAlignment(resolved.primary!)}
-            />
-          )}
+            />}
           {secondaryActive && resolved.secondary && (
             <ProjectorAlignmentCard
               project={project}
@@ -362,6 +372,7 @@ export function ProjectedStylePanel({
               onRemove={() => removeAlignment(resolved.secondary!)}
             />
           )}
+          </div></details>
         </section>
       )}
 
@@ -417,6 +428,7 @@ export function ProjectedStylePanel({
         onApply={applyAlignment}
         onClose={() => setEditorSourcePanoId(undefined)}
       />
+      <ProjectionRegionEditor open={Boolean(regionEditorSourcePanoId)} project={project} initialSourcePanoId={regionEditorSourcePanoId ?? ''} onApply={applyRegionAlignment} onClose={() => setRegionEditorSourcePanoId(undefined)} />
 
     </div>
   );
