@@ -3,6 +3,7 @@ import {
   LocationProject,
   PanoReference,
   ProjectedStyleSettings,
+  ProjectionAlignment,
   Vec3,
 } from '../domain/types';
 import { findProjectionAlignmentForPano, normalizeProjectedStyleSettings } from '../domain/defaults';
@@ -244,9 +245,167 @@ export function resolveProjectedProjectorAssets(
 }
 
 /**
+ * Explicit warp-map resolution quality buckets. The previous implementation
+ * derived runtime resolution from the source pano dimensions (÷16, capped at
+ * 512×256), which left the common 4096×2048 panorama at 256×128 — effectively
+ * preview quality even for the live viewport. Using explicit buckets keeps
+ * preview cheap and promotes the runtime path to a fixed 512×256.
+ */
+export type WarpRenderQuality = 'preview' | 'runtime';
+
+const WARP_QUALITY_DIMENSIONS: Record<WarpRenderQuality, { width: number; height: number }> = {
+  preview: { width: 256, height: 128 },
+  runtime: { width: 512, height: 256 },
+};
+
+function warpDimensionsForQuality(quality: WarpRenderQuality): { width: number; height: number } {
+  return WARP_QUALITY_DIMENSIONS[quality];
+}
+
+/**
+ * Result of validating a warp resolve request against the project. Each
+ * failure explains why no warp can be produced so callers can surface a
+ * sensible diagnostic instead of silently falling back to identity.
+ */
+interface WarpResolveValidation {
+  ok: boolean;
+  reason?:
+    | 'no_alignment'
+    | 'no_source_pano'
+    | 'no_source_image_asset'
+    | 'no_target_pano'
+    | 'no_target_image_asset'
+    | 'wrong_target_pano_type'
+    | 'no_enabled_pairs'
+    | 'no_source_dimensions';
+  alignment?: ProjectionAlignment;
+  sourcePano?: PanoReference;
+  targetPano?: PanoReference;
+}
+
+function validateWarpResolve(
+  project: LocationProject,
+  settings: ProjectedStyleSettings,
+  sourcePanoId: string,
+): WarpResolveValidation {
+  const alignment = findProjectionAlignmentForPano(settings, sourcePanoId);
+  if (!alignment) {
+    return { ok: false, reason: 'no_alignment' };
+  }
+  const sourcePano = project.panoRefs.find((p) => p.id === sourcePanoId);
+  if (!sourcePano) {
+    return { ok: false, reason: 'no_source_pano' };
+  }
+  // Source panorama must have a usable image asset.
+  const sourceAssetUri = project.assets.assets[sourcePano.imageAssetId]?.uri;
+  if (!sourceAssetUri) {
+    return { ok: false, reason: 'no_source_image_asset' };
+  }
+  // Target panorama must exist…
+  const targetPano = project.panoRefs.find((p) => p.id === alignment.targetGrayboxPanoId);
+  if (!targetPano) {
+    return { ok: false, reason: 'no_target_pano' };
+  }
+  // …and must be a graybox_render (the solver aligns styled source → graybox target).
+  if (targetPano.type !== 'graybox_render') {
+    return { ok: false, reason: 'wrong_target_pano_type' };
+  }
+  // …and its image asset must be reachable.
+  const targetAssetUri = project.assets.assets[targetPano.imageAssetId]?.uri;
+  if (!targetAssetUri) {
+    return { ok: false, reason: 'no_target_image_asset' }
+  }
+  if (!alignment.pairs.some((p) => p.enabled)) {
+    return { ok: false, reason: 'no_enabled_pairs' };
+  }
+  if (!sourcePano.width || !sourcePano.height) {
+    return { ok: false, reason: 'no_source_dimensions' };
+  }
+  return { ok: true, alignment, sourcePano, targetPano };
+}
+
+/**
+ * Project-aware warp resolver for the runtime/preview paths.
+ *
+ * Runs the full validation matrix against the project — alignment must exist,
+ * source pano and source image asset must be present, target pano must exist
+ * and be a graybox_render with its own image asset, at least one pair must be
+ * enabled, and the source pano must declare dimensions — and returns a
+ * cached warp texture at a fixed quality bucket.
+ *
+ * On any validation failure this returns undefined; callers fall back to the
+ * shader's identity-warp path (no displacement). The previous fallback that
+ * silently substituted default 4096×2048 source dimensions is gone — a
+ * missing source pano now means "no warp".
+ */
+export function resolveProjectionWarpForProject(
+  project: LocationProject,
+  sourcePanoId: string,
+  quality: WarpRenderQuality,
+): WarpTextureResult | undefined {
+  const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const validation = validateWarpResolve(project, settings, sourcePanoId);
+  if (!validation.ok || !validation.alignment || !validation.targetPano || !validation.sourcePano) {
+    return undefined;
+  }
+
+  const { width, height } = warpDimensionsForQuality(quality);
+  const sourceYawRadians = degreesToRadians(validation.sourcePano.rotation[1] ?? 0);
+  const targetYawRadians = degreesToRadians(validation.targetPano.rotation[1] ?? 0);
+
+  return acquireProjectionWarpTexture({
+    alignment: validation.alignment,
+    sourceYawRadians,
+    targetYawRadians,
+    width,
+    height,
+  });
+}
+
+/** Alignment strength (0..1) carried alongside the warp texture. */
+export interface ResolvedWarpWithStrength {
+  warp: WarpTextureResult;
+  strength: number;
+}
+
+/**
+ * Like {@link resolveProjectionWarpForProject} but also returns the
+ * alignment's saved strength so live rendering and offline exports consume
+ * the same warp-strength value instead of the viewport hardcoding 1.
+ */
+export function resolveProjectionWarpWithStrengthForProject(
+  project: LocationProject,
+  sourcePanoId: string,
+  quality: WarpRenderQuality,
+): ResolvedWarpWithStrength | undefined {
+  const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const validation = validateWarpResolve(project, settings, sourcePanoId);
+  if (!validation.ok || !validation.alignment || !validation.targetPano || !validation.sourcePano) {
+    return undefined;
+  }
+
+  const { width, height } = warpDimensionsForQuality(quality);
+  const sourceYawRadians = degreesToRadians(validation.sourcePano.rotation[1] ?? 0);
+  const targetYawRadians = degreesToRadians(validation.targetPano.rotation[1] ?? 0);
+
+  const warp = acquireProjectionWarpTexture({
+    alignment: validation.alignment,
+    sourceYawRadians,
+    targetYawRadians,
+    width,
+    height,
+  });
+  return { warp, strength: validation.alignment.strength };
+}
+
+/**
  * Resolve a warp map texture for a given projector pano.
  * Finds the alignment, runs the RBF solver, and creates/returns a cached warp texture.
  * Returns undefined when no alignment exists (shader will fall back to identity warp).
+ *
+ * @deprecated Prefer {@link resolveProjectionWarpForProject} or
+ * {@link resolveProjectionWarpWithStrengthForProject}; they validate the full
+ * project and use explicit quality buckets instead of ÷16-from-source.
  */
 export function resolveProjectionWarpForPano(
   settings: ProjectedStyleSettings,
@@ -263,8 +422,9 @@ export function resolveProjectionWarpForPano(
   const targetPano = panoRefs.find((p) => p.id === alignment.targetGrayboxPanoId);
   if (!targetPano) return undefined;
 
-  const warpWidth = width ?? Math.min(Math.max(Math.round((sourcePano?.width ?? 4096) / 16), 64), 512);
-  const warpHeight = height ?? Math.min(Math.max(Math.round((sourcePano?.height ?? 2048) / 16), 32), 256);
+  const warpWidth = width ?? WARP_QUALITY_DIMENSIONS.runtime.width;
+  const warpHeight = height ?? WARP_QUALITY_DIMENSIONS.runtime.height;
+  if (!Number.isFinite(warpWidth) || !Number.isFinite(warpHeight)) return undefined;
 
   const sourceYawRadians = degreesToRadians(sourceRotation[1] ?? 0);
   const targetYawRadians = degreesToRadians(targetPano.rotation[1] ?? 0);

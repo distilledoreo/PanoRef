@@ -1464,12 +1464,22 @@ export function SceneViewport({
     primaryWarpRef.current = projectedActive && projectedTexture && projectedPano
       ? resolveProjectionWarpForPano(projectedSettings, projectedPano.id, projectedPano.rotation, project.panoRefs)
       : undefined;
-    secondaryWarpRef.current = dualActive && projectedSecondary && primaryWarpRef.current
+    secondaryWarpRef.current = dualActive && projectedSecondary
       ? resolveProjectionWarpForPano(projectedSettings, projectedSecondary.id, projectedSecondary.rotation, project.panoRefs)
       : undefined;
 
     oldPrimaryWarp?.release();
     oldSecondaryWarp?.release();
+
+    // Read alignment strength from settings so live rendering and exports
+    // consume the same value; previously strength was hardcoded to 1 in the
+    // viewport while exports used the saved value.
+    const primaryStrength = primaryWarpRef.current && projectedPano
+      ? (findProjectionAlignmentForPano(projectedSettings, projectedPano.id)?.strength ?? 1)
+      : undefined;
+    const secondaryStrength = secondaryWarpRef.current && projectedSecondary
+      ? (findProjectionAlignmentForPano(projectedSettings, projectedSecondary.id)?.strength ?? 1)
+      : undefined;
 
     sceneRef.current = buildScene(project, {
       selectedShotId,
@@ -1494,12 +1504,12 @@ export function SceneViewport({
           warpMapSize: primaryWarpRef.current
             ? [primaryWarpRef.current.width, primaryWarpRef.current.height]
             : undefined,
-          warpStrength: primaryWarpRef.current ? 1 : undefined,
+          warpStrength: primaryStrength,
           warpMapB: secondaryWarpRef.current?.texture,
           warpMapSizeB: secondaryWarpRef.current
             ? [secondaryWarpRef.current.width, secondaryWarpRef.current.height]
             : undefined,
-          warpStrengthB: secondaryWarpRef.current ? 1 : undefined,
+          warpStrengthB: secondaryStrength,
         }
         : undefined,
     });

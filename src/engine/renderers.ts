@@ -25,7 +25,10 @@ import {
 import { buildScene, disposeScene, type ProjectedSceneOptions, type SceneVisualTheme } from './sceneObjects';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 
-/** Load primary (+ optional secondary) textures for projected export/render. */
+/** Load primary (+ optional secondary) textures for projected export/render.
+ *  All acquired resources are returned so callers can release them in a
+ *  finally block even when a downstream resolver or builder throws.
+ */
 async function loadProjectedSceneOptions(
   project: LocationProject,
 ): Promise<{
@@ -39,57 +42,71 @@ async function loadProjectedSceneOptions(
   if (!assets) return undefined;
   const texture = await acquireProjectedStyleTexture(assets.primaryUrl);
   if (!texture) return undefined;
+
+  // Track acquired resources so we can release on any early failure.
+  const acquiredUrls: string[] = [assets.primaryUrl];
   let secondaryTexture: THREE.Texture | undefined;
-  if (assets.secondaryUrl) {
-    secondaryTexture = (await acquireProjectedStyleTexture(assets.secondaryUrl)) ?? undefined;
-  }
+  try {
+    if (assets.secondaryUrl) {
+      secondaryTexture = (await acquireProjectedStyleTexture(assets.secondaryUrl)) ?? undefined;
+      if (secondaryTexture) acquiredUrls.push(assets.secondaryUrl);
+    }
 
-  // Read alignment strength from settings
-  const primaryStrength = assets.settings.alignments?.find(
-    (a) => a.sourcePanoId === assets.primary.id,
-  )?.strength ?? 1;
-  const secondaryStrength = assets.secondary
-    ? assets.settings.alignments?.find((a) => a.sourcePanoId === assets.secondary!.id)?.strength ?? 1
-    : 1;
+    // Read alignment strength from settings
+    const primaryStrength = assets.settings.alignments?.find(
+      (a) => a.sourcePanoId === assets.primary.id,
+    )?.strength ?? 1;
+    const secondaryStrength = assets.secondary
+      ? assets.settings.alignments?.find((a) => a.sourcePanoId === assets.secondary!.id)?.strength ?? 1
+      : 1;
 
-  const primaryWarp = resolveProjectionWarpForPano(
-    assets.settings,
-    assets.primary.id,
-    assets.primary.rotation,
-    project.panoRefs,
-  );
-  let secondaryWarp: WarpTextureResult | undefined;
-  if (secondaryTexture && assets.secondary) {
-    secondaryWarp = resolveProjectionWarpForPano(
+    const primaryWarp = resolveProjectionWarpForPano(
       assets.settings,
-      assets.secondary.id,
-      assets.secondary.rotation,
+      assets.primary.id,
+      assets.primary.rotation,
       project.panoRefs,
     );
-  }
+    let secondaryWarp: WarpTextureResult | undefined;
+    if (secondaryTexture && assets.secondary) {
+      secondaryWarp = resolveProjectionWarpForPano(
+        assets.settings,
+        assets.secondary.id,
+        assets.secondary.rotation,
+        project.panoRefs,
+      );
+    }
 
-  return {
-    primaryUrl: assets.primaryUrl,
-    secondaryUrl: secondaryTexture ? assets.secondaryUrl : undefined,
-    primaryWarp,
-    secondaryWarp,
-    options: {
-      texture,
-      origin: assets.primary.origin,
-      rotation: assets.primary.rotation,
-      settings: assets.settings,
-      disposableMaterials: true,
-      secondaryTexture,
-      secondaryOrigin: secondaryTexture && assets.secondary ? assets.secondary.origin : undefined,
-      secondaryRotation: secondaryTexture && assets.secondary ? assets.secondary.rotation : undefined,
-      warpMap: primaryWarp?.texture,
-      warpMapSize: primaryWarp ? [primaryWarp.width, primaryWarp.height] : undefined,
-      warpStrength: primaryWarp ? primaryStrength : undefined,
-      warpMapB: secondaryWarp?.texture,
-      warpMapSizeB: secondaryWarp ? [secondaryWarp.width, secondaryWarp.height] : undefined,
-      warpStrengthB: secondaryWarp ? secondaryStrength : undefined,
-    },
-  };
+    return {
+      primaryUrl: assets.primaryUrl,
+      secondaryUrl: secondaryTexture ? assets.secondaryUrl : undefined,
+      primaryWarp,
+      secondaryWarp,
+      options: {
+        texture,
+        origin: assets.primary.origin,
+        rotation: assets.primary.rotation,
+        settings: assets.settings,
+        disposableMaterials: true,
+        secondaryTexture,
+        secondaryOrigin: secondaryTexture && assets.secondary ? assets.secondary.origin : undefined,
+        secondaryRotation: secondaryTexture && assets.secondary ? assets.secondary.rotation : undefined,
+        warpMap: primaryWarp?.texture,
+        warpMapSize: primaryWarp ? [primaryWarp.width, primaryWarp.height] : undefined,
+        warpStrength: primaryWarp ? primaryStrength : undefined,
+        warpMapB: secondaryWarp?.texture,
+        warpMapSizeB: secondaryWarp ? [secondaryWarp.width, secondaryWarp.height] : undefined,
+        warpStrengthB: secondaryWarp ? secondaryStrength : undefined,
+      },
+    };
+  } catch (err) {
+    // An exception during warp resolution or material construction means we
+    // must release every texture we have already acquired.
+    for (const url of acquiredUrls) {
+      releaseProjectedStyleTexture(url);
+    }
+    texture.dispose();
+    throw err;
+  }
 }
 
 export interface ImageRenderResult {
@@ -552,39 +569,46 @@ export async function renderViewportProjected(
     throw new Error('Projected viewport export could not resolve the projector panorama asset.');
   }
 
-  await ensureHumanMannequinModel();
-  const renderer = createRenderer(width, height);
-  const scene = buildScene(project, {
-    showHelpers: false,
-    hiddenObjectTypes: ['sun_marker'],
-    appearance: 'projected',
-    projected: projectedLoad.options,
-  });
-  const camera = new THREE.PerspectiveCamera(
-    cameraData.fovDegrees,
-    width / height,
-    cameraData.near,
-    cameraData.far,
-  );
-  applyFlyCameraToPerspectiveCamera(
-    camera,
-    flyCameraFromCamera(cameraData),
-    cameraData.fovDegrees,
-    width / height,
-    cameraData.near,
-    cameraData.far,
-  );
-  renderer.render(scene, camera);
-  const dataUrl = renderer.domElement.toDataURL('image/png');
-
-  disposeScene(scene);
-  disposeRenderer(renderer);
-  releaseProjectedStyleTexture(projectedLoad.primaryUrl);
-  releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
-  projectedLoad.primaryWarp?.release();
-  projectedLoad.secondaryWarp?.release();
-
-  return { dataUrl, width, height };
+  try {
+    await ensureHumanMannequinModel();
+    const renderer = createRenderer(width, height);
+    try {
+      const scene = buildScene(project, {
+        showHelpers: false,
+        hiddenObjectTypes: ['sun_marker'],
+        appearance: 'projected',
+        projected: projectedLoad.options,
+      });
+      try {
+        const camera = new THREE.PerspectiveCamera(
+          cameraData.fovDegrees,
+          width / height,
+          cameraData.near,
+          cameraData.far,
+        );
+        applyFlyCameraToPerspectiveCamera(
+          camera,
+          flyCameraFromCamera(cameraData),
+          cameraData.fovDegrees,
+          width / height,
+          cameraData.near,
+          cameraData.far,
+        );
+        renderer.render(scene, camera);
+        const dataUrl = renderer.domElement.toDataURL('image/png');
+        return { dataUrl, width, height };
+      } finally {
+        disposeScene(scene);
+      }
+    } finally {
+      disposeRenderer(renderer);
+    }
+  } finally {
+    releaseProjectedStyleTexture(projectedLoad.primaryUrl);
+    releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
+    projectedLoad.primaryWarp?.release();
+    projectedLoad.secondaryWarp?.release();
+  }
 }
 
 export async function renderShotProjectedFrame(

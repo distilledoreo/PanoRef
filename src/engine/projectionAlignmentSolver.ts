@@ -13,9 +13,25 @@ import {
 
 const DEG = Math.PI / 180;
 const MAX_RESIDUAL_PASSES = 4;
-const RESIDUAL_TOLERANCE_RADIANS = 0.5 * DEG;
+/**
+ * Resolution-dependent residual tolerance. The solver iterates until every
+ * marker sits within this many radians of its target, or until improvement
+ * stalls. The tolerance scales with the smaller of the horizontal/vertical
+ * angular resolution of the warp field so a low-resolution run is not
+ * penalized for sub-texel drift that cannot physically be represented.
+ */
+const RESIDUAL_TOLERANCE_FRACTION_OF_TEXEL = 0.25;
+const STALL_IMPROVEMENT_RATIO = 0.05;
 const MAX_ROTATION_RADIANS = 35 * DEG;
 const IDENTITY_ANCHOR_WEIGHT = 0.06;
+
+function computeResidualToleranceRadians(width: number, height: number): number {
+  // Per-texel angular step: equirect horizontal is 2π/width, vertical π/height.
+  const horizontalStep = (2 * Math.PI) / width;
+  const verticalStep = Math.PI / height;
+  const texelStep = Math.min(horizontalStep, verticalStep);
+  return Math.max(texelStep * RESIDUAL_TOLERANCE_FRACTION_OF_TEXEL, 0.1 * DEG);
+}
 
 export interface ProjectionAlignmentSolveOptions {
   sourcePanoWidth?: number;
@@ -127,9 +143,19 @@ function clampRotationMagnitude(
 }
 
 /**
+ * Wrap an integer texel index into [0, width) for equirectangular horizontal
+ * sampling. Matches the GLSL `mod(x0 + 1.0, warpSize.x)` wrap used by
+ * sampleWarpMap so CPU diagnostics agree with GPU sampling at the +U/-U seam.
+ */
+function wrapHorizontally(index: number, width: number): number {
+  return ((index % width) + width) % width;
+}
+
+/**
  * Sample the rotation field using the same texel-center addressing as the
  * GLSL sampleWarpMap: texelCoord = uv * [width, height], with bilinear
- * interpolation between integer texel indices 0..width-1.
+ * interpolation. Horizontal neighbors wrap (equirect seam); vertical
+ * neighbors clamp to edge.
  */
 function sampleRotationFieldBilinear(
   field: Float32Array,
@@ -144,8 +170,8 @@ function sampleRotationFieldBilinear(
   const fx = tx - ix;
   const fy = ty - iy;
 
-  const ix0 = Math.max(0, Math.min(width - 1, ix));
-  const ix1 = Math.max(0, Math.min(width - 1, ix + 1));
+  const ix0 = wrapHorizontally(ix, width);
+  const ix1 = wrapHorizontally(ix + 1, width);
   const iy0 = Math.max(0, Math.min(height - 1, iy));
   const iy1 = Math.max(0, Math.min(height - 1, iy + 1));
 
@@ -173,7 +199,8 @@ function sampleRotationFieldBilinear(
 /**
  * Sample the displacement field using the same texel-center addressing as the
  * GLSL sampleWarpMap: texelCoord = uv * [width, height], with bilinear
- * interpolation between integer texel indices 0..width-1.
+ * interpolation. Horizontal neighbors wrap (equirect seam); vertical
+ * neighbors clamp to edge.
  */
 function sampleDisplacementFieldBilinear(
   field: Float32Array,
@@ -188,8 +215,8 @@ function sampleDisplacementFieldBilinear(
   const fx = tx - ix;
   const fy = ty - iy;
 
-  const ix0 = Math.max(0, Math.min(width - 1, ix));
-  const ix1 = Math.max(0, Math.min(width - 1, ix + 1));
+  const ix0 = wrapHorizontally(ix, width);
+  const ix1 = wrapHorizontally(ix + 1, width);
   const iy0 = Math.max(0, Math.min(height - 1, iy));
   const iy1 = Math.max(0, Math.min(height - 1, iy + 1));
 
@@ -251,7 +278,7 @@ export function solveProjectionWarp(
 
     const rotation = axisAngleVectorBetween(naturalSourceDir, desiredSourceDir);
 
-    sourceDirs.push(desiredSourceDir);
+    sourceDirs.push(naturalSourceDir);
     markers.push({
       targetGrayboxLocalDir: targetLocalDir,
       naturalSourceDir,
@@ -274,10 +301,20 @@ export function solveProjectionWarp(
 
   clampRotationMagnitude(rotationField, texelCount, MAX_ROTATION_RADIANS);
 
-  // Residual passes
+  // Residual passes: iteratively correct the rotation field toward the
+  // markers' targets. Each pass measures the worst marker error, builds
+  // residual markers for everything still outside tolerance, solves a
+  // correction field, and verifies that the correction actually improves
+  // the worst error before committing it. A correction that worsens the
+  // result is rejected and the loop stops; the loop also stops once
+  // improvement stalls (less than STALL_IMPROVEMENT_RATIO of the
+  // previous error) or every marker is within resolution-dependent
+  // tolerance.
+  const residualToleranceRadians = computeResidualToleranceRadians(width, height);
+  let previousMaxError = Infinity;
+
   for (let pass = 0; pass < MAX_RESIDUAL_PASSES; pass++) {
     let maxError = 0;
-    let stalled = true;
 
     for (let mi = 0; mi < markerCount; mi++) {
       const marker = markers[mi];
@@ -287,13 +324,14 @@ export function solveProjectionWarp(
       const currentDir = rotateDirectionByAxisAngleVector(marker.naturalSourceDir, currentRot);
       const error = angularDistanceRadians(currentDir, marker.desiredSourceDir);
       if (error > maxError) maxError = error;
-
-      if (error > RESIDUAL_TOLERANCE_RADIANS) {
-        stalled = false;
-      }
     }
 
-    if (stalled || maxError <= 0.01) break;
+    // Converged — every marker is within tolerance.
+    if (maxError <= residualToleranceRadians) break;
+    // Stalled — improvement this pass is negligible relative to last pass.
+    if (previousMaxError !== Infinity && maxError >= previousMaxError * (1 - STALL_IMPROVEMENT_RATIO)) {
+      break;
+    }
 
     // Build residual markers
     const residuals: MarkerData[] = [];
@@ -304,7 +342,7 @@ export function solveProjectionWarp(
 
       const currentDir = rotateDirectionByAxisAngleVector(marker.naturalSourceDir, currentRot);
       const error = angularDistanceRadians(currentDir, marker.desiredSourceDir);
-      if (error > RESIDUAL_TOLERANCE_RADIANS) {
+      if (error > residualToleranceRadians) {
         const residualRot = axisAngleVectorBetween(currentDir, marker.desiredSourceDir);
         residuals.push({
           ...marker,
@@ -315,9 +353,33 @@ export function solveProjectionWarp(
 
     if (residuals.length === 0) break;
 
-    const correction = solveField(width, height, residuals, anchors);
-    rotationField = composeRotations(rotationField, correction, width, height);
-    clampRotationMagnitude(rotationField, texelCount, MAX_ROTATION_RADIANS);
+    const candidateField = composeRotations(
+      rotationField,
+      solveField(width, height, residuals, anchors),
+      width,
+      height,
+    );
+    clampRotationMagnitude(candidateField, texelCount, MAX_ROTATION_RADIANS);
+
+    // Measure the worst marker error under the candidate field. Reject the
+    // correction (keep the existing field) if it does not improve the result.
+    let candidateMaxError = 0;
+    for (let mi = 0; mi < markerCount; mi++) {
+      const marker = markers[mi];
+      const texelUv = unitDirectionToEquirectUv(marker.naturalSourceDir);
+      const currentRot = sampleRotationFieldBilinear(candidateField, width, height, texelUv);
+      const currentDir = rotateDirectionByAxisAngleVector(marker.naturalSourceDir, currentRot);
+      const error = angularDistanceRadians(currentDir, marker.desiredSourceDir);
+      if (error > candidateMaxError) candidateMaxError = error;
+    }
+
+    if (candidateMaxError >= maxError) {
+      // Correction is worse than what we already had — stop iterating.
+      break;
+    }
+
+    rotationField = candidateField;
+    previousMaxError = maxError;
   }
 
   // Convert rotation field to displacement field
@@ -411,7 +473,7 @@ function solveField(
       let weightedRotZ = 0;
 
       for (const marker of markers) {
-        const dist = angularDistanceRadians(sourceDir, marker.desiredSourceDir);
+        const dist = angularDistanceRadians(sourceDir, marker.naturalSourceDir);
         const normalizedR = dist / marker.radiusRadians;
         const w = wendlandC2(normalizedR);
         weightedRotX += w * marker.rotation[0];

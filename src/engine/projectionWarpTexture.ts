@@ -101,7 +101,7 @@ function createTextureFromDisplacement(
     texture,
     width,
     height,
-    release: () => releaseWarpTexture(key),
+    release: makeRelease(key),
   };
 }
 
@@ -113,7 +113,7 @@ function cachedWarpResult(key: string, width: number, height: number): WarpTextu
     texture: existing.texture,
     width,
     height,
-    release: () => releaseWarpTexture(key),
+    release: makeRelease(key),
   };
 }
 
@@ -166,7 +166,7 @@ export function findWarpTexture(
     texture: entry.texture,
     width,
     height,
-    release: () => releaseWarpTexture(key),
+    release: makeRelease(key),
   };
 }
 
@@ -180,6 +180,20 @@ function releaseWarpTexture(key: string): void {
     entry.texture.dispose();
     warpCache.delete(key);
   }
+}
+
+/**
+ * Build a per-acquisition release callback that is idempotent.
+ * Each acquisition gets its own closure-local flag so that a repeated release
+ * from one consumer cannot consume another consumer's reference.
+ */
+function makeRelease(key: string): () => void {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    releaseWarpTexture(key);
+  };
 }
 
 export function projectionWarpTextureCacheSize(): number {
