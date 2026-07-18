@@ -204,6 +204,14 @@ export interface ProjectedSceneOptions {
   warpMapSizeB?: [number, number];
   /** Warp strength for secondary. */
   warpStrengthB?: number;
+  regionWarpMap?: THREE.DataTexture;
+  regionWeightMap?: THREE.DataTexture;
+  regionWarpMapSize?: [number, number];
+  regionStrength?: number;
+  regionWarpMapB?: THREE.DataTexture;
+  regionWeightMapB?: THREE.DataTexture;
+  regionWarpMapSizeB?: [number, number];
+  regionStrengthB?: number;
 }
 
 export function buildScene(
@@ -376,6 +384,14 @@ function applyProjectedStyleToObject(
     warpMapB: projected.warpMapB,
     warpMapSizeB: projected.warpMapSizeB,
     warpStrengthB: projected.warpStrengthB,
+    regionWarpMap: projected.regionWarpMap,
+    regionWeightMap: projected.regionWeightMap,
+    regionWarpMapSize: projected.regionWarpMapSize,
+    regionStrength: projected.regionStrength,
+    regionWarpMapB: projected.regionWarpMapB,
+    regionWeightMapB: projected.regionWeightMapB,
+    regionWarpMapSizeB: projected.regionWarpMapSizeB,
+    regionStrengthB: projected.regionStrengthB,
   });
   // Keep a tiny emissive edge so selection remains readable under projection.
   if (root.userData?.sceneObjectId && projected.disposableMaterials === false) {

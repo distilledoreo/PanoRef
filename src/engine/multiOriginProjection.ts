@@ -6,10 +6,13 @@ import {
   ProjectionAlignment,
   Vec3,
 } from '../domain/types';
-import { findProjectionAlignmentForPano, normalizeProjectedStyleSettings } from '../domain/defaults';
+import * as THREE from 'three';
+import { findProjectionAlignmentForPano, findProjectionRegionAlignmentForPano, normalizeProjectedStyleSettings } from '../domain/defaults';
 import { isEligibleProjectedStylePano, listEligibleProjectedStylePanos } from './projectedStyle';
 import { acquireProjectionWarpTexture, type WarpTextureResult } from './projectionWarpTexture';
 import { degreesToRadians, length, subtract } from './sync';
+import { generateProjectionRegionTexture, type ProjectionRegionTextureQuality } from './projectionRegionTexture';
+import type { ProjectionRegionMeshDiagnostics } from './projectionRegionMesh';
 
 /**
  * Multi-origin projector blend modes (depth-free approximation).
@@ -366,6 +369,30 @@ export function resolveProjectionWarpForProject(
 export interface ResolvedWarpWithStrength {
   warp: WarpTextureResult;
   strength: number;
+}
+
+export interface ResolvedProjectionRegionWithStrength {
+  regionWarpMap: THREE.DataTexture;
+  regionWeightMap: THREE.DataTexture;
+  width: number;
+  height: number;
+  strength: number;
+  diagnostics: ProjectionRegionMeshDiagnostics[];
+  release: () => void;
+}
+
+/** Resolve a valid enabled Region Fit. Callers use legacy point correction only when this returns undefined. */
+export function resolveProjectionRegionWithStrengthForProject(project: LocationProject, sourcePanoId: string, quality: ProjectionRegionTextureQuality): ResolvedProjectionRegionWithStrength | undefined {
+  const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle); const alignment = findProjectionRegionAlignmentForPano(settings, sourcePanoId);
+  if (!alignment || !alignment.regions.some((region) => region.enabled && region.vertices.length >= 3)) return undefined;
+  const sourcePano = project.panoRefs.find((pano) => pano.id === sourcePanoId); const targetPano = project.panoRefs.find((pano) => pano.id === alignment.targetGrayboxPanoId);
+  if (!sourcePano || !targetPano || targetPano.type !== 'graybox_render' || !project.assets.assets[sourcePano.imageAssetId]?.uri || !project.assets.assets[targetPano.imageAssetId]?.uri) return undefined;
+  const generated = generateProjectionRegionTexture(alignment, { sourceYawRadians: degreesToRadians(sourcePano.rotation[1] ?? 0), targetYawRadians: degreesToRadians(targetPano.rotation[1] ?? 0), sourceOrigin: sourcePano.origin, targetOrigin: targetPano.origin, quality });
+  if (!generated.diagnostics.some((diagnostic) => diagnostic.valid)) { generated.release(); return undefined; }
+  const packed = new Uint8Array(generated.width * generated.height * 4); for (let index = 0; index < generated.width * generated.height; index += 1) { const u = generated.displacement[index * 2]; const v = generated.displacement[index * 2 + 1]; packed[index * 4] = u >> 8; packed[index * 4 + 1] = u & 255; packed[index * 4 + 2] = v >> 8; packed[index * 4 + 3] = v & 255; }
+  const regionWarpMap = new THREE.DataTexture(packed, generated.width, generated.height, THREE.RGBAFormat, THREE.UnsignedByteType); regionWarpMap.wrapS = THREE.RepeatWrapping; regionWarpMap.wrapT = THREE.ClampToEdgeWrapping; regionWarpMap.minFilter = THREE.LinearFilter; regionWarpMap.magFilter = THREE.LinearFilter; regionWarpMap.needsUpdate = true;
+  const regionWeightMap = new THREE.DataTexture(generated.weight, generated.width, generated.height, THREE.RedFormat, THREE.UnsignedByteType); regionWeightMap.wrapS = THREE.RepeatWrapping; regionWeightMap.wrapT = THREE.ClampToEdgeWrapping; regionWeightMap.minFilter = THREE.LinearFilter; regionWeightMap.magFilter = THREE.LinearFilter; regionWeightMap.needsUpdate = true;
+  let released = false; return { regionWarpMap, regionWeightMap, width: generated.width, height: generated.height, strength: alignment.strength, diagnostics: generated.diagnostics, release: () => { if (released) return; released = true; regionWarpMap.dispose(); regionWeightMap.dispose(); generated.release(); } };
 }
 
 /**

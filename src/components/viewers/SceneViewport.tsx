@@ -13,7 +13,9 @@ import { BUILD_GRID_SIZE, createPlacedSceneObject, resolveStampPoint } from '../
 import { getHumanMannequinRevision, subscribeHumanMannequinReady } from '../../engine/humanMannequinModel';
 import {
   resolveProjectedProjectorAssets,
+  resolveProjectionRegionWithStrengthForProject,
   resolveProjectionWarpWithStrengthForProject,
+  type ResolvedProjectionRegionWithStrength,
   type ResolvedWarpWithStrength,
 } from '../../engine/multiOriginProjection';
 import {
@@ -253,6 +255,8 @@ export function SceneViewport({
   /** Current warp texture results; released on effect re-run or unmount. */
   const primaryWarpRef = useRef<WarpTextureResult | undefined>();
   const secondaryWarpRef = useRef<WarpTextureResult | undefined>();
+  const primaryRegionRef = useRef<ResolvedProjectionRegionWithStrength | undefined>();
+  const secondaryRegionRef = useRef<ResolvedProjectionRegionWithStrength | undefined>();
   /** Alignment debug overlay group added to the scene. */
   const alignmentOverlayRef = useRef<THREE.Group | null>(null);
 
@@ -1400,6 +1404,8 @@ export function SceneViewport({
     disposeProjectedTextureOwnership(secondaryOwnershipRef.current);
     primaryWarpRef.current?.release();
     secondaryWarpRef.current?.release();
+    primaryRegionRef.current?.release();
+    secondaryRegionRef.current?.release();
     if (alignmentOverlayRef.current) {
       disposeAlignmentOverlay(alignmentOverlayRef.current);
       alignmentOverlayRef.current = null;
@@ -1463,20 +1469,24 @@ export function SceneViewport({
     const oldScene = sceneRef.current;
     const oldPrimaryWarp = primaryWarpRef.current;
     const oldSecondaryWarp = secondaryWarpRef.current;
+    const oldPrimaryRegion = primaryRegionRef.current;
+    const oldSecondaryRegion = secondaryRegionRef.current;
 
     // Acquire new warp maps, but do NOT commit them yet.
     let nextPrimary: ResolvedWarpWithStrength | undefined;
     let nextSecondary: ResolvedWarpWithStrength | undefined;
+    let nextPrimaryRegion: ResolvedProjectionRegionWithStrength | undefined;
+    let nextSecondaryRegion: ResolvedProjectionRegionWithStrength | undefined;
     try {
-      nextPrimary = projectedActive && projectedTexture && projectedPano
-        ? resolveProjectionWarpWithStrengthForProject(project, projectedPano.id, 'runtime')
-        : undefined;
-      nextSecondary = dualActive && projectedSecondary
-        ? resolveProjectionWarpWithStrengthForProject(project, projectedSecondary.id, 'runtime')
-        : undefined;
+      nextPrimaryRegion = projectedActive && projectedTexture && projectedPano ? resolveProjectionRegionWithStrengthForProject(project, projectedPano.id, 'runtime') : undefined;
+      nextPrimary = projectedActive && projectedTexture && projectedPano && !nextPrimaryRegion ? resolveProjectionWarpWithStrengthForProject(project, projectedPano.id, 'runtime') : undefined;
+      nextSecondaryRegion = dualActive && projectedSecondary ? resolveProjectionRegionWithStrengthForProject(project, projectedSecondary.id, 'runtime') : undefined;
+      nextSecondary = dualActive && projectedSecondary && !nextSecondaryRegion ? resolveProjectionWarpWithStrengthForProject(project, projectedSecondary.id, 'runtime') : undefined;
     } catch (error) {
       nextPrimary?.warp.release();
       nextSecondary?.warp.release();
+      nextPrimaryRegion?.release();
+      nextSecondaryRegion?.release();
       throw error;
     }
 
@@ -1516,6 +1526,14 @@ export function SceneViewport({
               ? [nextSecondary.warp.width, nextSecondary.warp.height]
               : undefined,
             warpStrengthB: secondaryStrength,
+            regionWarpMap: nextPrimaryRegion?.regionWarpMap,
+            regionWeightMap: nextPrimaryRegion?.regionWeightMap,
+            regionWarpMapSize: nextPrimaryRegion ? [nextPrimaryRegion.width, nextPrimaryRegion.height] : undefined,
+            regionStrength: nextPrimaryRegion?.strength,
+            regionWarpMapB: nextSecondaryRegion?.regionWarpMap,
+            regionWeightMapB: nextSecondaryRegion?.regionWeightMap,
+            regionWarpMapSizeB: nextSecondaryRegion ? [nextSecondaryRegion.width, nextSecondaryRegion.height] : undefined,
+            regionStrengthB: nextSecondaryRegion?.strength,
           }
           : undefined,
       });
@@ -1524,6 +1542,8 @@ export function SceneViewport({
       // (scene, warps, refs) is still valid.
       nextPrimary?.warp.release();
       nextSecondary?.warp.release();
+      nextPrimaryRegion?.release();
+      nextSecondaryRegion?.release();
       throw error;
     }
 
@@ -1531,10 +1551,14 @@ export function SceneViewport({
     sceneRef.current = nextScene;
     primaryWarpRef.current = nextPrimary?.warp;
     secondaryWarpRef.current = nextSecondary?.warp;
+    primaryRegionRef.current = nextPrimaryRegion;
+    secondaryRegionRef.current = nextSecondaryRegion;
 
     if (oldScene) disposeScene(oldScene);
     oldPrimaryWarp?.release();
     oldSecondaryWarp?.release();
+    oldPrimaryRegion?.release();
+    oldSecondaryRegion?.release();
     if (previewPointRef.current && placementTypeRef.current) {
       updatePreviewMesh(previewPointRef.current);
     }

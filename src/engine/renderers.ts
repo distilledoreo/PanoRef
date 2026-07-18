@@ -13,7 +13,7 @@ import {
 } from './cameraMoveCubemap';
 import { DEFAULT_GRAYBOX_PANO_HEIGHT, DEFAULT_GRAYBOX_PANO_WIDTH } from '../domain/defaults';
 import { ensureHumanMannequinModel } from './humanMannequinModel';
-import { resolveProjectedProjectorAssets, resolveProjectionWarpWithStrengthForProject } from './multiOriginProjection';
+import { resolveProjectedProjectorAssets, resolveProjectionRegionWithStrengthForProject, resolveProjectionWarpWithStrengthForProject, type ResolvedProjectionRegionWithStrength } from './multiOriginProjection';
 import type { WarpTextureResult } from './projectionWarpTexture';
 import {
   canUseProjectedAppearance,
@@ -37,6 +37,8 @@ async function loadProjectedSceneOptions(
   secondaryUrl?: string;
   primaryWarp?: WarpTextureResult;
   secondaryWarp?: WarpTextureResult;
+  primaryRegion?: ResolvedProjectionRegionWithStrength;
+  secondaryRegion?: ResolvedProjectionRegionWithStrength;
 } | undefined> {
   const assets = resolveProjectedProjectorAssets(project);
   if (!assets) return undefined;
@@ -51,6 +53,8 @@ async function loadProjectedSceneOptions(
   // release a primary warp even if secondary warp acquisition throws.
   let primaryWarp: WarpTextureResult | undefined;
   let secondaryWarp: WarpTextureResult | undefined;
+  let primaryRegion: ResolvedProjectionRegionWithStrength | undefined;
+  let secondaryRegion: ResolvedProjectionRegionWithStrength | undefined;
   let primaryStrength = 1;
   let secondaryStrength = 1;
 
@@ -62,12 +66,14 @@ async function loadProjectedSceneOptions(
 
     // Use the project-aware resolver that returns both the warp texture and
     // its saved alignment strength, eliminating the separate alignment lookup.
-    const primaryResolved = resolveProjectionWarpWithStrengthForProject(project, assets.primary.id, 'runtime');
+    primaryRegion = resolveProjectionRegionWithStrengthForProject(project, assets.primary.id, 'export');
+    const primaryResolved = primaryRegion ? undefined : resolveProjectionWarpWithStrengthForProject(project, assets.primary.id, 'runtime');
     primaryWarp = primaryResolved?.warp;
     primaryStrength = primaryResolved?.strength ?? 1;
 
     if (secondaryTexture && assets.secondary) {
-      const secondaryResolved = resolveProjectionWarpWithStrengthForProject(project, assets.secondary.id, 'runtime');
+      secondaryRegion = resolveProjectionRegionWithStrengthForProject(project, assets.secondary.id, 'export');
+      const secondaryResolved = secondaryRegion ? undefined : resolveProjectionWarpWithStrengthForProject(project, assets.secondary.id, 'runtime');
       secondaryWarp = secondaryResolved?.warp;
       secondaryStrength = secondaryResolved?.strength ?? 1;
     }
@@ -77,6 +83,8 @@ async function loadProjectedSceneOptions(
       secondaryUrl: secondaryTexture ? assets.secondaryUrl : undefined,
       primaryWarp,
       secondaryWarp,
+      primaryRegion,
+      secondaryRegion,
       options: {
         texture,
         origin: assets.primary.origin,
@@ -92,6 +100,14 @@ async function loadProjectedSceneOptions(
         warpMapB: secondaryWarp?.texture,
         warpMapSizeB: secondaryWarp ? [secondaryWarp.width, secondaryWarp.height] : undefined,
         warpStrengthB: secondaryWarp ? secondaryStrength : undefined,
+        regionWarpMap: primaryRegion?.regionWarpMap,
+        regionWeightMap: primaryRegion?.regionWeightMap,
+        regionWarpMapSize: primaryRegion ? [primaryRegion.width, primaryRegion.height] : undefined,
+        regionStrength: primaryRegion?.strength,
+        regionWarpMapB: secondaryRegion?.regionWarpMap,
+        regionWeightMapB: secondaryRegion?.regionWeightMap,
+        regionWarpMapSizeB: secondaryRegion ? [secondaryRegion.width, secondaryRegion.height] : undefined,
+        regionStrengthB: secondaryRegion?.strength,
       },
     };
   } catch (err) {
@@ -102,6 +118,8 @@ async function loadProjectedSceneOptions(
     // Release any warp textures already acquired (idempotent per-acquisition flag).
     primaryWarp?.release();
     secondaryWarp?.release();
+    primaryRegion?.release();
+    secondaryRegion?.release();
     // Never call texture.dispose() directly — the projected-style texture cache
     // owns disposal and may still share this texture with another consumer.
     throw err;
@@ -475,6 +493,8 @@ export async function renderShotCameraMoveMp4(
       releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
       projectedLoad.primaryWarp?.release();
       projectedLoad.secondaryWarp?.release();
+      projectedLoad.primaryRegion?.release();
+      projectedLoad.secondaryRegion?.release();
     }
   }
 }
@@ -611,6 +631,8 @@ export async function renderViewportProjected(
     releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
     projectedLoad.primaryWarp?.release();
     projectedLoad.secondaryWarp?.release();
+    projectedLoad.primaryRegion?.release();
+    projectedLoad.secondaryRegion?.release();
   }
 }
 

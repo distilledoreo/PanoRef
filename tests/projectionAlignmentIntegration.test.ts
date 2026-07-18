@@ -7,13 +7,16 @@ import {
   createPanoReference,
   createProjectionAlignment,
   createProjectionControlPair,
+  createProjectionRegion,
+  createProjectionRegionAlignment,
+  createProjectionRegionVertexPair,
   findProjectionAlignmentForPano,
   resetPairCounterForTests,
   setProjectionAlignmentForPano,
 } from '../src/domain/defaults';
 import { solveProjectionWarp, computeResidualToleranceRadians } from '../src/engine/projectionAlignmentSolver';
 import { createWarpTexture, disposeAllProjectionWarpTextures } from '../src/engine/projectionWarpTexture';
-import { resolveProjectionWarpForPano, resolveProjectionWarpWithStrengthForProject } from '../src/engine/multiOriginProjection';
+import { resolveProjectionRegionWithStrengthForProject, resolveProjectionWarpForPano, resolveProjectionWarpWithStrengthForProject } from '../src/engine/multiOriginProjection';
 import { createProjectedStyleMaterial } from '../src/engine/projectedStyleMaterials';
 import { equirectUvToUnitDirection, unitDirectionToEquirectUv } from '../src/engine/projectionAlignmentMath';
 import { degreesToRadians } from '../src/engine/sync';
@@ -513,6 +516,22 @@ describe('resolveProjectionWarpWithStrengthForProject', () => {
     expect(typeof result!.warp.diagnostics!.conflictCount).toBe('number');
     expect(typeof result!.warp.diagnostics!.maximumRotationRadians).toBe('number');
     result!.warp.release();
+  });
+
+  it('resolves valid Region Fit textures and saved strength', () => {
+    const { project, styledPanoId, grayboxPanoId } = buildProject();
+    const points: [number, number][] = [[0.45, 0.45], [0.55, 0.45], [0.55, 0.55], [0.45, 0.55]];
+    const alignment = createProjectionRegionAlignment(styledPanoId, grayboxPanoId, [createProjectionRegion(points.map((point, index) => createProjectionRegionVertexPair(point, [point[0] + 0.01, point[1]], `v${index}`)))]);
+    alignment.strength = 0.6; project.settings.projectedStyle!.regionAlignments = [alignment];
+    const result = resolveProjectionRegionWithStrengthForProject(project, styledPanoId, 'preview');
+    expect(result).toBeDefined(); expect([result!.width, result!.height]).toEqual([256, 128]); expect(result!.strength).toBe(0.6); expect(result!.regionWarpMap).toBeDefined(); expect(result!.regionWeightMap).toBeDefined(); result!.release(); result!.release();
+  });
+
+  it('rejects Region Fit when capture origins do not match', () => {
+    const { project, styledPanoId, grayboxPanoId } = buildProject(); const styled = project.panoRefs.find((pano) => pano.id === styledPanoId)!; styled.origin = [0.3, 1.6, 0];
+    const points: [number, number][] = [[0.45, 0.45], [0.55, 0.45], [0.55, 0.55]];
+    project.settings.projectedStyle!.regionAlignments = [createProjectionRegionAlignment(styledPanoId, grayboxPanoId, [createProjectionRegion(points.map((point, index) => createProjectionRegionVertexPair(point, point, `v${index}`)))])];
+    expect(resolveProjectionRegionWithStrengthForProject(project, styledPanoId, 'preview')).toBeUndefined();
   });
 });
 
