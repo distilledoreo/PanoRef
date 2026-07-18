@@ -99,8 +99,9 @@ describe('projected style WebGL compile gate', () => {
       expect(result.lightingCases.every((c) => c.ok)).toBe(true);
       expect(result.dualCases).toHaveLength(4);
       expect(result.dualCases.every((c) => c.ok)).toBe(true);
-      expect(result.warpCases).toHaveLength(13);
+      expect(result.warpCases).toHaveLength(14);
       expect(result.warpCases.every((c) => c.ok)).toBe(true);
+      expect(result.warpCases.find((c) => c.name === 'region_fit_precedence_and_weight')?.ok).toBe(true);
       expect(result.warpCases.find((c) => c.name === 'nonuniform_multi_texel_bilinear')).toMatchObject({
         name: 'nonuniform_multi_texel_bilinear',
         ok: true,

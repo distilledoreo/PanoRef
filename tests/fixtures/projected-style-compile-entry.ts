@@ -202,6 +202,14 @@ function makeWarpDataTexture(width: number, height: number, du: number, dv: numb
   return texture;
 }
 
+function makeWeightDataTexture(weight: number): THREE.DataTexture {
+  const texture = new THREE.DataTexture(new Uint8Array([Math.round(weight * 255)]), 1, 1, THREE.RedFormat, THREE.UnsignedByteType);
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 type WarpDelta = [number, number];
 
 function encodeWarpDelta(data: Uint8Array, index: number, [du, dv]: WarpDelta): void {
@@ -676,7 +684,15 @@ function tryWarpTests(
 
   // ── Cleanup ──
   hGradTex.dispose(); vGradTex.dispose();
-  idWarp.dispose(); puWarp.dispose(); nuWarp.dispose();
+  // Region Fit samples original and fitted colors with an independent weight.
+  const regionWeight = makeWeightDataTexture(1);
+  m = createProjectedStyleMaterial({ texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
+    regionWarpMap: puWarp, regionWeightMap: regionWeight, regionWarpMapSize: [1, 1], regionStrength: 1,
+    warpMap: nuWarp, warpMapSize: [1, 1], warpStrength: 1 });
+  r = renderWith(m); m.dispose();
+  if (r.ok && r.r > ref.r + THRESHOLD && r.b < ref.b - THRESHOLD) push('region_fit_precedence_and_weight', r);
+  else push('region_fit_precedence_and_weight', { ...r, ok: false, error: r.error ?? 'Region Fit did not override legacy correction.' });
+  regionWeight.dispose(); idWarp.dispose(); puWarp.dispose(); nuWarp.dispose();
 
   return results;
 }

@@ -194,6 +194,20 @@ export interface ProjectedMaterialParams {
   warpMapSizeB?: [number, number];
   /** Warp strength for secondary. */
   warpStrengthB?: number;
+  regionWarpMap?: THREE.DataTexture;
+  regionWeightMap?: THREE.DataTexture;
+  regionWarpMapSize?: [number, number];
+  regionStrength?: number;
+  regionWarpMapB?: THREE.DataTexture;
+  regionWeightMapB?: THREE.DataTexture;
+  regionWarpMapSizeB?: [number, number];
+  regionStrengthB?: number;
+}
+
+let identityRegionWeight: THREE.DataTexture | undefined;
+function getIdentityRegionWeight(): THREE.DataTexture {
+  if (!identityRegionWeight) { identityRegionWeight = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat, THREE.UnsignedByteType); identityRegionWeight.needsUpdate = true; identityRegionWeight.minFilter = THREE.LinearFilter; identityRegionWeight.magFilter = THREE.LinearFilter; }
+  return identityRegionWeight;
 }
 
 /**
@@ -222,8 +236,10 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
   const blendMode = params.settings.blendMode ?? 'primary_only';
   const hasWarp = Boolean(params.warpMap);
   const hasWarpB = Boolean(params.warpMapB) && hasSecondary;
-  const warpStrength = params.warpStrength ?? 0;
-  const warpStrengthB = params.warpStrengthB ?? 0;
+  const regionActive = Boolean(params.regionWarpMap && params.regionWeightMap);
+  const regionActiveB = Boolean(params.regionWarpMapB && params.regionWeightMapB) && hasSecondary;
+  const warpStrength = regionActive ? 0 : params.warpStrength ?? 0;
+  const warpStrengthB = regionActiveB ? 0 : params.warpStrengthB ?? 0;
   const warpMapSize = params.warpMapSize ?? [256, 128];
   const warpMapSizeB = params.warpMapSizeB ?? [256, 128];
   const blendModeId = blendMode === 'secondary_only'
@@ -254,6 +270,14 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
     shader.uniforms.projectedWarpMapB = { value: params.warpMapB ?? getIdentityWarpTexture() };
     shader.uniforms.projectedWarpMapSizeB = { value: [warpMapSizeB[0], warpMapSizeB[1]] };
     shader.uniforms.projectedWarpStrengthB = { value: warpStrengthB };
+    shader.uniforms.projectedRegionWarpMap = { value: params.regionWarpMap ?? getIdentityWarpTexture() };
+    shader.uniforms.projectedRegionWeightMap = { value: params.regionWeightMap ?? getIdentityRegionWeight() };
+    shader.uniforms.projectedRegionWarpMapSize = { value: params.regionWarpMapSize ?? [1, 1] };
+    shader.uniforms.projectedRegionStrength = { value: regionActive ? params.regionStrength ?? 1 : 0 };
+    shader.uniforms.projectedRegionWarpMapB = { value: params.regionWarpMapB ?? getIdentityWarpTexture() };
+    shader.uniforms.projectedRegionWeightMapB = { value: params.regionWeightMapB ?? getIdentityRegionWeight() };
+    shader.uniforms.projectedRegionWarpMapSizeB = { value: params.regionWarpMapSizeB ?? [1, 1] };
+    shader.uniforms.projectedRegionStrengthB = { value: regionActiveB ? params.regionStrengthB ?? 1 : 0 };
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -290,6 +314,14 @@ uniform float projectedWarpStrength;
 uniform sampler2D projectedWarpMapB;
 uniform vec2 projectedWarpMapSizeB;
 uniform float projectedWarpStrengthB;
+uniform sampler2D projectedRegionWarpMap;
+uniform sampler2D projectedRegionWeightMap;
+uniform vec2 projectedRegionWarpMapSize;
+uniform float projectedRegionStrength;
+uniform sampler2D projectedRegionWarpMapB;
+uniform sampler2D projectedRegionWeightMapB;
+uniform vec2 projectedRegionWarpMapSizeB;
+uniform float projectedRegionStrengthB;
 varying vec3 vProjectedWorldPos;
 const float PROJECTED_PI = 3.141592653589793;
 const float PROJECTED_FALLOFF = 6.0;
@@ -349,7 +381,8 @@ float projectedConfidence(vec3 worldPos, vec3 origin) {
 }
 
 vec3 sampleProjectedPano(sampler2D map, vec3 origin, float yaw, vec3 worldPos,
-                         sampler2D warpMap, vec2 warpSize, float warpStrength) {
+                         sampler2D warpMap, vec2 warpSize, float warpStrength,
+                         sampler2D regionWarpMap, sampler2D regionWeightMap, vec2 regionSize, float regionStrength) {
   vec3 offset = worldPos - origin;
   float distSq = dot(offset, offset);
   if (distSq < 1e-8) {
@@ -365,7 +398,15 @@ vec3 sampleProjectedPano(sampler2D map, vec3 origin, float yaw, vec3 worldPos,
     panoUv.x = fract(panoUv.x);
     panoUv.y = clamp(panoUv.y, 0.0, 1.0);
   }
-  return texture2D(map, panoUv).rgb * projectedExposure;
+  vec3 originalColor = texture2D(map, panoUv).rgb;
+  if (regionStrength > 0.0) {
+    vec2 regionDelta = sampleWarpMap(regionWarpMap, regionSize, panoUv);
+    vec2 fittedUv = vec2(fract(panoUv.x + regionDelta.x), clamp(panoUv.y + regionDelta.y, 0.0, 1.0));
+    vec3 fittedColor = texture2D(map, fittedUv).rgb;
+    float regionWeight = texture2D(regionWeightMap, panoUv).r;
+    originalColor = mix(originalColor, fittedColor, regionWeight * regionStrength);
+  }
+  return originalColor * projectedExposure;
 }
 `,
       )
@@ -374,13 +415,15 @@ vec3 sampleProjectedPano(sampler2D map, vec3 origin, float yaw, vec3 worldPos,
         `#include <color_fragment>
 {
   vec3 sampleA = sampleProjectedPano(projectedPanoMap, projectedPanoOrigin, projectedPanoYaw, vProjectedWorldPos,
-                                     projectedWarpMap, projectedWarpMapSize, projectedWarpStrength);
+                                     projectedWarpMap, projectedWarpMapSize, projectedWarpStrength,
+                                     projectedRegionWarpMap, projectedRegionWeightMap, projectedRegionWarpMapSize, projectedRegionStrength);
   vec3 sampleColor = sampleA;
   if (sampleA.x < 0.0) {
     sampleColor = projectedUseNeutralFallback == 1 ? projectedFallbackColor : diffuseColor.rgb;
   } else if (projectedHasSecondary == 1 && projectedBlendMode != 0) {
     vec3 sampleB = sampleProjectedPano(projectedPanoMapB, projectedPanoOriginB, projectedPanoYawB, vProjectedWorldPos,
-                                       projectedWarpMapB, projectedWarpMapSizeB, projectedWarpStrengthB);
+                                       projectedWarpMapB, projectedWarpMapSizeB, projectedWarpStrengthB,
+                                       projectedRegionWarpMapB, projectedRegionWeightMapB, projectedRegionWarpMapSizeB, projectedRegionStrengthB);
     if (sampleB.x >= 0.0) {
       float confA = projectedConfidence(vProjectedWorldPos, projectedPanoOrigin);
       float confB = projectedConfidence(vProjectedWorldPos, projectedPanoOriginB);
