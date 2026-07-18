@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createProjectionControlPair,
   defaultProjectedStyleSettings,
   normalizeProjectedStyleSettings,
   normalizeProjectionAlignments,
   findProjectionAlignmentForPano,
   setProjectionAlignmentForPano,
+  updateProjectionAlignmentPairs,
 } from '../src/domain/defaults';
 import {
   ProjectedStyleSettings,
@@ -96,18 +98,16 @@ describe('projection alignment serialization', () => {
     expect(normalized![0].pairs[1].id).toBe('valid-2');
   });
 
-  it('duplicate source IDs are preserved', () => {
+  it('duplicate source IDs are deduplicated (last wins)', () => {
     const a1 = makeAlignment({ sourcePanoId: 'pano-1', pairs: [makePair({ id: 'p1' })] });
     const a2 = makeAlignment({ sourcePanoId: 'pano-1', pairs: [makePair({ id: 'p2' })] });
     const a3 = makeAlignment({ sourcePanoId: 'pano-2', pairs: [makePair({ id: 'p3' })] });
     const normalized = normalizeProjectionAlignments([a1, a2, a3]);
-    expect(normalized).toHaveLength(3);
+    expect(normalized).toHaveLength(2);
     expect(normalized![0].sourcePanoId).toBe('pano-1');
-    expect(normalized![0].pairs[0].id).toBe('p1');
-    expect(normalized![1].sourcePanoId).toBe('pano-1');
-    expect(normalized![1].pairs[0].id).toBe('p2');
-    expect(normalized![2].sourcePanoId).toBe('pano-2');
-    expect(normalized![2].pairs[0].id).toBe('p3');
+    expect(normalized![0].pairs[0].id).toBe('p2');
+    expect(normalized![1].sourcePanoId).toBe('pano-2');
+    expect(normalized![1].pairs[0].id).toBe('p3');
   });
 
   it('updating one panorama alignment preserves the other', () => {
@@ -172,15 +172,15 @@ describe('projection alignment serialization', () => {
     expect(normalized![0].updatedAt).toBe('');
   });
 
-  it('UV coordinates pass through without clamping', () => {
+  it('UV coordinates out of range are clamped to [0,1]', () => {
     const alignment = makeAlignment({
       pairs: [makePair({ targetUv: [-0.1, 1.5], sourceUv: [2.0, -0.5] })],
     });
     const normalized = normalizeProjectionAlignments([alignment]);
-    expect(normalized![0].pairs[0].targetUv[0]).toBe(-0.1);
-    expect(normalized![0].pairs[0].targetUv[1]).toBe(1.5);
-    expect(normalized![0].pairs[0].sourceUv[0]).toBe(2.0);
-    expect(normalized![0].pairs[0].sourceUv[1]).toBe(-0.5);
+    expect(normalized![0].pairs[0].targetUv[0]).toBe(0);
+    expect(normalized![0].pairs[0].targetUv[1]).toBe(1);
+    expect(normalized![0].pairs[0].sourceUv[0]).toBe(1);
+    expect(normalized![0].pairs[0].sourceUv[1]).toBe(0);
   });
 
   it('strength is clamped to 0-1', () => {
@@ -203,5 +203,69 @@ describe('projection alignment serialization', () => {
     expect(findProjectionAlignmentForPano(settings, 'pano-a')?.sourcePanoId).toBe('pano-a');
     expect(findProjectionAlignmentForPano(settings, 'pano-b')?.sourcePanoId).toBe('pano-b');
     expect(findProjectionAlignmentForPano(settings, 'pano-c')).toBeUndefined();
+  });
+
+  it('NaN UV coordinates are rejected', () => {
+    const alignment = makeAlignment({
+      pairs: [makePair({ targetUv: [NaN, 0.5], sourceUv: [0.3, 0.7] })],
+    });
+    const normalized = normalizeProjectionAlignments([alignment]);
+    expect(normalized).toBeUndefined();
+  });
+
+  it('Infinity UV coordinates are rejected', () => {
+    const alignment = makeAlignment({
+      pairs: [makePair({ targetUv: [Infinity, 0.5], sourceUv: [0.3, 0.7] })],
+    });
+    const normalized = normalizeProjectionAlignments([alignment]);
+    expect(normalized).toBeUndefined();
+  });
+
+  it('alignment with zero valid pairs is rejected', () => {
+    const alignment = makeAlignment({
+      pairs: [
+        { id: '', order: 0, targetUv: [0.5, 0.5], sourceUv: [0.3, 0.7], enabled: true } as ProjectionControlPair,
+      ],
+    });
+    const normalized = normalizeProjectionAlignments([alignment]);
+    expect(normalized).toBeUndefined();
+  });
+
+  it('strength field is preserved through normalization', () => {
+    const alignment = makeAlignment({ strength: 0.7 });
+    const normalized = normalizeProjectionAlignments([alignment]);
+    expect(normalized![0].strength).toBe(0.7);
+  });
+
+  it('targetGrayboxPanoId is preserved through normalization', () => {
+    const alignment = makeAlignment({ targetGrayboxPanoId: 'custom-graybox' });
+    const normalized = normalizeProjectionAlignments([alignment]);
+    expect(normalized![0].targetGrayboxPanoId).toBe('custom-graybox');
+  });
+
+  it('updateProjectionAlignmentPairs preserves metadata fields', () => {
+    const alignment = makeAlignment({
+      sourcePanoId: 'pano-src',
+      targetGrayboxPanoId: 'pano-graybox',
+      strength: 0.5,
+    });
+    const newPairs = [makePair({ id: 'new-pair' })];
+    const updated = updateProjectionAlignmentPairs(alignment, newPairs);
+    expect(updated.sourcePanoId).toBe('pano-src');
+    expect(updated.targetGrayboxPanoId).toBe('pano-graybox');
+    expect(updated.strength).toBe(0.5);
+    expect(updated.version).toBe(1);
+    expect(updated.solver).toBe('spherical-rbf-v1');
+    expect(updated.pairs).toHaveLength(1);
+    expect(updated.pairs[0].id).toBe('new-pair');
+    expect(updated.updatedAt).not.toBe(alignment.updatedAt);
+  });
+
+  it('createProjectionControlPair requires both coordinates', () => {
+    const pair = createProjectionControlPair({ targetUv: [0.2, 0.8], sourceUv: [0.4, 0.6] });
+    expect(pair.targetUv).toEqual([0.2, 0.8]);
+    expect(pair.sourceUv).toEqual([0.4, 0.6]);
+    expect(pair.id).toBeTruthy();
+    expect(pair.enabled).toBe(true);
   });
 });

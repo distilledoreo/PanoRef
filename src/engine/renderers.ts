@@ -44,6 +44,14 @@ async function loadProjectedSceneOptions(
     secondaryTexture = (await acquireProjectedStyleTexture(assets.secondaryUrl)) ?? undefined;
   }
 
+  // Read alignment strength from settings
+  const primaryStrength = assets.settings.alignments?.find(
+    (a) => a.sourcePanoId === assets.primary.id,
+  )?.strength ?? 1;
+  const secondaryStrength = assets.secondary
+    ? assets.settings.alignments?.find((a) => a.sourcePanoId === assets.secondary!.id)?.strength ?? 1
+    : 1;
+
   const primaryWarp = resolveProjectionWarpForPano(
     assets.settings,
     assets.primary.id,
@@ -76,10 +84,10 @@ async function loadProjectedSceneOptions(
       secondaryRotation: secondaryTexture && assets.secondary ? assets.secondary.rotation : undefined,
       warpMap: primaryWarp?.texture,
       warpMapSize: primaryWarp ? [primaryWarp.width, primaryWarp.height] : undefined,
-      warpStrength: primaryWarp ? 1 : undefined,
+      warpStrength: primaryWarp ? primaryStrength : undefined,
       warpMapB: secondaryWarp?.texture,
       warpMapSizeB: secondaryWarp ? [secondaryWarp.width, secondaryWarp.height] : undefined,
-      warpStrengthB: secondaryWarp ? 1 : undefined,
+      warpStrengthB: secondaryWarp ? secondaryStrength : undefined,
     },
   };
 }

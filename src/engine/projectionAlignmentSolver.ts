@@ -18,6 +18,8 @@ const MAX_ROTATION_RADIANS = 35 * DEG;
 const IDENTITY_ANCHOR_WEIGHT = 0.06;
 
 export interface ProjectionAlignmentSolveOptions {
+  sourcePanoWidth?: number;
+  sourcePanoHeight?: number;
   width?: number;
   height?: number;
   targetYawRadians: number;
@@ -90,12 +92,13 @@ function composeRotations(
       const currentAA: Vec3 = [current[offset], current[offset + 1], current[offset + 2]];
       const correctionAA: Vec3 = [correction[offset], correction[offset + 1], correction[offset + 2]];
 
-      const intermediate = rotateDirectionByAxisAngleVector(
-        [0, 0, 1],
-        currentAA,
-      );
+      const u = tx / width;
+      const v = ty / height;
+      const texelDir = equirectUvToUnitDirection([u, v]);
+
+      const intermediate = rotateDirectionByAxisAngleVector(texelDir, currentAA);
       const finalDir = rotateDirectionByAxisAngleVector(intermediate, correctionAA);
-      const composed = axisAngleVectorBetween([0, 0, 1], finalDir);
+      const composed = axisAngleVectorBetween(texelDir, finalDir);
       result[offset] = composed[0];
       result[offset + 1] = composed[1];
       result[offset + 2] = composed[2];
@@ -123,14 +126,19 @@ function clampRotationMagnitude(
   }
 }
 
+/**
+ * Sample the rotation field using the same texel-center addressing as the
+ * GLSL sampleWarpMap: texelCoord = uv * [width, height], with bilinear
+ * interpolation between integer texel indices 0..width-1.
+ */
 function sampleRotationFieldBilinear(
   field: Float32Array,
   width: number,
   height: number,
   uv: Vec2,
 ): Vec3 {
-  const tx = uv[0] * (width - 1);
-  const ty = uv[1] * (height - 1);
+  const tx = uv[0] * width;
+  const ty = uv[1] * height;
   const ix = Math.floor(tx);
   const iy = Math.floor(ty);
   const fx = tx - ix;
@@ -162,12 +170,51 @@ function sampleRotationFieldBilinear(
   return result;
 }
 
+/**
+ * Sample the displacement field using the same texel-center addressing as the
+ * GLSL sampleWarpMap: texelCoord = uv * [width, height], with bilinear
+ * interpolation between integer texel indices 0..width-1.
+ */
+function sampleDisplacementFieldBilinear(
+  field: Float32Array,
+  width: number,
+  height: number,
+  uv: Vec2,
+): Vec2 {
+  const tx = uv[0] * width;
+  const ty = uv[1] * height;
+  const ix = Math.floor(tx);
+  const iy = Math.floor(ty);
+  const fx = tx - ix;
+  const fy = ty - iy;
+
+  const ix0 = Math.max(0, Math.min(width - 1, ix));
+  const ix1 = Math.max(0, Math.min(width - 1, ix + 1));
+  const iy0 = Math.max(0, Math.min(height - 1, iy));
+  const iy1 = Math.max(0, Math.min(height - 1, iy + 1));
+
+  const s00 = iy0 * width + ix0;
+  const s01 = iy0 * width + ix1;
+  const s10 = iy1 * width + ix0;
+  const s11 = iy1 * width + ix1;
+
+  const wx0 = 1 - fx;
+  const wx1 = fx;
+  const wy0 = 1 - fy;
+  const wy1 = fy;
+
+  return [
+    field[s00 * 2] * wx0 * wy0 + field[s01 * 2] * wx1 * wy0 + field[s10 * 2] * wx0 * wy1 + field[s11 * 2] * wx1 * wy1,
+    field[s00 * 2 + 1] * wx0 * wy0 + field[s01 * 2 + 1] * wx1 * wy0 + field[s10 * 2 + 1] * wx0 * wy1 + field[s11 * 2 + 1] * wx1 * wy1,
+  ];
+}
+
 export function solveProjectionWarp(
   alignment: ProjectionAlignment | undefined,
   options: ProjectionAlignmentSolveOptions,
 ): ProjectionWarpField {
-  const width = options.width ?? 256;
-  const height = options.height ?? 128;
+  const width = options.sourcePanoWidth ?? options.width ?? 256;
+  const height = options.sourcePanoHeight ?? options.height ?? 128;
   const texelCount = width * height;
 
   if (!alignment) {
@@ -194,7 +241,7 @@ export function solveProjectionWarp(
   // Preprocess each marker
   const markerCount = enabledPairs.length;
   const markers: MarkerData[] = [];
-  const targetDirs: Vec3[] = [];
+  const sourceDirs: Vec3[] = [];
 
   for (const pair of enabledPairs) {
     const targetLocalDir = equirectUvToUnitDirection(pair.targetUv);
@@ -204,7 +251,7 @@ export function solveProjectionWarp(
 
     const rotation = axisAngleVectorBetween(naturalSourceDir, desiredSourceDir);
 
-    targetDirs.push(targetLocalDir);
+    sourceDirs.push(desiredSourceDir);
     markers.push({
       targetGrayboxLocalDir: targetLocalDir,
       naturalSourceDir,
@@ -214,10 +261,10 @@ export function solveProjectionWarp(
     });
   }
 
-  // Compute per-marker radius
+  // Compute per-marker radius using source-space distances
   const enabledFlags = markers.map(() => true);
   for (let i = 0; i < markerCount; i++) {
-    markers[i].radiusRadians = computeMarkerRadius(i, targetDirs, enabledFlags);
+    markers[i].radiusRadians = computeMarkerRadius(i, sourceDirs, enabledFlags);
   }
 
   const anchors = generateIdentityAnchors();
@@ -234,7 +281,7 @@ export function solveProjectionWarp(
 
     for (let mi = 0; mi < markerCount; mi++) {
       const marker = markers[mi];
-      const texelUv = unitDirectionToEquirectUv(marker.targetGrayboxLocalDir);
+      const texelUv = unitDirectionToEquirectUv(marker.naturalSourceDir);
       const currentRot = sampleRotationFieldBilinear(rotationField, width, height, texelUv);
 
       const currentDir = rotateDirectionByAxisAngleVector(marker.naturalSourceDir, currentRot);
@@ -252,7 +299,7 @@ export function solveProjectionWarp(
     const residuals: MarkerData[] = [];
     for (let mi = 0; mi < markerCount; mi++) {
       const marker = markers[mi];
-      const texelUv = unitDirectionToEquirectUv(marker.targetGrayboxLocalDir);
+      const texelUv = unitDirectionToEquirectUv(marker.naturalSourceDir);
       const currentRot = sampleRotationFieldBilinear(rotationField, width, height, texelUv);
 
       const currentDir = rotateDirectionByAxisAngleVector(marker.naturalSourceDir, currentRot);
@@ -283,39 +330,30 @@ export function solveProjectionWarp(
       const rotOffset = idx * 3;
       const dispOffset = idx * 2;
 
-      const u = tx / (width - 1);
-      const v = ty / (height - 1);
-
-      const targetLocalDir = equirectUvToUnitDirection([u, v]);
-      const worldDir = applyYawRotation(targetLocalDir, options.targetYawRadians);
-      const naturalSourceDir = applyInverseYawRotation(worldDir, options.sourceYawRadians);
+      const u = tx / width;
+      const v = ty / height;
+      const sourceDir = equirectUvToUnitDirection([u, v]);
 
       const rot: Vec3 = [rotationField[rotOffset], rotationField[rotOffset + 1], rotationField[rotOffset + 2]];
       const rotAngle = Math.sqrt(rot[0] * rot[0] + rot[1] * rot[1] + rot[2] * rot[2]);
       if (rotAngle > maxRotationRadians) maxRotationRadians = rotAngle;
 
-      const correctedDir = rotateDirectionByAxisAngleVector(naturalSourceDir, rot);
-      const sourceUv = unitDirectionToEquirectUv(correctedDir);
-      const naturalUv = unitDirectionToEquirectUv(naturalSourceDir);
+      const correctedDir = rotateDirectionByAxisAngleVector(sourceDir, rot);
+      const correctedUv = unitDirectionToEquirectUv(correctedDir);
 
-      displacement[dispOffset] = shortestWrappedDeltaU(naturalUv[0], sourceUv[0]);
-      displacement[dispOffset + 1] = sourceUv[1] - naturalUv[1];
+      displacement[dispOffset] = shortestWrappedDeltaU(u, correctedUv[0]);
+      displacement[dispOffset + 1] = correctedUv[1] - v;
     }
   }
 
   // Calculate marker error
   let maxMarkerErrorRadians = 0;
   for (const marker of markers) {
-    const texelUv = unitDirectionToEquirectUv(marker.targetGrayboxLocalDir);
-    const tx = Math.round(texelUv[0] * (width - 1));
-    const ty = Math.round(texelUv[1] * (height - 1));
-    const idx = (ty * width + tx) * 2;
-    const du = displacement[idx];
-    const dv = displacement[idx + 1];
+    const queryUv = unitDirectionToEquirectUv(marker.naturalSourceDir);
+    const [du, dv] = sampleDisplacementFieldBilinear(displacement, width, height, queryUv);
 
-    const naturalUv = unitDirectionToEquirectUv(marker.naturalSourceDir);
-    const mappedU = ((naturalUv[0] + du) % 1 + 1) % 1;
-    const mappedV = Math.min(1, Math.max(0, naturalUv[1] + dv));
+    const mappedU = ((queryUv[0] + du) % 1 + 1) % 1;
+    const mappedV = Math.min(1, Math.max(0, queryUv[1] + dv));
 
     const mappedDir = equirectUvToUnitDirection([mappedU, mappedV]);
     const error = angularDistanceRadians(mappedDir, marker.desiredSourceDir);
@@ -363,9 +401,9 @@ function solveField(
   for (let ty = 0; ty < height; ty++) {
     for (let tx = 0; tx < width; tx++) {
       const texelIdx = ty * width + tx;
-      const u = tx / (width - 1);
-      const v = ty / (height - 1);
-      const texelDir = equirectUvToUnitDirection([u, v]);
+      const u = tx / width;
+      const v = ty / height;
+      const sourceDir = equirectUvToUnitDirection([u, v]);
 
       let totalWeight = 0;
       let weightedRotX = 0;
@@ -373,7 +411,7 @@ function solveField(
       let weightedRotZ = 0;
 
       for (const marker of markers) {
-        const dist = angularDistanceRadians(texelDir, marker.targetGrayboxLocalDir);
+        const dist = angularDistanceRadians(sourceDir, marker.desiredSourceDir);
         const normalizedR = dist / marker.radiusRadians;
         const w = wendlandC2(normalizedR);
         weightedRotX += w * marker.rotation[0];
@@ -383,7 +421,7 @@ function solveField(
       }
 
       for (const anchorDir of anchorDirs) {
-        const dist = angularDistanceRadians(texelDir, anchorDir);
+        const dist = angularDistanceRadians(sourceDir, anchorDir);
         const w = wendlandC2(dist / (70 * DEG)) * IDENTITY_ANCHOR_WEIGHT;
         totalWeight += w;
       }

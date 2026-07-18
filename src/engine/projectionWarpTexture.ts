@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ProjectionAlignment } from '../domain/types';
+import { solveProjectionWarp } from './projectionAlignmentSolver';
 
 const DELTA_U_MIN = -0.5;
 const DELTA_U_MAX = 0.5;
@@ -54,50 +55,21 @@ export interface WarpTextureResult {
   release: () => void;
 }
 
-/**
- * Look up an existing warp texture from the cache without solving.
- * Returns undefined when no cached entry exists.
- */
-export function findWarpTexture(
-  alignment: ProjectionAlignment,
-  sourceYawRadians: number,
-  targetYawRadians: number,
-  width: number,
-  height: number,
-): WarpTextureResult | undefined {
-  const key = buildWarpCacheKey(alignment, sourceYawRadians, targetYawRadians, width, height);
-  const entry = warpCache.get(key);
-  if (!entry) return undefined;
-  entry.refCount += 1;
-  return {
-    texture: entry.texture,
-    width,
-    height,
-    release: () => releaseWarpTexture(key),
-  };
+/** Options for acquiring a projection warp texture. */
+export interface AcquireWarpOptions {
+  alignment: ProjectionAlignment;
+  sourceYawRadians: number;
+  targetYawRadians: number;
+  width: number;
+  height: number;
 }
 
-export function createWarpTexture(
-  alignment: ProjectionAlignment,
-  sourceYawRadians: number,
-  targetYawRadians: number,
+function createTextureFromDisplacement(
+  key: string,
   displacement: Float32Array,
   width: number,
   height: number,
 ): WarpTextureResult {
-  const key = buildWarpCacheKey(alignment, sourceYawRadians, targetYawRadians, width, height);
-
-  const existing = warpCache.get(key);
-  if (existing) {
-    existing.refCount += 1;
-    return {
-      texture: existing.texture,
-      width,
-      height,
-      release: () => releaseWarpTexture(key),
-    };
-  }
-
   const pixelCount = width * height;
   const data = new Uint8Array(pixelCount * 4);
 
@@ -133,10 +105,77 @@ export function createWarpTexture(
   };
 }
 
+function cachedWarpResult(key: string, width: number, height: number): WarpTextureResult | undefined {
+  const existing = warpCache.get(key);
+  if (!existing) return undefined;
+  existing.refCount += 1;
+  return {
+    texture: existing.texture,
+    width,
+    height,
+    release: () => releaseWarpTexture(key),
+  };
+}
+
+/**
+ * Acquire a warp texture in one call: checks cache, solves if needed,
+ * creates the DataTexture, caches it, and returns.
+ * Every result must have release() called when done.
+ */
+export function acquireProjectionWarpTexture(
+  options: AcquireWarpOptions,
+): WarpTextureResult {
+  const { alignment, sourceYawRadians, targetYawRadians, width, height } = options;
+  const key = buildWarpCacheKey(alignment, sourceYawRadians, targetYawRadians, width, height);
+
+  const cached = cachedWarpResult(key, width, height);
+  if (cached) return cached;
+
+  const field = solveProjectionWarp(alignment, { sourceYawRadians, targetYawRadians, width, height });
+  return createTextureFromDisplacement(key, field.displacement, width, height);
+}
+
+/** Create a warp texture from a pre-computed displacement array (bypasses solver). */
+export function createWarpTexture(
+  alignment: ProjectionAlignment,
+  sourceYawRadians: number,
+  targetYawRadians: number,
+  displacement: Float32Array,
+  width: number,
+  height: number,
+): WarpTextureResult {
+  const key = buildWarpCacheKey(alignment, sourceYawRadians, targetYawRadians, width, height);
+  const cached = cachedWarpResult(key, width, height);
+  if (cached) return cached;
+  return createTextureFromDisplacement(key, displacement, width, height);
+}
+
+/** @deprecated Use acquireProjectionWarpTexture instead (it handles cache look-up internally). */
+export function findWarpTexture(
+  alignment: ProjectionAlignment,
+  sourceYawRadians: number,
+  targetYawRadians: number,
+  width: number,
+  height: number,
+): WarpTextureResult | undefined {
+  const key = buildWarpCacheKey(alignment, sourceYawRadians, targetYawRadians, width, height);
+  const entry = warpCache.get(key);
+  if (!entry) return undefined;
+  entry.refCount += 1;
+  return {
+    texture: entry.texture,
+    width,
+    height,
+    release: () => releaseWarpTexture(key),
+  };
+}
+
 function releaseWarpTexture(key: string): void {
   const entry = warpCache.get(key);
   if (!entry) return;
-  entry.refCount -= 1;
+  if (entry.refCount > 0) {
+    entry.refCount -= 1;
+  }
   if (entry.refCount <= 0) {
     entry.texture.dispose();
     warpCache.delete(key);

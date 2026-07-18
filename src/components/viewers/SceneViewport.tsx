@@ -1456,28 +1456,20 @@ export function SceneViewport({
     if (sceneRef.current) disposeScene(sceneRef.current);
     clearTransformGizmo();
 
-    // Resolve warp maps for active projectors
-    primaryWarpRef.current?.release();
-    secondaryWarpRef.current?.release();
-    primaryWarpRef.current = undefined;
-    secondaryWarpRef.current = undefined;
+    // Acquire new warp maps first, then release old ones (swap pattern)
+    // to avoid destroying a texture that is still needed for the same key.
+    const oldPrimaryWarp = primaryWarpRef.current;
+    const oldSecondaryWarp = secondaryWarpRef.current;
 
-    if (projectedActive && projectedTexture && projectedPano) {
-      primaryWarpRef.current = resolveProjectionWarpForPano(
-        projectedSettings,
-        projectedPano.id,
-        projectedPano.rotation,
-        project.panoRefs,
-      );
-      if (dualActive && projectedSecondary) {
-        secondaryWarpRef.current = resolveProjectionWarpForPano(
-          projectedSettings,
-          projectedSecondary.id,
-          projectedSecondary.rotation,
-          project.panoRefs,
-        );
-      }
-    }
+    primaryWarpRef.current = projectedActive && projectedTexture && projectedPano
+      ? resolveProjectionWarpForPano(projectedSettings, projectedPano.id, projectedPano.rotation, project.panoRefs)
+      : undefined;
+    secondaryWarpRef.current = dualActive && projectedSecondary && primaryWarpRef.current
+      ? resolveProjectionWarpForPano(projectedSettings, projectedSecondary.id, projectedSecondary.rotation, project.panoRefs)
+      : undefined;
+
+    oldPrimaryWarp?.release();
+    oldSecondaryWarp?.release();
 
     sceneRef.current = buildScene(project, {
       selectedShotId,

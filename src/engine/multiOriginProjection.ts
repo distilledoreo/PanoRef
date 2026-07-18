@@ -7,8 +7,7 @@ import {
 } from '../domain/types';
 import { findProjectionAlignmentForPano, normalizeProjectedStyleSettings } from '../domain/defaults';
 import { isEligibleProjectedStylePano, listEligibleProjectedStylePanos } from './projectedStyle';
-import { solveProjectionWarp } from './projectionAlignmentSolver';
-import { createWarpTexture, findWarpTexture, type WarpTextureResult } from './projectionWarpTexture';
+import { acquireProjectionWarpTexture, type WarpTextureResult } from './projectionWarpTexture';
 import { degreesToRadians, length, subtract } from './sync';
 
 /**
@@ -254,32 +253,27 @@ export function resolveProjectionWarpForPano(
   sourcePanoId: string,
   sourceRotation: Euler,
   panoRefs: PanoReference[],
-  width = 256,
-  height = 128,
+  width?: number,
+  height?: number,
 ): WarpTextureResult | undefined {
   const alignment = findProjectionAlignmentForPano(settings, sourcePanoId);
   if (!alignment) return undefined;
 
-  const sourceYawRadians = degreesToRadians(sourceRotation[1] ?? 0);
+  const sourcePano = panoRefs.find((p) => p.id === sourcePanoId);
   const targetPano = panoRefs.find((p) => p.id === alignment.targetGrayboxPanoId);
-  const targetYawRadians = degreesToRadians(targetPano?.rotation?.[1] ?? 0);
+  if (!targetPano) return undefined;
 
-  const cached = findWarpTexture(alignment, sourceYawRadians, targetYawRadians, width, height);
-  if (cached) return cached;
+  const warpWidth = width ?? Math.min(Math.max(Math.round((sourcePano?.width ?? 4096) / 16), 64), 512);
+  const warpHeight = height ?? Math.min(Math.max(Math.round((sourcePano?.height ?? 2048) / 16), 32), 256);
 
-  const field = solveProjectionWarp(alignment, {
-    targetYawRadians,
-    sourceYawRadians,
-    width,
-    height,
-  });
+  const sourceYawRadians = degreesToRadians(sourceRotation[1] ?? 0);
+  const targetYawRadians = degreesToRadians(targetPano.rotation[1] ?? 0);
 
-  return createWarpTexture(
+  return acquireProjectionWarpTexture({
     alignment,
     sourceYawRadians,
     targetYawRadians,
-    field.displacement,
-    width,
-    height,
-  );
+    width: warpWidth,
+    height: warpHeight,
+  });
 }
