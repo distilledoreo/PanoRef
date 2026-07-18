@@ -62,6 +62,7 @@ import {
   cameraFromFlyState,
   flyCameraFromCamera,
   horizontalFlyDirections,
+  degreesToRadians,
   type FlyCameraState,
 } from '../../engine/sync';
 import {
@@ -131,7 +132,7 @@ export function SceneViewport({
   freeCameraActive = false,
   renderDistance = DEFAULT_BUILD_RENDER_DISTANCE,
   appearance = 'clay',
-  showAlignmentOverlay = false,
+  showAlignmentDebugOverlay = false,
   onFreeCameraActiveChange,
   shotFraming,
   onSelectObject,
@@ -165,8 +166,8 @@ export function SceneViewport({
   renderDistance?: number;
   /** Clay keeps existing materials; Projected applies world-space equirect styling when available. */
   appearance?: ViewportAppearanceMode;
-  /** When true, renders alignment marker pins + connecting lines in 3D space. */
-  showAlignmentOverlay?: boolean;
+  /** Development-only alignment marker pins + connecting lines for debugging. */
+  showAlignmentDebugOverlay?: boolean;
   onFreeCameraActiveChange?: (active: boolean) => void;
   shotFraming?: {
     camera: CameraData;
@@ -1577,27 +1578,32 @@ export function SceneViewport({
       alignmentOverlayRef.current = null;
     }
 
-    if (!showAlignmentOverlay) return;
+    if (!import.meta.env.DEV || !showAlignmentDebugOverlay) return;
     if (!projectedActive || !projectedPano) return;
     if (!projectedSettings.alignments || projectedSettings.alignments.length === 0) return;
 
     const alignment = findProjectionAlignmentForPano(projectedSettings, projectedPano.id);
     if (!alignment) return;
+    const targetPano = project.panoRefs.find((pano) => pano.id === alignment.targetGrayboxPanoId);
+    if (!targetPano) return;
 
     const overlay = createAlignmentMarkerOverlay(
       alignment,
       projectedPano.origin,
       projectedPano.rotation,
+      targetPano.origin,
+      degreesToRadians(targetPano.rotation[1] ?? 0),
     );
     scene.add(overlay);
     alignmentOverlayRef.current = overlay;
   }, [
-    showAlignmentOverlay,
+    showAlignmentDebugOverlay,
     projectedActive,
     projectedPano?.id,
     projectedPano?.origin,
     projectedPano?.rotation,
     projectedSettings,
+    project.panoRefs,
   ]);
 
   useEffect(() => {

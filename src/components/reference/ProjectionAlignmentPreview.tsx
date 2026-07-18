@@ -84,7 +84,6 @@ export function ProjectionAlignmentPreview({
           <SceneViewport
             project={displayedProject}
             appearance="projected"
-            showAlignmentOverlay={false}
             minHeightClassName="min-h-[24rem]"
           />
           <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-subtle bg-surface-overlay/90 px-3 py-2 text-xs text-primary shadow-card backdrop-blur-sm">
