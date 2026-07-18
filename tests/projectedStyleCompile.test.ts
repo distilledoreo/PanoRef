@@ -101,6 +101,10 @@ describe('projected style WebGL compile gate', () => {
       expect(result.dualCases.every((c) => c.ok)).toBe(true);
       expect(result.warpCases).toHaveLength(13);
       expect(result.warpCases.every((c) => c.ok)).toBe(true);
+      expect(result.warpCases.find((c) => c.name === 'nonuniform_multi_texel_bilinear')).toMatchObject({
+        name: 'nonuniform_multi_texel_bilinear',
+        ok: true,
+      });
 
       // Verify pixel readback for each dual mode
       const primaryOnly = result.dualCases.find((c) => c.mode === 'primary_only');

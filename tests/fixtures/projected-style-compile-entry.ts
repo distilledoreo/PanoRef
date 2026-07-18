@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { createProjectedStyleMaterial } from '../../src/engine/projectedStyleMaterials';
 import { defaultProjectedStyleSettings } from '../../src/domain/defaults';
 import type { ProjectedStyleSettings } from '../../src/domain/types';
+import { worldPositionToProjectedPanoUv } from '../../src/engine/projectedStyleMath';
 
 export interface ProjectedCompileResult {
   ok: boolean;
@@ -201,22 +202,21 @@ function makeWarpDataTexture(width: number, height: number, du: number, dv: numb
   return texture;
 }
 
-function makeCheckerWarpTexture(width: number, height: number, cellSize: number): THREE.DataTexture {
-  const pixelCount = width * height;
-  const data = new Uint8Array(pixelCount * 4);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = y * width + x;
-      const cx = Math.floor(x / cellSize);
-      const cy = Math.floor(y / cellSize);
-      const du = ((cx + cy) % 2 === 0) ? 0.1 : -0.1;
-      const encodedU = Math.round(((du + 0.5) / 1) * 65535);
-      data[i * 4] = encodedU >> 8;
-      data[i * 4 + 1] = encodedU & 0xff;
-      data[i * 4 + 2] = 128;
-      data[i * 4 + 3] = 0;
-    }
-  }
+type WarpDelta = [number, number];
+
+function encodeWarpDelta(data: Uint8Array, index: number, [du, dv]: WarpDelta): void {
+  const encodedU = Math.round(((du + 0.5) / 1) * 65535);
+  const encodedV = Math.round(((dv + 1.0) / 2) * 65535);
+  data[index * 4] = encodedU >> 8;
+  data[index * 4 + 1] = encodedU & 0xff;
+  data[index * 4 + 2] = encodedV >> 8;
+  data[index * 4 + 3] = encodedV & 0xff;
+}
+
+function makeWarpDataTextureFromValues(width: number, height: number, values: WarpDelta[]): THREE.DataTexture {
+  if (values.length !== width * height) throw new Error('Warp value count must match texture dimensions.');
+  const data = new Uint8Array(values.length * 4);
+  values.forEach((value, index) => encodeWarpDelta(data, index, value));
   const texture = new THREE.DataTexture(data, width, height);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
@@ -224,6 +224,81 @@ function makeCheckerWarpTexture(width: number, height: number, cellSize: number)
   texture.magFilter = THREE.NearestFilter;
   texture.needsUpdate = true;
   return texture;
+}
+
+function readbackWorldPoint(
+  renderer: THREE.WebGLRenderer,
+  boxPosition: [number, number, number],
+  cameraPosition: [number, number, number],
+): [number, number, number] | undefined {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+  mesh.position.set(...boxPosition);
+  mesh.updateMatrixWorld();
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+  camera.position.set(...cameraPosition);
+  camera.lookAt(...boxPosition);
+  camera.updateMatrixWorld();
+  camera.updateProjectionMatrix();
+  const pixelX = Math.floor(renderer.domElement.width / 2);
+  const pixelY = Math.floor(renderer.domElement.height / 2);
+  const ndc = new THREE.Vector2(
+    ((pixelX + 0.5) / renderer.domElement.width) * 2 - 1,
+    ((pixelY + 0.5) / renderer.domElement.height) * 2 - 1,
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObject(mesh)[0];
+  mesh.geometry.dispose();
+  return hit?.point ? [hit.point.x, hit.point.y, hit.point.z] : undefined;
+}
+
+function bilinearWarpDelta(
+  values: WarpDelta[],
+  width: number,
+  height: number,
+  uv: { u: number; v: number },
+): WarpDelta {
+  const texelX = uv.u * width;
+  const texelY = uv.v * height;
+  const fracX = texelX - Math.floor(texelX);
+  const fracY = texelY - Math.floor(texelY);
+  const x0 = Math.floor(texelX);
+  const y0 = Math.floor(texelY);
+  const x1 = (x0 + 1) % width;
+  const y1 = Math.min(y0 + 1, height - 1);
+  const at = (x: number, y: number): WarpDelta => values[y * width + x];
+  const top = [
+    at(x0, y0)[0] + (at(x1, y0)[0] - at(x0, y0)[0]) * fracX,
+    at(x0, y0)[1] + (at(x1, y0)[1] - at(x0, y0)[1]) * fracX,
+  ];
+  const bottom = [
+    at(x0, y1)[0] + (at(x1, y1)[0] - at(x0, y1)[0]) * fracX,
+    at(x0, y1)[1] + (at(x1, y1)[1] - at(x0, y1)[1]) * fracX,
+  ];
+  return [
+    top[0] + (bottom[0] - top[0]) * fracY,
+    top[1] + (bottom[1] - top[1]) * fracY,
+  ];
+}
+
+/*
+ * Keep this fixture intentionally nonuniform. The production shader samples
+ * four neighboring texels, so a constant map cannot prove interpolation.
+ */
+function nonuniformWarpValues(width: number, height: number): WarpDelta[] {
+  const values: WarpDelta[] = Array.from({ length: width * height }, () => [0, 0]);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      values[y * width + x] = [
+        x === 2 && y === 2 ? -0.3 :
+          x === 3 && y === 2 ? 0.4 :
+            x === 2 && y === 3 ? 0.2 :
+              x === 3 && y === 3 ? -0.45 : 0,
+        y === 2 ? -0.4 : y === 3 ? 0.6 : 0,
+      ];
+    }
+  }
+  return values;
 }
 
 function makeVerticalGradientTexture(height: number): THREE.DataTexture {
@@ -553,31 +628,24 @@ function tryWarpTests(
   }
   priSolid.dispose(); siIdWarp.dispose(); siShiftWarp.dispose();
 
-  // ── Multi-texel bilinear sampling ──
-  // All texels in the warp encode the same displacement.  The manual bilinear
-  // sampler in the shader must produce the same result at any UV as a 1×1
-  // reference warp, proving that four-texel interpolation, boundary clamping,
-  // and horizontal texel wrapping all behave correctly.
+  // ── Nonuniform multi-texel bilinear sampling ──
+  // Four neighboring texels intentionally carry different displacements. The
+  // center readback UV is used to calculate the expected bilinear value, then
+  // compared with a 1×1 warp carrying that interpolated value. A constant map
+  // would not distinguish bilinear interpolation from nearest sampling.
   {
-    const bw = 4, bh = 2;
-    const uniformDu = 0.25;
-    const bData = new Uint8Array(bw * bh * 4);
-    for (let y = 0; y < bh; y++) {
-      for (let x = 0; x < bw; x++) {
-        const i = y * bw + x;
-        const eu = Math.round(((uniformDu + 0.5) / 1) * 65535);
-        bData[i * 4] = eu >> 8;
-        bData[i * 4 + 1] = eu & 0xff;
-        bData[i * 4 + 2] = 128;
-        bData[i * 4 + 3] = 0;
-      }
-    }
-    const multiWarpTex = new THREE.DataTexture(bData, bw, bh);
-    multiWarpTex.wrapS = THREE.RepeatWrapping;
-    multiWarpTex.wrapT = THREE.ClampToEdgeWrapping;
-    multiWarpTex.minFilter = THREE.NearestFilter;
-    multiWarpTex.magFilter = THREE.NearestFilter;
-    multiWarpTex.needsUpdate = true;
+    const bw = 4, bh = 4;
+    const values = nonuniformWarpValues(bw, bh);
+    const multiWarpTex = makeWarpDataTextureFromValues(bw, bh, values);
+    const readbackPoint = readbackWorldPoint(renderer, boxPos, camPos);
+    const sampleUv = readbackPoint
+      ? worldPositionToProjectedPanoUv({
+          worldPosition: readbackPoint,
+          panoOrigin: origin,
+          panoYawRadians: 0,
+        })
+      : undefined;
+    const expectedDelta = sampleUv ? bilinearWarpDelta(values, bw, bh, sampleUv) : undefined;
 
     const multiMat = createProjectedStyleMaterial({
       texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
@@ -586,21 +654,23 @@ function tryWarpTests(
     r = renderWith(multiMat);
     multiMat.dispose();
 
-    const refWarp = makeWarpDataTexture(1, 1, uniformDu, 0);
+    const refWarp = expectedDelta
+      ? makeWarpDataTexture(1, 1, expectedDelta[0], expectedDelta[1])
+      : undefined;
     const refMat = createProjectedStyleMaterial({
       texture: hGradTex, origin, rotation: [0, 0, 0], settings, fallbackColor: 0x888888, disposable: true,
-      warpMap: refWarp, warpMapSize: [1, 1], warpStrength: 1,
+      warpMap: refWarp ?? idWarp, warpMapSize: [1, 1], warpStrength: 1,
     });
     const refRes = renderWith(refMat);
     refMat.dispose();
-    refWarp.dispose();
+    refWarp?.dispose();
     multiWarpTex.dispose();
 
-    if (r.ok && refRes.ok) {
-      if (closeChan(r, refRes)) push('multi_texel_bilinear', r);
-      else push('multi_texel_bilinear', { ...r, ok: false, error: `uniform multi-texel warp ≠ 1×1 reference: ref=(${refRes.r},${refRes.g},${refRes.b}) got=(${r.r},${r.g},${r.b})` });
+    if (r.ok && refRes.ok && expectedDelta && sampleUv) {
+      if (closeChan(r, refRes)) push('nonuniform_multi_texel_bilinear', r);
+      else push('nonuniform_multi_texel_bilinear', { ...r, ok: false, error: `nonuniform multi-texel warp ≠ bilinear reference at uv=(${sampleUv.u.toFixed(4)},${sampleUv.v.toFixed(4)}), delta=(${expectedDelta[0].toFixed(4)},${expectedDelta[1].toFixed(4)}): ref=(${refRes.r},${refRes.g},${refRes.b}) got=(${r.r},${r.g},${r.b})` });
     } else {
-      push('multi_texel_bilinear', { ...r, ok: false, error: r.error ?? refRes.error ?? 'unknown' });
+      push('nonuniform_multi_texel_bilinear', { ...r, ok: false, error: r.error ?? refRes.error ?? 'unable to resolve center sample UV' });
     }
   }
 
