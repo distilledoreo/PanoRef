@@ -107,6 +107,7 @@ float decodeDepthMetersGLSL(vec4 packed, float nearMeters, float farMeters) {
   return mix(nearMeters, farMeters, normalizedDepth);
 }`,
   occlusionVisibility: `float singleOcclusionSample(
+  vec3 sampleDirection,
   vec3 worldPosition,
   vec3 projectorOrigin,
   samplerCube occlusionCube,
@@ -116,8 +117,7 @@ float decodeDepthMetersGLSL(vec4 packed, float nearMeters, float farMeters) {
 ) {
   vec3 projectorOffset = worldPosition - projectorOrigin;
   float fragmentDistance = length(projectorOffset);
-  vec3 projectorDirection = normalize(projectorOffset);
-  vec4 packedDepth = textureCube(occlusionCube, projectorDirection);
+  vec4 packedDepth = textureCube(occlusionCube, sampleDirection);
   if (packedDepth.b < 0.5) {
     return 1.0;
   }
@@ -152,15 +152,15 @@ float sampleProjectorVisibility(
   float offsetAngle = texelAngle * max(softness, 0.0);
 
   float v = 0.0;
-  v += singleOcclusionSample(worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  v += singleOcclusionSample(direction, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
   vec3 d1 = normalize(direction + tangent * offsetAngle);
-  v += singleOcclusionSample(worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  v += singleOcclusionSample(d1, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
   vec3 d2 = normalize(direction - tangent * offsetAngle);
-  v += singleOcclusionSample(worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  v += singleOcclusionSample(d2, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
   vec3 d3 = normalize(direction + bitangent * offsetAngle);
-  v += singleOcclusionSample(worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  v += singleOcclusionSample(d3, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
   vec3 d4 = normalize(direction - bitangent * offsetAngle);
-  v += singleOcclusionSample(worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  v += singleOcclusionSample(d4, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
   return clamp(v / 5.0, 0.0, 1.0);
 }`,
 } as const;

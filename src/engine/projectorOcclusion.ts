@@ -6,8 +6,9 @@ import {
 } from '../domain/types';
 import {
   computeGrayboxPanoFarPlane,
-} from './renderers';
-import { buildScene } from './sceneObjects';
+} from './sceneBounds';
+import { createObject3D } from './sceneObjects';
+import { releaseImportedGeometry } from './importedMesh';
 
 const DEFAULT_OCCLUSION_FACE_SIZE = 512;
 const DEFAULT_OCCLUSION_NEAR = 0.05;
@@ -53,18 +54,22 @@ function buildOccluderScene(
   project: LocationProject,
   hiddenObjectTypes: SceneObjectType[] = ['sun_marker'],
 ): THREE.Scene {
-  const hiddenTypes = [...new Set([...hiddenObjectTypes, 'sun_marker'])] as SceneObjectType[];
-  const scene = buildScene(project, {
-    appearance: 'projected',
-    showHelpers: false,
-    showSceneGuides: false,
-    showPanoOrigin: false,
-    hiddenObjectTypes: hiddenTypes,
-    fog: false,
-    // Provide a placeholder so buildScene accepts the projected branch without
-    // attaching real projected materials (we override all materials below).
-    projected: undefined,
-  });
+  const hiddenTypes = new Set<string>([...hiddenObjectTypes, 'sun_marker']);
+  // Geometry-only scene: no background, no environment, no grid, no lights,
+  // no helpers, no frustums, no pano origin. The depth cubemap must contain
+  // only solid occluder meshes; any other object would pollute the packed
+  // depth and corrupt the visibility contract.
+  const scene = new THREE.Scene();
+  scene.background = null;
+  scene.environment = null;
+
+  for (const object of project.scene.objects) {
+    if (!object.visible) continue;
+    if (hiddenTypes.has(object.type)) continue;
+    const mesh = createObject3D(object, false, 'light', project.assets);
+    mesh.userData.sceneObjectId = object.id;
+    scene.add(mesh);
+  }
 
   // The depth material is assigned per-map in generateProjectorOcclusionMap.
   return scene;
@@ -83,14 +88,14 @@ function createRadialDepthMaterial(
       occlusionNear: { value: nearMeters },
       occlusionFar: { value: farMeters },
     },
-    vertexShader: /* glsl */`
-      varying vec3 vOcclusionWorldPosition;
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(transformed, 1.0);
-        vOcclusionWorldPosition = worldPosition.xyz;
-        gl_Position = projectionMatrix * viewMatrix * worldPosition;
-      }
-    `,
+      vertexShader: /* glsl */`
+        varying vec3 vOcclusionWorldPosition;
+        void main() {
+          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+          vOcclusionWorldPosition = worldPosition.xyz;
+          gl_Position = projectionMatrix * viewMatrix * worldPosition;
+        }
+      `,
     fragmentShader: /* glsl */`
       uniform vec3 occlusionOrigin;
       uniform float occlusionNear;
@@ -179,7 +184,7 @@ export function generateProjectorOcclusionMap(
 
   try {
     renderer.toneMapping = THREE.NoToneMapping;
-    renderer.outputColorSpace = THREE.NoColorSpace;
+    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     renderer.autoClear = true;
     renderer.setClearColor(NO_HIT_CLEAR, 1);
     cubeCamera.update(renderer, occluderScene);
@@ -192,10 +197,13 @@ export function generateProjectorOcclusionMap(
 
   const key = computeProjectorOcclusionKey(project, origin);
 
-  // Dispose occluder scene resources (geometry + shared depth material).
+  // Dispose occluder scene resources. Imported-model geometry is
+  // reference-counted via releaseImportedGeometry; share-owned buffers must not
+  // be disposed directly or cached GPU resources become unstable.
   occluderScene.traverse((child) => {
     const mesh = child as THREE.Mesh;
-    if (mesh.isMesh && mesh.geometry) mesh.geometry.dispose();
+    if (!mesh.isMesh || !mesh.geometry) return;
+    if (!releaseImportedGeometry(mesh.geometry)) mesh.geometry.dispose();
   });
   depthMaterial.dispose();
 

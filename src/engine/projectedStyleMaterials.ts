@@ -214,11 +214,12 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
   const exposure = params.settings.exposure;
   const lightingContribution = params.settings.lightingContribution;
   const useNeutralFallback = params.settings.fallbackMode === 'neutral';
-  const useOcclusion = Boolean(params.occlusionTexture);
+  const useOcclusion = params.settings.occlusionEnabled !== false
+    && Boolean(params.occlusionTexture);
   const useSecondary = Boolean(params.secondaryTexture);
   const secondaryOrigin = params.secondaryOrigin ? new THREE.Vector3(...params.secondaryOrigin) : new THREE.Vector3(0, 0, 0);
   const secondaryYaw = degreesToRadians(params.secondaryRotation?.[1] ?? 0);
-  const useSecondaryOcclusion = useSecondary && Boolean(params.secondaryOcclusionTexture);
+  const useSecondaryOcclusion = useSecondary && useOcclusion && Boolean(params.secondaryOcclusionTexture);
   const occlusionBias = params.settings.occlusionBiasMeters ?? 0.04;
   const occlusionSoftness = params.settings.occlusionSoftness ?? 1;
   const debugCoverage = params.settings.occlusionDebugMode === 'coverage';
@@ -392,60 +393,40 @@ float projectedConfidenceAt(vec3 worldPos, vec3 origin) {
     secondaryValid = 1.0;
   }
 
-  // --- Blend gating: visibility gates confidence-based dominance ---
-  float primaryWeight = 0.0;
-  float secondaryWeight = 0.0;
-
+  // --- Continuous visibility scores (no hard 0.5 thresholding) ---
+  float primaryConfidence = 1.0;
+  float secondaryConfidence = 1.0;
   if (projectedUseSecondary == 1 && secondaryValid > 0.5) {
-    if (projectedBlendMode == 0) {
-      // primary-only mode
-      primaryWeight = primaryVisibility;
-    } else if (projectedBlendMode == 2) {
-      // secondary-only mode
-      secondaryWeight = secondaryVisibility;
-    } else {
-      // both: visibility-gated dominance
-      bool pVis = primaryVisibility > 0.5;
-      bool sVis = secondaryVisibility > 0.5;
-      if (pVis && !sVis) {
-        primaryWeight = 1.0;
-      } else if (!pVis && sVis) {
-        secondaryWeight = 1.0;
-      } else if (!pVis && !sVis) {
-        primaryWeight = 0.0;
-        secondaryWeight = 0.0;
-      } else {
-        float pConf = projectedConfidenceAt(vProjectedWorldPos, projectedPanoOrigin);
-        float sConf = projectedConfidenceAt(vProjectedWorldPos, projectedSecondaryOrigin);
-        float total = pConf + sConf;
-        if (total > 0.0) {
-          primaryWeight = pConf / total;
-          secondaryWeight = sConf / total;
-        }
-      }
-    }
-  } else {
-    primaryWeight = primaryVisibility;
+    primaryConfidence = projectedConfidenceAt(vProjectedWorldPos, projectedPanoOrigin);
+    secondaryConfidence = projectedConfidenceAt(vProjectedWorldPos, projectedSecondaryOrigin);
   }
 
-  // --- Coverage diagnostic (same visibility functions as projection) ---
+  float primaryScore = primaryVisibility * primaryConfidence;
+  float secondaryScore = secondaryVisibility * secondaryConfidence;
+  float scoreTotal = primaryScore + secondaryScore;
+
+  // --- Coverage (single-projector modes use that projector's visibility) ---
+  float primaryCoverage = primaryVisibility;
+  float secondaryCoverage = (projectedUseSecondary == 1 && secondaryValid > 0.5)
+    ? secondaryVisibility
+    : (projectedUseSecondary == 1 ? 0.0 : primaryVisibility);
+  float coverage = max(primaryCoverage, secondaryCoverage);
+
+  // --- Coverage diagnostic (continuous visibility, not thresholded) ---
   if (projectedDebugCoverage == 1) {
     vec3 cov;
     if (projectedUseSecondary == 1 && secondaryValid > 0.5) {
-      if (primaryVisibility > 0.5 && secondaryVisibility > 0.5) cov = vec3(1.0);
-      else if (primaryVisibility > 0.5) cov = vec3(0.0, 1.0, 1.0);
-      else if (secondaryVisibility > 0.5) cov = vec3(1.0, 0.0, 1.0);
-      else cov = vec3(1.0, 0.0, 0.0);
+      cov = vec3(1.0 - coverage, coverage, 1.0 - coverage);
     } else {
-      cov = primaryVisibility > 0.5 ? vec3(0.0, 1.0, 1.0) : vec3(1.0, 0.0, 0.0);
+      cov = vec3(1.0 - primaryVisibility, primaryVisibility, 1.0 - primaryVisibility);
     }
     diffuseColor.rgb = cov;
   } else {
-    vec3 projectedColor = primarySample * primaryWeight + secondarySample * secondaryWeight;
-    // When fully occluded (no weight), keep the fallback albedo.
-    float totalWeight = primaryWeight + secondaryWeight;
-    vec3 resultColor = totalWeight > 0.0
-      ? mix(fallbackAlbedo, projectedColor, clamp(projectedOpacity, 0.0, 1.0) * clamp(totalWeight, 0.0, 1.0))
+    vec3 projectedColor = (primarySample * primaryScore + secondarySample * secondaryScore)
+      / max(scoreTotal, 0.0001);
+    // When fully occluded (no score), keep the fallback albedo.
+    vec3 resultColor = coverage > 0.0001
+      ? mix(fallbackAlbedo, projectedColor, clamp(projectedOpacity, 0.0, 1.0) * clamp(coverage, 0.0, 1.0))
       : fallbackAlbedo;
     diffuseColor.rgb = resultColor;
   }

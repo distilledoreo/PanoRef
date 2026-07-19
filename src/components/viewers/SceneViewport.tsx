@@ -1403,6 +1403,56 @@ export function SceneViewport({
     disposeProjectedTextureOwnership(secondaryOwnershipRef.current);
   }, []);
 
+  // Load / release the optional secondary projector's panorama texture
+  // independently of the primary so dual-origin projection shows two distinct
+  // panoramas rather than reprojecting the primary from a second origin.
+  const secondaryTextureUrlRef = useRef<string | undefined>();
+  const [secondaryProjectedTexture, setSecondaryProjectedTexture] = useState<THREE.Texture | null>(null);
+  const secondaryAssetKey = (() => {
+    if (appearance !== 'projected') return '';
+    if (!projectedSettings.secondaryPanoId) return '';
+    const pano = project.panoRefs.find((p) => p.id === projectedSettings.secondaryPanoId);
+    if (!pano || pano.id === projectedPano?.id) return '';
+    return getProjectedStyleAssetUri(project, pano) ?? '';
+  })();
+
+  useEffect(() => {
+    let cancelled = false;
+    const url = secondaryAssetKey || undefined;
+    if (!url) {
+      const previousUrl = secondaryTextureUrlRef.current;
+      secondaryTextureUrlRef.current = undefined;
+      setSecondaryProjectedTexture(null);
+      releaseProjectedStyleTexture(previousUrl);
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (secondaryTextureUrlRef.current === url) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const previousUrl = secondaryTextureUrlRef.current;
+    secondaryTextureUrlRef.current = url;
+    void acquireProjectedStyleTexture(url).then((texture) => {
+      if (cancelled || !texture) {
+        if (texture) releaseProjectedStyleTexture(url);
+        return;
+      }
+      setSecondaryProjectedTexture(texture);
+      if (previousUrl && previousUrl !== url) releaseProjectedStyleTexture(previousUrl);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [secondaryAssetKey]);
+
+  useEffect(() => () => {
+    releaseProjectedStyleTexture(secondaryTextureUrlRef.current);
+    secondaryTextureUrlRef.current = undefined;
+  }, []);
+
   useEffect(() => {
     if (!shotFraming || dragRef.current.kind === 'shot_framing') return;
     // Re-seed fly pose only when the shot or stored camera pose changes.
@@ -1585,17 +1635,17 @@ export function SceneViewport({
           rotation: projectedPano.rotation,
           settings: projectedSettings,
           disposableMaterials: true,
-          occlusionTexture: primaryOcclusionRef.current?.texture,
-          occlusionNearMeters: primaryOcclusionRef.current?.nearMeters,
-          occlusionFarMeters: primaryOcclusionRef.current?.farMeters,
-          occlusionFaceSize: primaryOcclusionRef.current?.faceSize,
-          secondaryTexture: secondaryPano && secondaryPano.id !== projectedPano.id ? projectedTexture : undefined,
+          occlusionTexture: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.texture : undefined,
+          occlusionNearMeters: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.nearMeters : undefined,
+          occlusionFarMeters: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.farMeters : undefined,
+          occlusionFaceSize: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.faceSize : undefined,
+          secondaryTexture: secondaryProjectedTexture ?? undefined,
           secondaryOrigin: secondaryPano?.origin,
           secondaryRotation: secondaryPano?.rotation,
-          secondaryOcclusionTexture: secondaryOcclusionRef.current?.texture,
-          secondaryOcclusionNearMeters: secondaryOcclusionRef.current?.nearMeters,
-          secondaryOcclusionFarMeters: secondaryOcclusionRef.current?.farMeters,
-          secondaryOcclusionFaceSize: secondaryOcclusionRef.current?.faceSize,
+          secondaryOcclusionTexture: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.texture : undefined,
+          secondaryOcclusionNearMeters: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.nearMeters : undefined,
+          secondaryOcclusionFarMeters: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.farMeters : undefined,
+          secondaryOcclusionFaceSize: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.faceSize : undefined,
         }
         : undefined,
     });
@@ -1622,6 +1672,7 @@ export function SceneViewport({
     projectedSettings.occlusionDebugMode,
     projectedSettings.blendMode,
     projectedTexture,
+    secondaryProjectedTexture,
     secondaryPano?.id,
     primaryOcclusionRef.current?.key,
     secondaryOcclusionRef.current?.key,
