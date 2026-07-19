@@ -124,6 +124,9 @@ describe('ui revamp fidelity surfaces', () => {
     expect(coveragePanel).toContain('data-coverage-apply-capture-a');
     expect(coveragePanel).toContain('data-coverage-apply-capture');
     expect(coveragePanel).toContain('Existing panorama origins are never rewritten');
+    expect(coveragePanel).toContain('data-coverage-use-selection-bounds');
+    expect(coveragePanel).toContain('Restrict optimizer to an analysis region');
+    expect(coveragePanel).toContain('Metrics above are room-local');
   });
 
   it('guards both successful and failed coverage extraction against stale analysis identity', () => {

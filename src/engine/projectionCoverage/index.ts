@@ -1,4 +1,4 @@
-export { extractCoverageScene, sampleMeshSurface } from './surfaceSampler';
+export { extractCoverageScene, sampleMeshSurface, coverageAnalysisDiagonal, pointIsInCoverageRegions } from './surfaceSampler';
 export { optimizeProjectionCoverage, resolveCoverageOptions } from './optimizer';
 export { runCoverageOptimization } from './coverageClient';
 export type { CoverageOptimizationTask } from './coverageClient';

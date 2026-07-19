@@ -220,6 +220,62 @@ describe('projection coverage engine', () => {
     expect(candidates.every((candidate) => candidate.position[1] === 1.6)).toBe(true);
   });
 
+  it('scores only surface samples inside the analysis region and keeps candidates there', () => {
+    const nearFloor = floorTriangles(0, 2);
+    const farFloor = floorTriangles(0, 2).map((triangle) => ({
+      a: [triangle.a[0] + 12, triangle.a[1], triangle.a[2]] as Vec3,
+      b: [triangle.b[0] + 12, triangle.b[1], triangle.b[2]] as Vec3,
+      c: [triangle.c[0] + 12, triangle.c[1], triangle.c[2]] as Vec3,
+    }));
+    const nearWall: TestTriangle = { a: [-2, 0, -2], b: [2, 0, -2], c: [0, 2.5, -2] };
+    const farWall: TestTriangle = { a: [10, 0, -2], b: [14, 0, -2], c: [12, 2.5, -2] };
+    const scene = packedScene(
+      [...nearFloor, ...farFloor, nearWall, farWall],
+      [0, 1, 2, 3],
+      { min: [-2, 0, -2], max: [14, 3, 2] },
+    );
+    scene.allowedFloorRegions = [{ min: [-2.1, -0.1, -2.1], max: [2.1, 2.8, 2.1] }];
+    scene.diagonal = 25;
+
+    const samples = sampleMeshSurface(scene, 400, 99);
+    expect(samples.length).toBe(400);
+    expect(samples.every((sample) => (
+      sample.position[0] >= -2.1 && sample.position[0] <= 2.1
+      && sample.position[1] >= -0.1 && sample.position[1] <= 2.8
+      && sample.position[2] >= -2.1 && sample.position[2] <= 2.1
+    ))).toBe(true);
+    expect(samples.some((sample) => sample.position[0] > 5)).toBe(false);
+
+    const options = resolveCoverageOptions(scene, {
+      candidateSpacing: 0.75,
+      maximumCandidateCount: 48,
+      cameraClearanceRadius: 0.1,
+      minimumOriginSeparation: 1,
+      coarseSampleCount: 64,
+      fineSampleCount: 128,
+      coarsePairSeedCount: 4,
+      localRefinementLevels: 1,
+      minimumTexelDensity: 0,
+      targetTexelDensity: 1,
+    });
+    // Unrestricted defaults would use the 25 m scene diagonal (~1.5 m separation floor
+    // from spacing alone is fine, but region-aware defaults stay room-scale).
+    const unrestricted = resolveCoverageOptions({ ...scene, allowedFloorRegions: undefined });
+    expect(unrestricted.minimumOriginSeparation).toBeGreaterThan(options.minimumOriginSeparation);
+
+    const result = optimizeProjectionCoverage({
+      mode: 'fixed-first',
+      scene,
+      firstOrigin: [0, 1.6, 0],
+      options,
+    });
+    expect(result.originB[0]).toBeGreaterThanOrEqual(-2.1);
+    expect(result.originB[0]).toBeLessThanOrEqual(2.1);
+    expect(result.originB[2]).toBeGreaterThanOrEqual(-2.1);
+    expect(result.originB[2]).toBeLessThanOrEqual(2.1);
+    expect(Math.abs(result.originB[0])).toBeLessThan(5);
+  });
+
   it('uses one fine validation bank for reachable metrics and enforces fixed-first separation', () => {
     const scene = floorScene();
     const options = resolveCoverageOptions(scene, {

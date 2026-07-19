@@ -529,16 +529,17 @@ test.describe('workflow path smoke', () => {
     await page.locator('[data-coverage-optimizer] summary').click();
 
     const floorRegionToggle = drawer.getByRole('switch', {
-      name: 'Restrict optimizer to an allowed floor region',
+      name: 'Restrict optimizer to an analysis region',
     });
     await floorRegionToggle.click();
     await expect(drawer.locator('[data-coverage-floor-region]')).toBeVisible();
+    await expect(drawer.locator('[data-coverage-use-selection-bounds]')).toBeVisible();
     await drawer.locator('[data-coverage-floor-min="y"]').fill('1');
     await drawer.locator('[data-coverage-floor-max="y"]').fill('0');
     await expect(drawer.locator('[data-coverage-floor-region-error]')).toBeVisible();
     await expect(drawer.locator('[data-coverage-analyze]')).toBeDisabled();
     await drawer.locator('[data-coverage-floor-min="y"]').fill('-0.25');
-    await drawer.locator('[data-coverage-floor-max="y"]').fill('0.25');
+    await drawer.locator('[data-coverage-floor-max="y"]').fill('3.5');
     await expect(drawer.locator('[data-coverage-analyze]')).toBeEnabled();
 
     const layout = await drawer.evaluate((element) => {

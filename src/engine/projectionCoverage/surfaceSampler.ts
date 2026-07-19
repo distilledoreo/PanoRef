@@ -170,6 +170,37 @@ function normalizeAllowedFloorRegions(
   return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
+export function pointIsInCoverageRegions(
+  x: number,
+  y: number,
+  z: number,
+  regions: readonly CoverageBounds[],
+): boolean {
+  return regions.some((region) => (
+    x >= region.min[0] && x <= region.max[0]
+    && y >= region.min[1] && y <= region.max[1]
+    && z >= region.min[2] && z <= region.max[2]
+  ));
+}
+
+/** Longest axis-aligned diagonal across analysis regions (or scene diagonal when unrestricted). */
+export function coverageAnalysisDiagonal(scene: CoverageSceneData): number {
+  const regions = scene.allowedFloorRegions;
+  if (!regions?.length) return scene.diagonal;
+  let longest = 0;
+  for (const region of regions) {
+    longest = Math.max(
+      longest,
+      Math.hypot(
+        region.max[0] - region.min[0],
+        region.max[1] - region.min[1],
+        region.max[2] - region.min[2],
+      ),
+    );
+  }
+  return Math.max(longest, 1e-3);
+}
+
 function triangleIntersectsAllowedFloorRegion(
   triangle: Float64Array,
   regions: readonly CoverageBounds[],
@@ -379,7 +410,10 @@ function lowerBound(values: Float64Array, target: number): number {
   return low;
 }
 
-/** Deterministic area-weighted Monte Carlo samples from compact indexed geometry. */
+/** Deterministic area-weighted Monte Carlo samples from compact indexed geometry.
+ * When `allowedFloorRegions` is set, only surfaces inside that volume are scored
+ * (room-local coverage). Occlusion still uses the full scene BVH.
+ */
 export function sampleMeshSurface(
   scene: CoverageSceneData,
   sampleCount: number,
@@ -387,12 +421,17 @@ export function sampleMeshSurface(
 ): SurfaceSample[] {
   const count = triangleCount(scene);
   if (count === 0 || sampleCount <= 0) return [];
+  const regions = scene.allowedFloorRegions;
   const cumulativeArea = new Float64Array(count);
   const triangleScratch = new Float64Array(9);
   const normalScratch = new Float64Array(3);
   let totalArea = 0;
   for (let triangleIndex = 0; triangleIndex < count; triangleIndex += 1) {
     readWorldTriangle(scene, triangleIndex, triangleScratch);
+    if (regions && !triangleIntersectsAllowedFloorRegion(triangleScratch, regions)) {
+      cumulativeArea[triangleIndex] = totalArea;
+      continue;
+    }
     const area = triangleAreaNormal(triangleScratch, normalScratch);
     totalArea += area > MIN_TRIANGLE_AREA ? area : 0;
     cumulativeArea[triangleIndex] = totalArea;
@@ -401,7 +440,10 @@ export function sampleMeshSurface(
 
   const rng = mulberry32(seed);
   const samples: SurfaceSample[] = [];
-  for (let index = 0; index < sampleCount; index += 1) {
+  let attempts = 0;
+  const maxAttempts = sampleCount * (regions ? 24 : 1);
+  while (samples.length < sampleCount && attempts < maxAttempts) {
+    attempts += 1;
     const triangleIndex = lowerBound(cumulativeArea, rng() * totalArea);
     readWorldTriangle(scene, triangleIndex, triangleScratch);
     triangleAreaNormal(triangleScratch, normalScratch);
@@ -411,12 +453,16 @@ export function sampleMeshSurface(
     const b0 = 1 - sqrtR1;
     const b1 = sqrtR1 * (1 - r2);
     const b2 = sqrtR1 * r2;
+    const position: Vec3 = [
+      triangleScratch[0] * b0 + triangleScratch[3] * b1 + triangleScratch[6] * b2,
+      triangleScratch[1] * b0 + triangleScratch[4] * b1 + triangleScratch[7] * b2,
+      triangleScratch[2] * b0 + triangleScratch[5] * b1 + triangleScratch[8] * b2,
+    ];
+    if (regions && !pointIsInCoverageRegions(position[0], position[1], position[2], regions)) {
+      continue;
+    }
     samples.push({
-      position: [
-        triangleScratch[0] * b0 + triangleScratch[3] * b1 + triangleScratch[6] * b2,
-        triangleScratch[1] * b0 + triangleScratch[4] * b1 + triangleScratch[7] * b2,
-        triangleScratch[2] * b0 + triangleScratch[5] * b1 + triangleScratch[8] * b2,
-      ],
+      position,
       geometricNormal: [normalScratch[0], normalScratch[1], normalScratch[2]],
       meshId: scene.triangleMeshIds[triangleIndex],
       triangleId: triangleIndex,

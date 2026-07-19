@@ -11,7 +11,7 @@ import { rankAllPairs } from './jointPairOptimizer';
 import { evaluateOrigin } from './originEvaluator';
 import { buildSceneAcceleration } from './sceneAcceleration';
 import { rankSecondOrigins } from './secondOriginOptimizer';
-import { sampleMeshSurface } from './surfaceSampler';
+import { coverageAnalysisDiagonal, sampleMeshSurface } from './surfaceSampler';
 import type {
   CoverageOptimizationOptions,
   CoverageOptimizationRequest,
@@ -27,8 +27,9 @@ export function resolveCoverageOptions(
   scene: CoverageSceneData,
   partial: Partial<CoverageOptimizationOptions> = {},
 ): CoverageOptimizationOptions {
+  const analysisDiagonal = coverageAnalysisDiagonal(scene);
   const candidateSpacing = partial.candidateSpacing
-    ?? Math.max(0.5, Math.min(1, scene.diagonal * 0.03));
+    ?? Math.max(0.5, Math.min(1, analysisDiagonal * 0.03));
   return {
     coarseSampleCount: partial.coarseSampleCount ?? 4_096,
     fineSampleCount: partial.fineSampleCount ?? 24_576,
@@ -41,7 +42,7 @@ export function resolveCoverageOptions(
     minimumTexelDensity: partial.minimumTexelDensity ?? 128,
     targetTexelDensity: partial.targetTexelDensity ?? 1_024,
     minimumOriginSeparation: partial.minimumOriginSeparation
-      ?? Math.max(2 * candidateSpacing, scene.diagonal * 0.06),
+      ?? Math.max(2 * candidateSpacing, analysisDiagonal * 0.06),
     cameraClearanceRadius: partial.cameraClearanceRadius ?? 0.3,
     coarsePairSeedCount: partial.coarsePairSeedCount ?? 16,
     localRefinementLevels: partial.localRefinementLevels ?? 4,
@@ -233,8 +234,22 @@ export function optimizeProjectionCoverage(request: CoverageOptimizationRequest)
   const acceleration = buildSceneAcceleration(scene);
   const candidates = generateOriginCandidates(scene, options, acceleration);
   const coarseSamples = sampleMeshSurface(scene, options.coarseSampleCount, options.seed);
-  const coarseEvaluations = evaluateCandidates(candidates, coarseSamples, acceleration, scene, options);
   const fineSamples = sampleMeshSurface(scene, options.fineSampleCount, options.seed + 1);
+  if (coarseSamples.length === 0 || fineSamples.length === 0) {
+    throw new Error(
+      scene.allowedFloorRegions?.length
+        ? 'Analysis region contains no usable surface samples. Expand the region so it includes room walls and floors, or clear it to search the whole set.'
+        : 'Coverage analysis found no usable surface samples.',
+    );
+  }
+  if (candidates.length === 0) {
+    throw new Error(
+      scene.allowedFloorRegions?.length
+        ? 'No camera candidates fit inside the analysis region. Expand the X/Z bounds or lower the floor Y range.'
+        : 'No valid panorama origin candidates were found on eligible floors.',
+    );
+  }
+  const coarseEvaluations = evaluateCandidates(candidates, coarseSamples, acceleration, scene, options);
   // Reported pair and reachable metrics share this exact validation bank.
   const reachableEvaluations = evaluateCandidates(candidates, fineSamples, acceleration, scene, options);
 
