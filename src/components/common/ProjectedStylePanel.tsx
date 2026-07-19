@@ -21,17 +21,10 @@ export function ProjectedStylePanel({
   project,
   onChange,
   onSetCaptureOrigin,
-  onApplyPanoramaOrigins,
 }: {
   project: LocationProject;
   onChange: (settings: ProjectedStyleSettings) => void;
   onSetCaptureOrigin?: (origin: LocationProject['scene']['panoOrigin']) => void;
-  onApplyPanoramaOrigins?: (
-    primaryPanoId: string,
-    secondaryPanoId: string,
-    originA: LocationProject['scene']['panoOrigin'],
-    originB: LocationProject['scene']['panoOrigin'],
-  ) => void;
 }) {
   const occlusionStatus = useContinuityStore((state) => state.projectedOcclusionStatus);
   const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
@@ -280,11 +273,7 @@ export function ProjectedStylePanel({
       <CoverageOptimizerPanel
         project={project}
         primaryPano={active}
-        secondaryPano={secondary}
         onSetCaptureOrigin={onSetCaptureOrigin}
-        onApplyPanoramaOrigins={active && secondary && onApplyPanoramaOrigins
-          ? (originA, originB) => onApplyPanoramaOrigins(active.id, secondary.id, originA, originB)
-          : undefined}
       />
 
       <Field label={`Opacity (${Math.round(settings.opacity * 100)}%)`}>

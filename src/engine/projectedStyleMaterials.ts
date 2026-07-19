@@ -168,6 +168,8 @@ export interface ProjectedMaterialParams {
   origin: Vec3;
   /** Pano rotation Euler (degrees); yaw is rotation[1]. */
   rotation: Euler;
+  panoramaWidth?: number;
+  panoramaHeight?: number;
   settings: ProjectedStyleSettings;
   /** Clay / neutral fallback albedo (linear-ish hex or Color). */
   fallbackColor: THREE.ColorRepresentation;
@@ -182,6 +184,8 @@ export interface ProjectedMaterialParams {
   secondaryTexture?: THREE.Texture;
   secondaryOrigin?: Vec3;
   secondaryRotation?: Euler;
+  secondaryPanoramaWidth?: number;
+  secondaryPanoramaHeight?: number;
 
   secondaryOcclusionTexture?: THREE.CubeTexture;
   secondaryOcclusionNearMeters?: number;
@@ -224,6 +228,7 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
   const occlusionSoftness = params.settings.occlusionSoftness ?? 1;
   const debugCoverage = params.settings.occlusionDebugMode === 'coverage';
   const blendMode = params.settings.blendMode === 'primary' ? 0 : params.settings.blendMode === 'secondary' ? 2 : 1;
+  const texelConstant = (width: number, height: number) => width * height / (2 * Math.PI * Math.PI);
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.projectedPanoMap = { value: params.texture };
@@ -260,6 +265,12 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
 
     shader.uniforms.projectedDebugCoverage = { value: debugCoverage ? 1 : 0 };
     shader.uniforms.projectedBlendMode = { value: blendMode };
+    shader.uniforms.projectedPrimaryTexelConstant = {
+      value: texelConstant(params.panoramaWidth ?? 8_192, params.panoramaHeight ?? 4_096),
+    };
+    shader.uniforms.projectedSecondaryTexelConstant = {
+      value: texelConstant(params.secondaryPanoramaWidth ?? 8_192, params.secondaryPanoramaHeight ?? 4_096),
+    };
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -308,6 +319,8 @@ uniform float projectedSecondaryOcclusionFar;
 uniform float projectedSecondaryOcclusionFaceSize;
 uniform int projectedDebugCoverage;
 uniform int projectedBlendMode;
+uniform float projectedPrimaryTexelConstant;
+uniform float projectedSecondaryTexelConstant;
 varying vec3 vProjectedWorldPos;
 const float PROJECTED_PI = 3.141592653589793;
 const float PROJECTED_FALLOFF = 6.0;
@@ -320,9 +333,19 @@ ${PROJECTED_STYLE_GLSL.occlusionDepthHelpers}
 
 ${PROJECTED_STYLE_GLSL.occlusionVisibility}
 
-float projectedConfidenceAt(vec3 worldPos, vec3 origin) {
-  float d = length(worldPos - origin);
-  return 1.0 / (1.0 + d * 0.05);
+float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
+  vec3 offset = worldPos - origin;
+  float distanceSquared = max(dot(offset, offset), 1e-6);
+  vec3 direction = normalize(offset);
+  vec3 geometricNormal = normalize(cross(dFdy(worldPos), dFdx(worldPos)));
+  // The renderer may receive either winding for imported double-sided set
+  // surfaces; visible fragments use the same absolute face-angle quality as
+  // intentionally double-sided coverage geometry.
+  float facing = abs(dot(geometricNormal, -direction));
+  float angleQuality = smoothstep(0.15, 0.55, facing);
+  float texelDensity = texelConstant * facing / distanceSquared;
+  float resolutionQuality = smoothstep(128.0, 1024.0, texelDensity);
+  return angleQuality * resolutionQuality;
 }
 `,
       )
@@ -402,34 +425,44 @@ float projectedConfidenceAt(vec3 worldPos, vec3 origin) {
   float primaryEnabled = projectedBlendMode == 2 ? 0.0 : 1.0;
   float secondaryEnabled = projectedBlendMode == 0 ? 0.0 : hasSecondary;
 
-  float primaryConfidence = hasSecondary > 0.5
-    ? projectedConfidenceAt(vProjectedWorldPos, projectedPanoOrigin)
-    : 1.0;
-  float secondaryConfidence = hasSecondary > 0.5
-    ? projectedConfidenceAt(vProjectedWorldPos, projectedSecondaryOrigin)
+  float primaryQuality = projectedQualityAt(
+    vProjectedWorldPos,
+    projectedPanoOrigin,
+    projectedPrimaryTexelConstant
+  );
+  float secondaryQuality = hasSecondary > 0.5
+    ? projectedQualityAt(vProjectedWorldPos, projectedSecondaryOrigin, projectedSecondaryTexelConstant)
     : 0.0;
 
-  float primaryScore = primaryEnabled * primaryVisibility * primaryConfidence;
-  float secondaryScore = secondaryEnabled * secondaryVisibility * secondaryConfidence;
-  float scoreTotal = primaryScore + secondaryScore;
+  float primaryScore = primaryEnabled * primaryVisibility * primaryQuality;
+  float secondaryScore = secondaryEnabled * secondaryVisibility * secondaryQuality;
+  // Winner-takes-most weighting follows the optimizer's max-quality objective
+  // while retaining a narrow transition when qualities are nearly equal.
+  float primaryWeight = pow(primaryScore, 4.0);
+  float secondaryWeight = pow(secondaryScore, 4.0);
+  float scoreTotal = primaryWeight + secondaryWeight;
 
   float coverage = max(
-    primaryEnabled * primaryVisibility,
-    secondaryEnabled * secondaryVisibility
+    primaryScore,
+    secondaryScore
   );
 
   // --- Coverage diagnostic (four-state: red/cyan/magenta/white) ---
   if (projectedDebugCoverage == 1) {
-    float p = primaryEnabled * primaryVisibility;
-    float s = secondaryEnabled * secondaryVisibility;
+    float p = primaryScore;
+    float s = secondaryScore;
+    float visibleButPoor = max(
+      primaryEnabled * primaryVisibility,
+      secondaryEnabled * secondaryVisibility
+    ) * (1.0 - step(0.001, max(p, s)));
     vec3 cov =
         vec3(1.0, 0.0, 0.0) * (1.0 - p) * (1.0 - s) // red: neither
       + vec3(0.0, 1.0, 1.0) * p * (1.0 - s)         // cyan: primary only
       + vec3(1.0, 0.0, 1.0) * (1.0 - p) * s          // magenta: secondary only
       + vec3(1.0) * p * s;                           // white: both
-    diffuseColor.rgb = cov;
+    diffuseColor.rgb = mix(cov, vec3(1.0, 0.55, 0.0), visibleButPoor); // orange: poor quality
   } else {
-    vec3 projectedColor = (primarySample * primaryScore + secondarySample * secondaryScore)
+    vec3 projectedColor = (primarySample * primaryWeight + secondarySample * secondaryWeight)
       / max(scoreTotal, 0.0001);
     // When fully occluded (no score), keep the fallback albedo.
     vec3 resultColor = coverage > 0.0001
@@ -460,7 +493,7 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v4:${params.settings.fallbackMode}:`
+    `projected-style-v5:${params.settings.fallbackMode}:`
     + `${params.disposable ? 'd' : 's'}:`
     + `${useOcclusion ? 'o' : 'n'}:`
     + `${useSecondary ? 's' : 'p'}:`

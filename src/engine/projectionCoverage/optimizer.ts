@@ -4,8 +4,9 @@ import {
   generateOriginCandidates,
   isCandidatePositionValid,
   localCandidateOffsets,
+  projectCandidateToFloor,
 } from './candidateGenerator';
-import { reachableCoverage } from './coverageBitset';
+import { compareOriginPair, reachableCoverage } from './coverageBitset';
 import { rankAllPairs } from './jointPairOptimizer';
 import { evaluateOrigin } from './originEvaluator';
 import { buildSceneAcceleration } from './sceneAcceleration';
@@ -18,6 +19,8 @@ import type {
   CoverageSceneData,
   OriginCandidate,
   OriginEvaluation,
+  PairMetrics,
+  SurfaceSample,
 } from './types';
 
 export function resolveCoverageOptions(
@@ -50,73 +53,156 @@ function candidateKey(position: Vec3): string {
   return position.map((value) => value.toFixed(5)).join(':');
 }
 
-function addCandidate(
-  destination: OriginCandidate[],
-  seen: Set<string>,
+function localCandidates(
   scene: CoverageSceneData,
-  position: Vec3,
+  center: OriginEvaluation,
+  step: number,
   options: CoverageOptimizationOptions,
-): void {
-  const key = candidateKey(position);
-  if (seen.has(key)) return;
-  if (!isCandidatePositionValid(scene, position, options.cameraClearanceRadius)) return;
-  seen.add(key);
-  destination.push({ position: [...position], clearance: candidateClearance(scene, position) });
-}
-
-function refinedCandidates(
-  scene: CoverageSceneData,
-  seeds: OriginCandidate[],
-  options: CoverageOptimizationOptions,
-  refinementSeedCount: number,
+  acceleration: ReturnType<typeof buildSceneAcceleration>,
 ): OriginCandidate[] {
   const candidates: OriginCandidate[] = [];
   const seen = new Set<string>();
-  for (const seed of seeds) {
-    addCandidate(candidates, seen, scene, seed.position, options);
-  }
-  // The fine pass keeps every coarse survivor, but local pattern search is
-  // intentionally bounded to the top four positions (or both ends of the top
-  // four pairs). Expanding every offset recursively turns 16 seeds into
-  // thousands of fine evaluations without improving the search topology.
-  for (const seed of seeds.slice(0, refinementSeedCount)) {
-    let step = options.candidateSpacing / 2;
-    for (let level = 0; level < options.localRefinementLevels; level += 1) {
-      for (const position of localCandidateOffsets(seed.position, step)) {
-        addCandidate(candidates, seen, scene, position, options);
-      }
-      step *= 0.5;
-    }
+  const preferredFloorY = center.position[1] - options.panoramaHeightMeters;
+  for (const [x, z] of localCandidateOffsets(center.position, step)) {
+    const position = projectCandidateToFloor(
+      scene,
+      x,
+      z,
+      options.panoramaHeightMeters,
+      preferredFloorY,
+    );
+    if (!position || seen.has(candidateKey(position))) continue;
+    if (!isCandidatePositionValid(
+      scene,
+      position,
+      options.cameraClearanceRadius,
+      options.panoramaHeightMeters,
+      acceleration,
+    )) continue;
+    seen.add(candidateKey(position));
+    candidates.push({
+      position,
+      clearance: candidateClearance(scene, position, acceleration),
+    });
   }
   return candidates;
 }
 
 function evaluateCandidates(
   candidates: OriginCandidate[],
-  samples: ReturnType<typeof sampleMeshSurface>,
+  samples: SurfaceSample[],
   acceleration: ReturnType<typeof buildSceneAcceleration>,
   scene: CoverageSceneData,
   options: CoverageOptimizationOptions,
 ): OriginEvaluation[] {
-  return candidates.map((candidate) => evaluateOrigin(
-    candidate,
-    samples,
-    acceleration,
-    scene.diagonal,
-    options,
-  ));
+  return candidates.map((candidate) => evaluateOrigin(candidate, samples, acceleration, scene.diagonal, options));
+}
+
+function pairComparator(
+  a: { evaluation: OriginEvaluation; metrics: PairMetrics },
+  b: { evaluation: OriginEvaluation; metrics: PairMetrics },
+): number {
+  const coverageDelta = b.metrics.unionCoverage - a.metrics.unionCoverage;
+  if (Math.abs(coverageDelta) > 0.0025) return coverageDelta;
+  const qualityDelta = b.metrics.averageQuality - a.metrics.averageQuality;
+  if (Math.abs(qualityDelta) > 1e-8) return qualityDelta;
+  const aContribution = Math.min(a.metrics.aOnlyCoverage, a.metrics.bOnlyCoverage);
+  const bContribution = Math.min(b.metrics.aOnlyCoverage, b.metrics.bOnlyCoverage);
+  if (Math.abs(bContribution - aContribution) > 1e-8) return bContribution - aContribution;
+  return a.metrics.overlapCoverage - b.metrics.overlapCoverage;
+}
+
+function bestJointPartner(
+  fixed: OriginEvaluation,
+  candidates: OriginEvaluation[],
+  minimumSeparation: number,
+): OriginEvaluation {
+  const ranked = candidates
+    .filter((candidate) => Math.hypot(
+      candidate.position[0] - fixed.position[0],
+      candidate.position[1] - fixed.position[1],
+      candidate.position[2] - fixed.position[2],
+    ) >= minimumSeparation)
+    .map((evaluation) => ({ evaluation, metrics: compareOriginPair(fixed, evaluation) }))
+    .sort(pairComparator);
+  return ranked[0]?.evaluation ?? candidates[0];
+}
+
+function refineSecondOrigin(
+  scene: CoverageSceneData,
+  first: OriginEvaluation,
+  initial: OriginEvaluation,
+  fineSamples: SurfaceSample[],
+  acceleration: ReturnType<typeof buildSceneAcceleration>,
+  options: CoverageOptimizationOptions,
+): OriginEvaluation {
+  let center = initial;
+  let step = options.candidateSpacing / 2;
+  for (let level = 0; level < options.localRefinementLevels; level += 1) {
+    const local = evaluateCandidates(
+      localCandidates(scene, center, step, options, acceleration),
+      fineSamples,
+      acceleration,
+      scene,
+      options,
+    );
+    center = rankSecondOrigins(
+      first,
+      [center, ...local],
+      options.minimumOriginSeparation,
+    )[0]?.evaluation ?? center;
+    step *= 0.5;
+  }
+  return center;
+}
+
+function refineJointPair(
+  scene: CoverageSceneData,
+  initialA: OriginEvaluation,
+  initialB: OriginEvaluation,
+  fineSamples: SurfaceSample[],
+  acceleration: ReturnType<typeof buildSceneAcceleration>,
+  options: CoverageOptimizationOptions,
+): [OriginEvaluation, OriginEvaluation] {
+  let originA = initialA;
+  let originB = initialB;
+  let step = options.candidateSpacing / 2;
+  for (let level = 0; level < options.localRefinementLevels; level += 1) {
+    const localA = evaluateCandidates(
+      localCandidates(scene, originA, step, options, acceleration),
+      fineSamples,
+      acceleration,
+      scene,
+      options,
+    );
+    originA = bestJointPartner(originB, [originA, ...localA], options.minimumOriginSeparation);
+    const localB = evaluateCandidates(
+      localCandidates(scene, originB, step, options, acceleration),
+      fineSamples,
+      acceleration,
+      scene,
+      options,
+    );
+    originB = bestJointPartner(originA, [originB, ...localB], options.minimumOriginSeparation);
+    step *= 0.5;
+  }
+  return [originA, originB];
 }
 
 function buildResult(
   request: CoverageOptimizationRequest,
   evaluationA: OriginEvaluation,
   evaluationB: OriginEvaluation,
-  metrics: ReturnType<typeof import('./coverageBitset').compareOriginPair>,
-  reachable: number,
+  reachableEvaluations: OriginEvaluation[],
   candidateCount: number,
   sampleCount: number,
   startedAt: number,
 ): CoverageOptimizationResult {
+  const metrics = compareOriginPair(evaluationA, evaluationB);
+  const reachable = reachableCoverage(
+    [...reachableEvaluations, evaluationA, evaluationB],
+    sampleCount,
+  );
   const combined = metrics.unionCoverage;
   return {
     mode: request.mode,
@@ -131,7 +217,7 @@ function buildResult(
     averageQuality: metrics.averageQuality,
     addedCoverage: Math.max(0, combined - evaluationA.individualCoverage),
     reachableCoverage: reachable,
-    reachableEfficiency: reachable > 0 ? Math.min(1, combined / reachable) : 0,
+    reachableEfficiency: reachable > 0 ? combined / reachable : 0,
     estimatedRemainingSurface: Math.max(0, 1 - combined),
     candidateCount,
     sampleCount,
@@ -140,49 +226,58 @@ function buildResult(
 }
 
 /** Shared coarse-to-fine engine feeding both optimizer strategies. */
-export function optimizeProjectionCoverage(
-  request: CoverageOptimizationRequest,
-): CoverageOptimizationResult {
+export function optimizeProjectionCoverage(request: CoverageOptimizationRequest): CoverageOptimizationResult {
   const startedAt = performance.now();
   const { scene } = request;
   const options = resolveCoverageOptions(scene, request.options);
-  const acceleration = buildSceneAcceleration(scene.triangles);
-  const candidates = generateOriginCandidates(scene, options);
-  const coarseSamples = sampleMeshSurface(scene.triangles, options.coarseSampleCount, options.seed);
+  const acceleration = buildSceneAcceleration(scene);
+  const candidates = generateOriginCandidates(scene, options, acceleration);
+  const coarseSamples = sampleMeshSurface(scene, options.coarseSampleCount, options.seed);
   const coarseEvaluations = evaluateCandidates(candidates, coarseSamples, acceleration, scene, options);
-  const reachable = reachableCoverage(coarseEvaluations, coarseSamples.length);
+  const fineSamples = sampleMeshSurface(scene, options.fineSampleCount, options.seed + 1);
+  // Reported pair and reachable metrics share this exact validation bank.
+  const reachableEvaluations = evaluateCandidates(candidates, fineSamples, acceleration, scene, options);
 
   if (request.mode === 'fixed-first') {
     if (!request.firstOrigin) throw new Error('Fixed-first optimization requires the current panorama origin.');
     const firstCandidate: OriginCandidate = {
       position: [...request.firstOrigin],
-      clearance: candidateClearance(scene, request.firstOrigin),
+      clearance: candidateClearance(scene, request.firstOrigin, acceleration),
     };
-    const coarseFirst = evaluateOrigin(
-      firstCandidate,
-      coarseSamples,
-      acceleration,
-      scene.diagonal,
-      options,
+    const coarseFirst = evaluateOrigin(firstCandidate, coarseSamples, acceleration, scene.diagonal, options);
+    const coarseRanking = rankSecondOrigins(
+      coarseFirst,
+      coarseEvaluations,
+      options.minimumOriginSeparation,
     );
-    const coarseRanking = rankSecondOrigins(coarseFirst, coarseEvaluations);
-    const seeds = coarseRanking.slice(0, options.coarsePairSeedCount).map((ranked) => ({
-      position: ranked.evaluation.position,
-      clearance: ranked.evaluation.clearance,
-    }));
-    const fineCandidates = refinedCandidates(scene, seeds, options, 4);
-    if (fineCandidates.length === 0) fineCandidates.push(...seeds);
-    const fineSamples = sampleMeshSurface(scene.triangles, options.fineSampleCount, options.seed + 1);
+    const seedKeys = new Set(coarseRanking.slice(0, options.coarsePairSeedCount).map((ranked) => candidateKey(ranked.evaluation.position)));
     const fineFirst = evaluateOrigin(firstCandidate, fineSamples, acceleration, scene.diagonal, options);
-    const fineEvaluations = evaluateCandidates(fineCandidates, fineSamples, acceleration, scene, options);
-    const best = rankSecondOrigins(fineFirst, fineEvaluations)[0];
+    const fineSeeds = reachableEvaluations.filter((evaluation) => seedKeys.has(candidateKey(evaluation.position)));
+    const initial = rankSecondOrigins(
+      fineFirst,
+      fineSeeds,
+      options.minimumOriginSeparation,
+    ).slice(0, 4);
+    if (initial.length === 0) throw new Error('No valid secondary origin satisfies the minimum separation.');
+    const refined = initial.map((ranked) => refineSecondOrigin(
+      scene,
+      fineFirst,
+      ranked.evaluation,
+      fineSamples,
+      acceleration,
+      options,
+    ));
+    const best = rankSecondOrigins(
+      fineFirst,
+      [...fineSeeds, ...refined],
+      options.minimumOriginSeparation,
+    )[0];
     if (!best) throw new Error('No valid secondary origin candidates.');
     return buildResult(
       request,
       fineFirst,
       best.evaluation,
-      best.metrics,
-      reachable,
+      [...reachableEvaluations, fineFirst],
       candidates.length,
       fineSamples.length,
       startedAt,
@@ -195,25 +290,35 @@ export function optimizeProjectionCoverage(
     coarseSamples.length,
     options.coarsePairSeedCount,
   );
-  if (coarsePairs.length === 0) {
-    throw new Error('No valid origin pair satisfies the minimum separation.');
-  }
-  const seedCandidates: OriginCandidate[] = [];
-  const seedKeys = new Set<string>();
+  if (coarsePairs.length === 0) throw new Error('No valid origin pair satisfies the minimum separation.');
+  const fineByPosition = new Map(reachableEvaluations.map((evaluation) => [candidateKey(evaluation.position), evaluation]));
+  const seedEvaluations: OriginEvaluation[] = [];
   for (const pair of coarsePairs) {
-    for (const evaluation of [pair.evaluationA, pair.evaluationB]) {
-      const key = candidateKey(evaluation.position);
-      if (seedKeys.has(key)) continue;
-      seedKeys.add(key);
-      seedCandidates.push({ position: evaluation.position, clearance: evaluation.clearance });
+    for (const endpoint of [pair.evaluationA, pair.evaluationB]) {
+      const evaluation = fineByPosition.get(candidateKey(endpoint.position));
+      if (evaluation && !seedEvaluations.includes(evaluation)) seedEvaluations.push(evaluation);
     }
   }
-  const fineCandidates = refinedCandidates(scene, seedCandidates, options, 8);
-  if (fineCandidates.length === 0) fineCandidates.push(...seedCandidates);
-  const fineSamples = sampleMeshSurface(scene.triangles, options.fineSampleCount, options.seed + 1);
-  const fineEvaluations = evaluateCandidates(fineCandidates, fineSamples, acceleration, scene, options);
+  const finePairs = rankAllPairs(
+    seedEvaluations,
+    options.minimumOriginSeparation,
+    fineSamples.length,
+    4,
+  );
+  if (finePairs.length === 0) throw new Error('No valid refined origin pair satisfies the minimum separation.');
+  const refinedEndpoints: OriginEvaluation[] = [];
+  for (const pair of finePairs) {
+    refinedEndpoints.push(...refineJointPair(
+      scene,
+      pair.evaluationA,
+      pair.evaluationB,
+      fineSamples,
+      acceleration,
+      options,
+    ));
+  }
   const best = rankAllPairs(
-    fineEvaluations,
+    [...seedEvaluations, ...refinedEndpoints],
     options.minimumOriginSeparation,
     fineSamples.length,
     1,
@@ -223,8 +328,7 @@ export function optimizeProjectionCoverage(
     request,
     best.evaluationA,
     best.evaluationB,
-    best.metrics,
-    reachable,
+    reachableEvaluations,
     candidates.length,
     fineSamples.length,
     startedAt,

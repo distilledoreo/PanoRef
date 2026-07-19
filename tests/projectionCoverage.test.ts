@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Vec3 } from '../src/domain/types';
-import { createDefaultProject } from '../src/domain/defaults';
+import type { ProjectAsset, SceneObject, Vec3 } from '../src/domain/types';
+import { createDefaultProject, createTransform } from '../src/domain/defaults';
+import { encodePackedGrayboxMesh } from '../src/engine/importedMesh';
 import {
   buildSceneAcceleration,
   compareOriginPair,
@@ -8,49 +9,63 @@ import {
   extractCoverageScene,
   generateOriginCandidates,
   optimizeProjectionCoverage,
+  projectCandidateToFloor,
   rankAllPairs,
   rankSecondOrigins,
   resolveCoverageOptions,
   sampleMeshSurface,
   type CoverageSceneData,
-  type CoverageTriangle,
   type OriginEvaluation,
 } from '../src/engine/projectionCoverage';
 
-function triangle(a: Vec3, b: Vec3, c: Vec3, normal: Vec3, triangleId: number): CoverageTriangle {
-  const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-  const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-  const cross = [
-    ab[1] * ac[2] - ab[2] * ac[1],
-    ab[2] * ac[0] - ab[0] * ac[2],
-    ab[0] * ac[1] - ab[1] * ac[0],
-  ];
+interface TestTriangle { a: Vec3; b: Vec3; c: Vec3 }
+
+const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+function packedScene(
+  triangles: TestTriangle[],
+  floorTriangleIndices: number[] = [],
+  bounds = { min: [-2, 0, -2] as Vec3, max: [2, 3, 2] as Vec3 },
+): CoverageSceneData {
+  const positions = new Float32Array(triangles.length * 9);
+  const indices = new Uint32Array(triangles.length * 3);
+  triangles.forEach((triangle, triangleIndex) => {
+    positions.set([...triangle.a, ...triangle.b, ...triangle.c], triangleIndex * 9);
+    indices.set([triangleIndex * 3, triangleIndex * 3 + 1, triangleIndex * 3 + 2], triangleIndex * 3);
+  });
+  const floorBounds = new Float32Array(floorTriangleIndices.length * 4);
+  floorTriangleIndices.forEach((triangleIndex, floorIndex) => {
+    const { a, b, c } = triangles[triangleIndex];
+    floorBounds.set([
+      Math.min(a[0], b[0], c[0]), Math.max(a[0], b[0], c[0]),
+      Math.min(a[2], b[2], c[2]), Math.max(a[2], b[2], c[2]),
+    ], floorIndex * 4);
+  });
   return {
-    a,
-    b,
-    c,
-    geometricNormal: normal,
-    meshId: triangleId,
-    triangleId,
-    area: Math.hypot(...cross) * 0.5,
+    positions,
+    indices,
+    triangleMeshIds: new Uint32Array(triangles.length),
+    meshMatrices: new Float32Array(IDENTITY_MATRIX),
+    floorTriangleIndices: new Uint32Array(floorTriangleIndices),
+    floorBounds,
+    bounds,
+    diagonal: Math.hypot(
+      bounds.max[0] - bounds.min[0],
+      bounds.max[1] - bounds.min[1],
+      bounds.max[2] - bounds.min[2],
+    ),
   };
 }
 
-function floorScene(): CoverageSceneData {
-  const triangles = [
-    triangle([-2, 0, -2], [2, 0, -2], [2, 0, 2], [0, 1, 0], 0),
-    triangle([-2, 0, -2], [2, 0, 2], [-2, 0, 2], [0, 1, 0], 1),
+function floorTriangles(y = 0, extent = 2): TestTriangle[] {
+  return [
+    { a: [-extent, y, -extent], b: [extent, y, extent], c: [extent, y, -extent] },
+    { a: [-extent, y, -extent], b: [-extent, y, extent], c: [extent, y, extent] },
   ];
-  return {
-    triangles,
-    bounds: { min: [-2, 0, -2], max: [2, 0.1, 2] },
-    obstacleBounds: [],
-    floorTriangles: [
-      { triangleIndex: 0, minX: -2, maxX: 2, minZ: -2, maxZ: 2 },
-      { triangleIndex: 1, minX: -2, maxX: 2, minZ: -2, maxZ: 2 },
-    ],
-    diagonal: Math.hypot(4, 0.1, 4),
-  };
+}
+
+function floorScene(): CoverageSceneData {
+  return packedScene(floorTriangles(), [0, 1]);
 }
 
 function evaluation(bits: number, quality: number[], position: Vec3): OriginEvaluation {
@@ -67,12 +82,12 @@ function evaluation(bits: number, quality: number[], position: Vec3): OriginEval
 
 describe('projection coverage engine', () => {
   it('samples world-space surface area deterministically and proportionally', () => {
-    const triangles = [
-      triangle([0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], 0),
-      triangle([2, 0, 0], [6, 0, 0], [2, 2, 0], [0, 0, 1], 1),
-    ];
-    const first = sampleMeshSurface(triangles, 5_000, 1234);
-    const second = sampleMeshSurface(triangles, 5_000, 1234);
+    const scene = packedScene([
+      { a: [0, 0, 0], b: [1, 0, 0], c: [0, 1, 0] },
+      { a: [2, 0, 0], b: [6, 0, 0], c: [2, 2, 0] },
+    ]);
+    const first = sampleMeshSurface(scene, 5_000, 1234);
+    const second = sampleMeshSurface(scene, 5_000, 1234);
     expect(second).toEqual(first);
     const largeCount = first.filter((sample) => sample.triangleIndex === 1).length;
     expect(largeCount / first.length).toBeGreaterThan(0.86);
@@ -80,23 +95,16 @@ describe('projection coverage engine', () => {
   });
 
   it('uses double-sided BVH segment hits to reject geometry-hidden samples', () => {
-    const wall = triangle([1, -1, -1], [1, 1, -1], [1, 0, 1], [1, 0, 0], 0);
-    const target = triangle([2, -1, -1], [2, 0, 1], [2, 1, -1], [-1, 0, 0], 1);
-    const acceleration = buildSceneAcceleration([wall, target]);
+    const scene = packedScene([
+      { a: [1, -1, -1], b: [1, 1, -1], c: [1, 0, 1] },
+      { a: [2, -1, -1], b: [2, 0, 1], c: [2, 1, -1] },
+    ]);
+    const acceleration = buildSceneAcceleration(scene);
     expect(acceleration.raycastAny([0, 0, 0], [1, 0, 0], 1.99, 1)).toBe(true);
-    const options = resolveCoverageOptions(floorScene(), {
-      minimumTexelDensity: 0,
-      targetTexelDensity: 1,
-    });
+    const options = resolveCoverageOptions(floorScene(), { minimumTexelDensity: 0, targetTexelDensity: 1 });
     const result = evaluateOrigin(
       { position: [0, 0, 0], clearance: 1 },
-      [{
-        position: [2, 0, 0],
-        geometricNormal: [-1, 0, 0],
-        meshId: 1,
-        triangleId: 1,
-        triangleIndex: 1,
-      }],
+      [{ position: [2, 0, 0], geometricNormal: [-1, 0, 0], meshId: 0, triangleId: 1, triangleIndex: 1 }],
       acceleration,
       4,
       options,
@@ -109,54 +117,176 @@ describe('projection coverage engine', () => {
     const redundant = evaluation(0b0011, [255, 255, 0, 0], [1, 0, 0]);
     const complementary = evaluation(0b1100, [0, 0, 200, 200], [2, 0, 0]);
     const partial = evaluation(0b0110, [0, 180, 180, 0], [3, 0, 0]);
-
     expect(rankSecondOrigins(first, [redundant, complementary, partial])[0].evaluation).toBe(complementary);
     const bestPair = rankAllPairs([redundant, complementary, partial], 0.5, 4, 1)[0];
     expect(new Set([bestPair.evaluationA, bestPair.evaluationB])).toEqual(new Set([redundant, complementary]));
     expect(compareOriginPair(redundant, complementary).unionCoverage).toBe(1);
   });
 
-  it('generates cleared floor candidates and runs both shared search modes', () => {
+  it('keeps imported-room interior candidates by using triangle clearance instead of an enclosing AABB', () => {
+    const triangles = [...floorTriangles(0, 3)];
+    // One imported mesh can contain floor and all four walls; its object AABB encloses the room.
+    triangles.push(
+      { a: [-3, 0, -3], b: [-3, 3, -3], c: [3, 3, -3] },
+      { a: [-3, 0, -3], b: [3, 3, -3], c: [3, 0, -3] },
+      { a: [3, 0, 3], b: [3, 3, 3], c: [-3, 3, 3] },
+      { a: [3, 0, 3], b: [-3, 3, 3], c: [-3, 0, 3] },
+      { a: [-3, 0, 3], b: [-3, 3, 3], c: [-3, 3, -3] },
+      { a: [-3, 0, 3], b: [-3, 3, -3], c: [-3, 0, -3] },
+      { a: [3, 0, -3], b: [3, 3, -3], c: [3, 3, 3] },
+      { a: [3, 0, -3], b: [3, 3, 3], c: [3, 0, 3] },
+    );
+    const scene = packedScene(triangles, [0, 1], { min: [-3, 0, -3], max: [3, 3, 3] });
+    const options = resolveCoverageOptions(scene, { candidateSpacing: 1, cameraClearanceRadius: 0.3 });
+    const candidates = generateOriginCandidates(scene, options, buildSceneAcceleration(scene));
+    expect(candidates.some((candidate) => Math.hypot(candidate.position[0], candidate.position[2]) < 0.1)).toBe(true);
+  });
+
+  it('extracts one imported room object and retains its concave empty interior', async () => {
+    const triangles = [...floorTriangles(0, 3)];
+    triangles.push(
+      { a: [-3, 0, -3], b: [-3, 3, -3], c: [3, 3, -3] },
+      { a: [-3, 0, -3], b: [3, 3, -3], c: [3, 0, -3] },
+      { a: [3, 0, 3], b: [3, 3, 3], c: [-3, 3, 3] },
+      { a: [3, 0, 3], b: [-3, 3, 3], c: [-3, 0, 3] },
+      { a: [-3, 0, 3], b: [-3, 3, 3], c: [-3, 3, -3] },
+      { a: [-3, 0, 3], b: [-3, 3, -3], c: [-3, 0, -3] },
+      { a: [3, 0, -3], b: [3, 3, -3], c: [3, 3, 3] },
+      { a: [3, 0, -3], b: [3, 3, 3], c: [3, 0, 3] },
+    );
+    const positions = new Float32Array(triangles.length * 9);
+    const indices = new Uint32Array(triangles.length * 3);
+    triangles.forEach((triangle, triangleIndex) => {
+      positions.set([...triangle.a, ...triangle.b, ...triangle.c], triangleIndex * 9);
+      indices.set([triangleIndex * 3, triangleIndex * 3 + 1, triangleIndex * 3 + 2], triangleIndex * 3);
+    });
+    const packed = encodePackedGrayboxMesh(positions, indices);
+    const asset: ProjectAsset = {
+      id: 'coverage_imported_room', type: 'model', name: 'room.panoref-mesh',
+      uri: packed.uri, createdAt: new Date(0).toISOString(),
+    };
+    const object: SceneObject = {
+      id: 'coverage_room_object', name: 'Imported Room', type: 'imported_model',
+      transform: createTransform([0, 0, 0]), dimensions: [6, 3, 6],
+      category: 'architecture', locked: false, visible: true, modelAssetId: asset.id,
+    };
+    const project = createDefaultProject();
+    project.scene.objects = [object];
+    project.assets.assets[asset.id] = asset;
+    const scene = await extractCoverageScene(project);
+    const options = resolveCoverageOptions(scene, { candidateSpacing: 1, cameraClearanceRadius: 0.3 });
+    const candidates = generateOriginCandidates(scene, options, buildSceneAcceleration(scene));
+    expect(candidates.some((candidate) => Math.hypot(candidate.position[0], candidate.position[2]) < 0.1)).toBe(true);
+  });
+
+  it('uses one fine validation bank for reachable metrics and enforces fixed-first separation', () => {
     const scene = floorScene();
     const options = resolveCoverageOptions(scene, {
       candidateSpacing: 1,
       maximumCandidateCount: 16,
       cameraClearanceRadius: 0.1,
-      minimumOriginSeparation: 1,
+      minimumOriginSeparation: 1.5,
       coarseSampleCount: 32,
       fineSampleCount: 64,
       coarsePairSeedCount: 4,
-      localRefinementLevels: 1,
+      localRefinementLevels: 2,
       minimumTexelDensity: 0,
       targetTexelDensity: 1,
     });
-    const candidates = generateOriginCandidates(scene, options);
+    const fixed = optimizeProjectionCoverage({ mode: 'fixed-first', scene, firstOrigin: [0, 1.6, 0], options });
+    expect(fixed.reachableCoverage).toBeGreaterThanOrEqual(fixed.combinedCoverage);
+    expect(fixed.reachableEfficiency).toBeLessThanOrEqual(1);
+    expect(Math.hypot(
+      fixed.originA[0] - fixed.originB[0],
+      fixed.originA[1] - fixed.originB[1],
+      fixed.originA[2] - fixed.originB[2],
+    )).toBeGreaterThanOrEqual(1.5);
+  });
+
+  it('reprojects local X/Z offsets onto the nearest sloped or multilevel floor', () => {
+    const lower = floorTriangles(0, 2);
+    const upper = floorTriangles(3, 1).map((triangle) => ({
+      a: [triangle.a[0] + 3, triangle.a[1], triangle.a[2]] as Vec3,
+      b: [triangle.b[0] + 3, triangle.b[1], triangle.b[2]] as Vec3,
+      c: [triangle.c[0] + 3, triangle.c[1], triangle.c[2]] as Vec3,
+    }));
+    const slope: TestTriangle = { a: [-2, 0, 3], b: [2, 1, 5], c: [2, 0, 3] };
+    const scene = packedScene([...lower, ...upper, slope], [0, 1, 2, 3, 4], {
+      min: [-2, 0, -2], max: [4, 4, 5],
+    });
+    const upperPosition = projectCandidateToFloor(scene, 3, 0, 1.6, 3);
+    const slopePosition = projectCandidateToFloor(scene, 1.5, 4.5, 1.6, 0.5);
+    expect(upperPosition?.[1]).toBeCloseTo(4.6, 5);
+    expect(slopePosition?.[1]).toBeGreaterThan(1.6);
+    expect(slopePosition?.[1]).toBeLessThan(2.6);
+  });
+
+  it('generates candidates and runs both shared search modes', () => {
+    const scene = floorScene();
+    const options = resolveCoverageOptions(scene, {
+      candidateSpacing: 1, maximumCandidateCount: 16, cameraClearanceRadius: 0.1,
+      minimumOriginSeparation: 1, coarseSampleCount: 32, fineSampleCount: 64,
+      coarsePairSeedCount: 4, localRefinementLevels: 1, minimumTexelDensity: 0, targetTexelDensity: 1,
+    });
+    const candidates = generateOriginCandidates(scene, options, buildSceneAcceleration(scene));
     expect(candidates.length).toBeGreaterThan(2);
     expect(candidates.every((candidate) => candidate.position[1] === 1.6)).toBe(true);
-
-    const fixed = optimizeProjectionCoverage({
-      mode: 'fixed-first',
-      scene,
-      firstOrigin: [0, 1.6, 0],
-      options,
-    });
+    const fixed = optimizeProjectionCoverage({ mode: 'fixed-first', scene, firstOrigin: [0, 1.6, 0], options });
     const joint = optimizeProjectionCoverage({ mode: 'joint-pair', scene, options });
     expect(fixed.sampleCount).toBe(64);
     expect(fixed.combinedCoverage).toBeGreaterThan(0.9);
     expect(joint.combinedCoverage).toBeGreaterThan(0.9);
-    expect(Math.hypot(
-      joint.originA[0] - joint.originB[0],
-      joint.originA[2] - joint.originB[2],
-    )).toBeGreaterThanOrEqual(1);
   });
 
-  it('prefers authored floors over upward-facing prop and roof surfaces', () => {
-    const scene = extractCoverageScene(createDefaultProject());
-    const floorHeights = scene.floorTriangles.flatMap(({ triangleIndex }) => {
-      const floor = scene.triangles[triangleIndex];
-      return [floor.a[1], floor.b[1], floor.c[1]];
+  it('prefers authored floors over upward-facing prop and roof surfaces', async () => {
+    const scene = await extractCoverageScene(createDefaultProject());
+    expect(scene.floorTriangleIndices.length).toBeGreaterThan(0);
+    const positions = Array.from(scene.floorTriangleIndices).flatMap((triangleIndex) => {
+      const offset = triangleIndex * 3;
+      return [
+        scene.positions[scene.indices[offset] * 3 + 1],
+        scene.positions[scene.indices[offset + 1] * 3 + 1],
+        scene.positions[scene.indices[offset + 2] * 3 + 1],
+      ];
     });
-    expect(floorHeights.length).toBeGreaterThan(0);
-    expect(Math.max(...floorHeights)).toBeLessThan(0.25);
+    expect(Math.max(...positions)).toBeLessThan(0.25);
   });
+
+  it('builds a flat BVH for a 100k-triangle indexed fixture without object expansion', () => {
+    const cells = 225;
+    const side = cells + 1;
+    const positions = new Float32Array(side * side * 3);
+    for (let z = 0; z < side; z += 1) {
+      for (let x = 0; x < side; x += 1) {
+        const offset = (z * side + x) * 3;
+        positions[offset] = x * 0.1;
+        positions[offset + 2] = z * 0.1;
+      }
+    }
+    const indices = new Uint32Array(cells * cells * 6);
+    let offset = 0;
+    for (let z = 0; z < cells; z += 1) {
+      for (let x = 0; x < cells; x += 1) {
+        const a = z * side + x; const b = a + 1; const c = a + side; const d = c + 1;
+        indices.set([a, d, b, a, c, d], offset);
+        offset += 6;
+      }
+    }
+    const scene: CoverageSceneData = {
+      positions,
+      indices,
+      triangleMeshIds: new Uint32Array(indices.length / 3),
+      meshMatrices: new Float32Array(IDENTITY_MATRIX),
+      floorTriangleIndices: new Uint32Array(0),
+      floorBounds: new Float32Array(0),
+      bounds: { min: [0, 0, 0], max: [22.5, 0, 22.5] },
+      diagonal: Math.hypot(22.5, 22.5),
+    };
+    const packedBytes = positions.byteLength + indices.byteLength
+      + scene.triangleMeshIds.byteLength + scene.meshMatrices.byteLength;
+    expect(indices.length / 3).toBeGreaterThan(100_000);
+    expect(packedBytes).toBeLessThan(3_000_000);
+    const acceleration = buildSceneAcceleration(scene);
+    expect(acceleration.distanceToGeometry([11, 1.6, 11])).toBeCloseTo(1.6, 3);
+  }, 30_000);
 });

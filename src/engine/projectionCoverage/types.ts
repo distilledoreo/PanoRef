@@ -2,34 +2,25 @@ import type { Vec3 } from '../../domain/types';
 
 export type CoverageOptimizationMode = 'fixed-first' | 'joint-pair';
 
-export interface CoverageTriangle {
-  a: Vec3;
-  b: Vec3;
-  c: Vec3;
-  geometricNormal: Vec3;
-  meshId: number;
-  triangleId: number;
-  area: number;
-}
-
 export interface CoverageBounds {
   min: Vec3;
   max: Vec3;
 }
 
-export interface CoverageFloorTriangle {
-  triangleIndex: number;
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-}
-
+/**
+ * Compact indexed geometry. Positions stay in mesh-local space and each
+ * triangle references a mesh transform, avoiding nine duplicated world-space
+ * numbers and several JavaScript objects per triangle.
+ */
 export interface CoverageSceneData {
-  triangles: CoverageTriangle[];
+  positions: Float32Array;
+  indices: Uint32Array;
+  triangleMeshIds: Uint32Array;
+  meshMatrices: Float32Array;
+  floorTriangleIndices: Uint32Array;
+  /** minX, maxX, minZ, maxZ for each floorTriangleIndices entry. */
+  floorBounds: Float32Array;
   bounds: CoverageBounds;
-  obstacleBounds: CoverageBounds[];
-  floorTriangles: CoverageFloorTriangle[];
   diagonal: number;
 }
 
@@ -90,6 +81,8 @@ export interface CoverageOptimizationRequest {
   options?: Partial<CoverageOptimizationOptions>;
 }
 
+export type CoverageExtractionProgress = (progress: number, message: string) => void;
+
 export interface CoverageOptimizationResult {
   mode: CoverageOptimizationMode;
   originA: Vec3;
@@ -109,4 +102,3 @@ export interface CoverageOptimizationResult {
   sampleCount: number;
   elapsedMilliseconds: number;
 }
-

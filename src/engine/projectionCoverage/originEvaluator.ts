@@ -39,7 +39,7 @@ export function evaluateOrigin(
     if (!(distance > 1e-6)) continue;
     const direction: Vec3 = [offset[0] / distance, offset[1] / distance, offset[2] / distance];
     const towardOrigin: Vec3 = [-direction[0], -direction[1], -direction[2]];
-    const facing = Math.max(0,
+    const facing = Math.abs(
       sample.geometricNormal[0] * towardOrigin[0]
       + sample.geometricNormal[1] * towardOrigin[1]
       + sample.geometricNormal[2] * towardOrigin[2]);
@@ -82,4 +82,3 @@ export function evaluateOrigin(
     clearance: candidate.clearance,
   };
 }
-

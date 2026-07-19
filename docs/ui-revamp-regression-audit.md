@@ -284,11 +284,12 @@ The Projected Style panel now feeds both dual-origin search modes from one cover
 
 - **Fixed-first:** evaluates the selected primary panorama origin and ranks second origins by combined usable coverage, then quality gain, overlap, and clearance.
 - **Joint-pair:** ranks all coarse origin pairs by their coverage bitset union before fine evaluation, preserving candidates that are weak alone but complementary together.
-- **Search:** automatically derives cleared candidates from upward-facing floors, evaluates 4,096 coarse samples, refines retained seeds against 24,576 fine samples, and reports the reachable union across all legal coarse candidates.
-- **Runtime isolation:** geometry extraction happens once in the panel and candidate evaluation runs in a module Web Worker so the reference controls remain responsive.
-- **Application:** results can move the next graybox capture origin or update both selected panorama-reference origins; the existing cyan/magenta/white/red coverage preview then provides the live geometry check.
+- **Search:** automatically derives candidates from upward-facing floors, rejects them with triangle-accurate camera clearance, evaluates 4,096 coarse samples, iteratively recenters four local refinement levels, and reports final pair plus reachable union on one shared 24,576-sample bank. Fixed-first applies the same minimum-separation rule as joint mode.
+- **Runtime isolation:** indexed positions, indices, mesh transforms, and floor ranges are stored in typed arrays. Main-thread extraction yields between objects and large buffer chunks, then transfers the ArrayBuffers to a module worker. The worker builds a flat typed-array BVH with in-place partitioning and allocation-free ray/clearance queries.
+- **Application:** results are capture-plan positions only. They can move the graybox capture origin to A or B so a new panorama can be rendered, styled, and imported. Existing panorama references remain immutable because changing their stored origin would misproject the already-captured pixels.
+- **Rendering parity:** dual-projector blending uses the same face-angle and approximate texel-density quality model as optimization, with winner-takes-most weighting; the coverage preview adds orange for visible but under-resolved/grazing surfaces.
 
-`tests/projectionCoverage.test.ts` locks deterministic area weighting, double-sided occlusion, marginal-versus-joint ranking, floor candidate generation, and both coarse-to-fine search modes.
+`tests/projectionCoverage.test.ts` locks deterministic area weighting, double-sided occlusion, marginal-versus-joint ranking, imported-room interior clearance, common-bank reachability, fixed-first separation, sloped/multilevel floor reprojection, both search modes, and a 100k-triangle indexed BVH fixture. UI fidelity and browser tests assert that optimization never rewrites existing panorama origins.
 
 **Automated checks (at feature completion):**
 

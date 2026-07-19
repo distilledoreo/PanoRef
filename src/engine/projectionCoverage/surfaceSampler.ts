@@ -2,33 +2,23 @@ import * as THREE from 'three';
 import type { LocationProject, Vec3 } from '../../domain/types';
 import { releaseImportedGeometry } from '../importedMesh';
 import { createObject3D } from '../sceneObjects';
+import {
+  readWorldTriangle,
+  triangleAreaNormal,
+  triangleCount,
+  writeTriangleBounds,
+} from './geometryAccess';
 import type {
-  CoverageBounds,
-  CoverageFloorTriangle,
+  CoverageExtractionProgress,
   CoverageSceneData,
-  CoverageTriangle,
   SurfaceSample,
 } from './types';
 
 const MIN_TRIANGLE_AREA = 1e-8;
+const COPY_CHUNK_VALUES = 262_144;
 
 function toVec3(vector: THREE.Vector3): Vec3 {
   return [vector.x, vector.y, vector.z];
-}
-
-function triangleBounds(triangle: CoverageTriangle): CoverageBounds {
-  return {
-    min: [
-      Math.min(triangle.a[0], triangle.b[0], triangle.c[0]),
-      Math.min(triangle.a[1], triangle.b[1], triangle.c[1]),
-      Math.min(triangle.a[2], triangle.b[2], triangle.c[2]),
-    ],
-    max: [
-      Math.max(triangle.a[0], triangle.b[0], triangle.c[0]),
-      Math.max(triangle.a[1], triangle.b[1], triangle.c[1]),
-      Math.max(triangle.a[2], triangle.b[2], triangle.c[2]),
-    ],
-  };
 }
 
 function disposeExtractedNode(root: THREE.Object3D): void {
@@ -41,104 +31,164 @@ function disposeExtractedNode(root: THREE.Object3D): void {
   });
 }
 
-/**
- * Flatten the exact rendered triangle surfaces into deterministic world-space
- * geometry. Helpers and the sun marker are deliberately excluded.
- */
-export function extractCoverageScene(project: LocationProject): CoverageSceneData {
-  const triangles: CoverageTriangle[] = [];
-  const obstacleBounds: CoverageBounds[] = [];
-  const explicitFloorTriangles: CoverageFloorTriangle[] = [];
-  const inferredFloorTriangles: CoverageFloorTriangle[] = [];
-  const sceneBounds = new THREE.Box3();
-  let meshId = 0;
+function yieldToMainThread(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
-  for (const object of project.scene.objects) {
-    if (!object.visible || object.type === 'sun_marker' || object.category === 'helper') continue;
+async function forEachProjectMesh(
+  project: LocationProject,
+  visit: (mesh: THREE.Mesh, explicitFloor: boolean) => Promise<void> | void,
+  onProgress?: CoverageExtractionProgress,
+  progressStart = 0,
+  progressSpan = 1,
+): Promise<void> {
+  const objects = project.scene.objects.filter(
+    (object) => object.visible && object.type !== 'sun_marker' && object.category !== 'helper',
+  );
+  for (let objectIndex = 0; objectIndex < objects.length; objectIndex += 1) {
+    const object = objects[objectIndex];
     const root = createObject3D(object, false, 'light', project.assets);
     root.updateMatrixWorld(true);
-    const objectBounds = new THREE.Box3().setFromObject(root, true);
-    if (!objectBounds.isEmpty()) {
-      sceneBounds.union(objectBounds);
-      if (object.type !== 'floor') {
-        obstacleBounds.push({ min: toVec3(objectBounds.min), max: toVec3(objectBounds.max) });
-      }
-    }
-
+    const meshes: THREE.Mesh[] = [];
     root.traverse((child) => {
       const mesh = child as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      const geometry = mesh.geometry;
-      const position = geometry.getAttribute('position');
-      if (!position) return;
-      const index = geometry.index;
-      const triangleCount = index ? Math.floor(index.count / 3) : Math.floor(position.count / 3);
-      const a = new THREE.Vector3();
-      const b = new THREE.Vector3();
-      const c = new THREE.Vector3();
-      const edgeAB = new THREE.Vector3();
-      const edgeAC = new THREE.Vector3();
-      const normal = new THREE.Vector3();
-
-      for (let triangleId = 0; triangleId < triangleCount; triangleId += 1) {
-        const ia = index ? index.getX(triangleId * 3) : triangleId * 3;
-        const ib = index ? index.getX(triangleId * 3 + 1) : triangleId * 3 + 1;
-        const ic = index ? index.getX(triangleId * 3 + 2) : triangleId * 3 + 2;
-        a.fromBufferAttribute(position, ia).applyMatrix4(mesh.matrixWorld);
-        b.fromBufferAttribute(position, ib).applyMatrix4(mesh.matrixWorld);
-        c.fromBufferAttribute(position, ic).applyMatrix4(mesh.matrixWorld);
-        edgeAB.subVectors(b, a);
-        edgeAC.subVectors(c, a);
-        normal.crossVectors(edgeAB, edgeAC);
-        const area = normal.length() * 0.5;
-        if (!Number.isFinite(area) || area <= MIN_TRIANGLE_AREA) continue;
-        normal.normalize();
-        const triangle: CoverageTriangle = {
-          a: toVec3(a),
-          b: toVec3(b),
-          c: toVec3(c),
-          geometricNormal: toVec3(normal),
-          meshId,
-          triangleId,
-          area,
-        };
-        const triangleIndex = triangles.push(triangle) - 1;
-        if (normal.y > 0.8) {
-          const bounds = triangleBounds(triangle);
-          const floor = {
-            triangleIndex,
-            minX: bounds.min[0],
-            maxX: bounds.max[0],
-            minZ: bounds.min[2],
-            maxZ: bounds.max[2],
-          };
-          if (object.type === 'floor') explicitFloorTriangles.push(floor);
-          else inferredFloorTriangles.push(floor);
-        }
-      }
-      meshId += 1;
+      if (mesh.isMesh && mesh.geometry.getAttribute('position')) meshes.push(mesh);
     });
-
+    for (const mesh of meshes) await visit(mesh, object.type === 'floor');
     disposeExtractedNode(root);
+    onProgress?.(
+      progressStart + progressSpan * ((objectIndex + 1) / Math.max(1, objects.length)),
+      'Preparing indexed scene geometry…',
+    );
+    await yieldToMainThread();
   }
+}
 
-  if (triangles.length === 0 || sceneBounds.isEmpty()) {
+async function copyPositionAttribute(
+  target: Float32Array,
+  targetOffset: number,
+  attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+): Promise<void> {
+  if (!attribute.normalized && !(attribute instanceof THREE.InterleavedBufferAttribute) && attribute.itemSize === 3) {
+    const source = attribute.array;
+    for (let offset = 0; offset < source.length; offset += COPY_CHUNK_VALUES) {
+      const end = Math.min(source.length, offset + COPY_CHUNK_VALUES);
+      target.set(source.subarray(offset, end), targetOffset + offset);
+      if (end < source.length) await yieldToMainThread();
+    }
+    return;
+  }
+  for (let vertex = 0; vertex < attribute.count; vertex += 1) {
+    const offset = targetOffset + vertex * 3;
+    target[offset] = attribute.getX(vertex);
+    target[offset + 1] = attribute.getY(vertex);
+    target[offset + 2] = attribute.getZ(vertex);
+    if (vertex > 0 && vertex % (COPY_CHUNK_VALUES / 3) === 0) await yieldToMainThread();
+  }
+}
+
+/**
+ * Extract indexed mesh buffers without expanding triangles. Work is chunked
+ * between objects and large buffer ranges so complex imports do not monopolize
+ * the browser event loop before worker optimization begins.
+ */
+export async function extractCoverageScene(
+  project: LocationProject,
+  onProgress?: CoverageExtractionProgress,
+): Promise<CoverageSceneData> {
+  let vertexCount = 0;
+  let indexCount = 0;
+  let meshCount = 0;
+  const sceneBounds = new THREE.Box3();
+
+  await forEachProjectMesh(project, (mesh) => {
+    const position = mesh.geometry.getAttribute('position');
+    const index = mesh.geometry.index;
+    const meshIndexCount = index ? Math.floor(index.count / 3) * 3 : Math.floor(position.count / 3) * 3;
+    if (meshIndexCount === 0) return;
+    vertexCount += position.count;
+    indexCount += meshIndexCount;
+    meshCount += 1;
+    sceneBounds.union(new THREE.Box3().setFromObject(mesh, true));
+  }, onProgress, 0, 0.15);
+
+  if (indexCount === 0 || vertexCount === 0 || sceneBounds.isEmpty()) {
     throw new Error('Coverage analysis requires at least one visible solid mesh.');
   }
 
-  return {
-    triangles,
+  const scene: CoverageSceneData = {
+    positions: new Float32Array(vertexCount * 3),
+    indices: new Uint32Array(indexCount),
+    triangleMeshIds: new Uint32Array(indexCount / 3),
+    meshMatrices: new Float32Array(meshCount * 16),
+    floorTriangleIndices: new Uint32Array(0),
+    floorBounds: new Float32Array(0),
     bounds: { min: toVec3(sceneBounds.min), max: toVec3(sceneBounds.max) },
-    obstacleBounds,
-    // Authored floor objects define the allowed capture region when present.
-    // Only infer floors from arbitrary upward faces for imported sets that do
-    // not contain an explicit floor object; this prevents tables and rooftops
-    // from becoming technically valid but nonsensical camera platforms.
-    floorTriangles: explicitFloorTriangles.length > 0
-      ? explicitFloorTriangles
-      : inferredFloorTriangles,
     diagonal: Math.max(sceneBounds.getSize(new THREE.Vector3()).length(), 1e-3),
   };
+  const floorFlags = new Uint8Array(indexCount / 3);
+  let explicitFloorSeen = false;
+  let vertexBase = 0;
+  let indexBase = 0;
+  let meshId = 0;
+  const triangleScratch = new Float64Array(9);
+  const normalScratch = new Float64Array(3);
+
+  await forEachProjectMesh(project, async (mesh, explicitFloor) => {
+    const position = mesh.geometry.getAttribute('position');
+    const sourceIndex = mesh.geometry.index;
+    const meshIndexCount = sourceIndex
+      ? Math.floor(sourceIndex.count / 3) * 3
+      : Math.floor(position.count / 3) * 3;
+    if (meshIndexCount === 0) return;
+    await copyPositionAttribute(scene.positions, vertexBase * 3, position);
+    scene.meshMatrices.set(mesh.matrixWorld.elements, meshId * 16);
+    for (let offset = 0; offset < meshIndexCount; offset += 1) {
+      scene.indices[indexBase + offset] = vertexBase + (sourceIndex ? sourceIndex.getX(offset) : offset);
+      if (offset > 0 && offset % COPY_CHUNK_VALUES === 0) await yieldToMainThread();
+    }
+    const triangleStart = indexBase / 3;
+    const meshTriangleCount = meshIndexCount / 3;
+    scene.triangleMeshIds.fill(meshId, triangleStart, triangleStart + meshTriangleCount);
+    for (let localTriangle = 0; localTriangle < meshTriangleCount; localTriangle += 1) {
+      const triangleIndex = triangleStart + localTriangle;
+      readWorldTriangle(scene, triangleIndex, triangleScratch);
+      const area = triangleAreaNormal(triangleScratch, normalScratch);
+      if (area > MIN_TRIANGLE_AREA && normalScratch[1] > 0.8) {
+        floorFlags[triangleIndex] = explicitFloor ? 2 : 1;
+        if (explicitFloor) explicitFloorSeen = true;
+      }
+      if (localTriangle > 0 && localTriangle % 65_536 === 0) await yieldToMainThread();
+    }
+    vertexBase += position.count;
+    indexBase += meshIndexCount;
+    meshId += 1;
+  }, onProgress, 0.15, 0.7);
+
+  const selectedFlag = explicitFloorSeen ? 2 : 1;
+  let floorCount = 0;
+  for (let triangleIndex = 0; triangleIndex < floorFlags.length; triangleIndex += 1) {
+    if (floorFlags[triangleIndex] === selectedFlag) floorCount += 1;
+  }
+  scene.floorTriangleIndices = new Uint32Array(floorCount);
+  scene.floorBounds = new Float32Array(floorCount * 4);
+  const boundsScratch = new Float32Array(6);
+  let floorOffset = 0;
+  for (let triangleIndex = 0; triangleIndex < floorFlags.length; triangleIndex += 1) {
+    if (floorFlags[triangleIndex] !== selectedFlag) continue;
+    scene.floorTriangleIndices[floorOffset] = triangleIndex;
+    readWorldTriangle(scene, triangleIndex, triangleScratch);
+    writeTriangleBounds(triangleScratch, boundsScratch, 0);
+    const target = floorOffset * 4;
+    scene.floorBounds[target] = boundsScratch[0];
+    scene.floorBounds[target + 1] = boundsScratch[3];
+    scene.floorBounds[target + 2] = boundsScratch[2];
+    scene.floorBounds[target + 3] = boundsScratch[5];
+    floorOffset += 1;
+    if (floorOffset % 65_536 === 0) await yieldToMainThread();
+  }
+  onProgress?.(1, 'Indexed geometry is ready for worker analysis.');
+  return scene;
 }
 
 function mulberry32(seed: number): () => number {
@@ -163,18 +213,23 @@ function lowerBound(values: Float64Array, target: number): number {
   return low;
 }
 
-/** Deterministic area-weighted Monte Carlo surface samples. */
+/** Deterministic area-weighted Monte Carlo samples from compact indexed geometry. */
 export function sampleMeshSurface(
-  triangles: CoverageTriangle[],
+  scene: CoverageSceneData,
   sampleCount: number,
   seed: number,
 ): SurfaceSample[] {
-  if (triangles.length === 0 || sampleCount <= 0) return [];
-  const cumulativeArea = new Float64Array(triangles.length);
+  const count = triangleCount(scene);
+  if (count === 0 || sampleCount <= 0) return [];
+  const cumulativeArea = new Float64Array(count);
+  const triangleScratch = new Float64Array(9);
+  const normalScratch = new Float64Array(3);
   let totalArea = 0;
-  for (let i = 0; i < triangles.length; i += 1) {
-    totalArea += triangles[i].area;
-    cumulativeArea[i] = totalArea;
+  for (let triangleIndex = 0; triangleIndex < count; triangleIndex += 1) {
+    readWorldTriangle(scene, triangleIndex, triangleScratch);
+    const area = triangleAreaNormal(triangleScratch, normalScratch);
+    totalArea += area > MIN_TRIANGLE_AREA ? area : 0;
+    cumulativeArea[triangleIndex] = totalArea;
   }
   if (!(totalArea > 0)) return [];
 
@@ -182,7 +237,8 @@ export function sampleMeshSurface(
   const samples: SurfaceSample[] = [];
   for (let index = 0; index < sampleCount; index += 1) {
     const triangleIndex = lowerBound(cumulativeArea, rng() * totalArea);
-    const triangle = triangles[triangleIndex];
+    readWorldTriangle(scene, triangleIndex, triangleScratch);
+    triangleAreaNormal(triangleScratch, normalScratch);
     const r1 = rng();
     const r2 = rng();
     const sqrtR1 = Math.sqrt(r1);
@@ -191,13 +247,13 @@ export function sampleMeshSurface(
     const b2 = sqrtR1 * r2;
     samples.push({
       position: [
-        triangle.a[0] * b0 + triangle.b[0] * b1 + triangle.c[0] * b2,
-        triangle.a[1] * b0 + triangle.b[1] * b1 + triangle.c[1] * b2,
-        triangle.a[2] * b0 + triangle.b[2] * b1 + triangle.c[2] * b2,
+        triangleScratch[0] * b0 + triangleScratch[3] * b1 + triangleScratch[6] * b2,
+        triangleScratch[1] * b0 + triangleScratch[4] * b1 + triangleScratch[7] * b2,
+        triangleScratch[2] * b0 + triangleScratch[5] * b1 + triangleScratch[8] * b2,
       ],
-      geometricNormal: [...triangle.geometricNormal],
-      meshId: triangle.meshId,
-      triangleId: triangle.triangleId,
+      geometricNormal: [normalScratch[0], normalScratch[1], normalScratch[2]],
+      meshId: scene.triangleMeshIds[triangleIndex],
+      triangleId: triangleIndex,
       triangleIndex,
     });
   }

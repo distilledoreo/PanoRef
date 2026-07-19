@@ -114,6 +114,18 @@ describe('ui revamp fidelity surfaces', () => {
     expect(help).toContain('double-tap W');
   });
 
+  it('keeps optimized origins as a capture plan without relocating existing panorama pixels', () => {
+    const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
+    const projectedPanel = readFileSync(new URL('../src/components/common/ProjectedStylePanel.tsx', import.meta.url), 'utf8');
+    const coveragePanel = readFileSync(new URL('../src/components/common/CoverageOptimizerPanel.tsx', import.meta.url), 'utf8');
+    expect(reference).not.toContain('onApplyPanoramaOrigins');
+    expect(projectedPanel).not.toContain('onApplyPanoramaOrigins');
+    expect(coveragePanel).not.toContain('data-coverage-apply-pair');
+    expect(coveragePanel).toContain('data-coverage-apply-capture-a');
+    expect(coveragePanel).toContain('data-coverage-apply-capture');
+    expect(coveragePanel).toContain('Existing panorama origins are never rewritten');
+  });
+
   it('pauses automatic shot frame preview renders while fly camera is active', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     expect(shots).not.toContain('flyCameraRevision');

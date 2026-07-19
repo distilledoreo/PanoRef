@@ -20,31 +20,36 @@ function originLabel(origin: Vec3): string {
 export function CoverageOptimizerPanel({
   project,
   primaryPano,
-  secondaryPano,
   onSetCaptureOrigin,
-  onApplyPanoramaOrigins,
 }: {
   project: LocationProject;
   primaryPano?: PanoReference;
-  secondaryPano?: PanoReference;
   onSetCaptureOrigin?: (origin: Vec3) => void;
-  onApplyPanoramaOrigins?: (originA: Vec3, originB: Vec3) => void;
 }) {
   const [mode, setMode] = useState<CoverageOptimizationMode>('fixed-first');
   const [status, setStatus] = useState<'idle' | 'running' | 'complete' | 'failed'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [result, setResult] = useState<CoverageOptimizationResult>();
   const taskRef = useRef<CoverageOptimizationTask>();
+  const analysisIdRef = useRef(0);
 
-  useEffect(() => () => taskRef.current?.cancel(), []);
-
-  const analyze = () => {
+  useEffect(() => () => {
+    analysisIdRef.current += 1;
     taskRef.current?.cancel();
+  }, []);
+
+  const analyze = async () => {
+    taskRef.current?.cancel();
+    const analysisId = analysisIdRef.current + 1;
+    analysisIdRef.current = analysisId;
     setResult(undefined);
     setStatus('running');
-    setStatusMessage('Sampling rendered surfaces…');
+    setStatusMessage('Preparing indexed scene geometry…');
     try {
-      const scene = extractCoverageScene(project);
+      const scene = await extractCoverageScene(project, (_progress, message) => {
+        if (analysisIdRef.current === analysisId) setStatusMessage(message);
+      });
+      if (analysisIdRef.current !== analysisId) return;
       const task = runCoverageOptimization(
         {
           mode,
@@ -62,13 +67,13 @@ export function CoverageOptimizerPanel({
       );
       taskRef.current = task;
       void task.promise.then((nextResult) => {
-        if (taskRef.current !== task) return;
+        if (taskRef.current !== task || analysisIdRef.current !== analysisId) return;
         taskRef.current = undefined;
         setResult(nextResult);
         setStatus('complete');
         setStatusMessage('');
       }).catch((error) => {
-        if (taskRef.current !== task) return;
+        if (taskRef.current !== task || analysisIdRef.current !== analysisId) return;
         taskRef.current = undefined;
         if (error instanceof DOMException && error.name === 'AbortError') return;
         setStatus('failed');
@@ -112,7 +117,7 @@ export function CoverageOptimizerPanel({
 
         <button
           type="button"
-          onClick={analyze}
+          onClick={() => void analyze()}
           disabled={status === 'running' || project.scene.objects.every((object) => !object.visible)}
           className="w-full rounded-lg bg-[var(--accent)] px-3 py-2 font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-45"
           data-coverage-analyze
@@ -163,6 +168,16 @@ export function CoverageOptimizerPanel({
             </div>
 
             <div className="flex flex-col gap-2">
+              {onSetCaptureOrigin && mode === 'joint-pair' && (
+                <button
+                  type="button"
+                  onClick={() => onSetCaptureOrigin(result.originA)}
+                  className="rounded-lg border border-subtle px-3 py-2 font-semibold text-primary transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                  data-coverage-apply-capture-a
+                >
+                  Move capture origin to A
+                </button>
+              )}
               {onSetCaptureOrigin && (
                 <button
                   type="button"
@@ -170,26 +185,15 @@ export function CoverageOptimizerPanel({
                   className="rounded-lg border border-subtle px-3 py-2 font-semibold text-primary transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
                   data-coverage-apply-capture
                 >
-                  Move next capture origin to B
-                </button>
-              )}
-              {secondaryPano && onApplyPanoramaOrigins && (
-                <button
-                  type="button"
-                  onClick={() => onApplyPanoramaOrigins(result.originA, result.originB)}
-                  className="rounded-lg border border-subtle px-3 py-2 font-semibold text-primary transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                  data-coverage-apply-pair
-                >
-                  Apply to selected panorama pair
+                  Move capture origin to B
                 </button>
               )}
             </div>
 
-            {!secondaryPano && (
-              <p className="text-[11px] leading-snug text-muted">
-                Select a secondary panorama above to apply both optimized origins. You can still move the next graybox capture to B now.
-              </p>
-            )}
+            <p className="text-[11px] leading-snug text-muted" data-coverage-capture-plan>
+              Capture plan only: render and style a new panorama at each suggested origin.
+              Existing panorama origins are never rewritten because their pixels remain tied to where they were captured.
+            </p>
           </div>
         )}
       </div>

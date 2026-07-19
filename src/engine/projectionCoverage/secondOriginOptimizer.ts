@@ -12,9 +12,14 @@ const COVERAGE_TIE_TOLERANCE = 0.0025;
 export function rankSecondOrigins(
   first: OriginEvaluation,
   candidates: OriginEvaluation[],
+  minimumOriginSeparation = 0,
 ): RankedSecondOrigin[] {
   return candidates
-    .filter((candidate) => candidate !== first)
+    .filter((candidate) => candidate !== first && Math.hypot(
+      candidate.position[0] - first.position[0],
+      candidate.position[1] - first.position[1],
+      candidate.position[2] - first.position[2],
+    ) >= minimumOriginSeparation)
     .map((evaluation) => {
       const metrics = compareOriginPair(first, evaluation);
       return {
@@ -37,9 +42,9 @@ export function rankSecondOrigins(
 export function optimizeSecondOrigin(
   first: OriginEvaluation,
   candidates: OriginEvaluation[],
+  minimumOriginSeparation = 0,
 ): RankedSecondOrigin {
-  const best = rankSecondOrigins(first, candidates)[0];
+  const best = rankSecondOrigins(first, candidates, minimumOriginSeparation)[0];
   if (!best) throw new Error('No valid secondary origin candidates.');
   return best;
 }
-

@@ -183,7 +183,7 @@ describe('synthetic directional projection sampling', () => {
     expect(materials).not.toMatch(/#include\s*<lights_physical_fragment>/);
     expect(materials).toContain('#include <aomap_fragment>');
     expect(materials).toContain('reflectedLight.indirectDiffuse = diffuseColor.rgb');
-    expect(materials).toContain('projected-style-v4');
+    expect(materials).toContain('projected-style-v5');
   });
 
   it('sampleSyntheticDirectionalPano covers seam UVs without NaN', () => {

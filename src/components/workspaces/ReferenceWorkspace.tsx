@@ -462,10 +462,6 @@ export function ReferenceWorkspace() {
               project={project}
               onChange={(projectedStyle) => updateProjectSettings({ projectedStyle })}
               onSetCaptureOrigin={setPanoOrigin}
-              onApplyPanoramaOrigins={(primaryPanoId, secondaryPanoId, originA, originB) => {
-                updatePanoReference(primaryPanoId, { origin: originA });
-                updatePanoReference(secondaryPanoId, { origin: originB });
-              }}
             />
           </div>
 

@@ -495,8 +495,8 @@ test.describe('workflow path smoke', () => {
     expect(failureDetail, failureDetail.join('\n')).toHaveLength(0);
   });
 
-  test('coverage optimizer completes without overflowing the Reference drawer', async ({ page }) => {
-    test.setTimeout(180_000);
+  test('coverage optimizer completes without overflowing the Reference drawer', async ({ page }, testInfo) => {
+    test.setTimeout(240_000);
     const pageErrors: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
 
@@ -553,6 +553,26 @@ test.describe('workflow path smoke', () => {
     // The default set has an authored ground floor; props/rooftops must not
     // become candidate platforms.
     expect(originB?.[1]).toBeLessThan(2.5);
+    await expect(page.locator('[data-coverage-capture-plan]')).toContainText('Existing panorama origins are never rewritten');
+    await expect(page.locator('[data-coverage-apply-pair]')).toHaveCount(0);
+
+    if (testInfo.project.name === 'desktop-chromium') {
+      await page.locator('[data-coverage-mode]').selectOption('joint-pair');
+      await page.locator('[data-coverage-analyze]').click();
+      await expect(result).toBeVisible({ timeout: 120_000 });
+      const originA = (await result.getAttribute('data-coverage-origin-a'))
+        ?.split(',').map((value) => Number(value));
+      const jointOriginB = (await result.getAttribute('data-coverage-origin-b'))
+        ?.split(',').map((value) => Number(value));
+      expect(originA?.every(Number.isFinite)).toBe(true);
+      expect(jointOriginB?.every(Number.isFinite)).toBe(true);
+      expect(Math.hypot(
+        (originA?.[0] ?? 0) - (jointOriginB?.[0] ?? 0),
+        (originA?.[1] ?? 0) - (jointOriginB?.[1] ?? 0),
+        (originA?.[2] ?? 0) - (jointOriginB?.[2] ?? 0),
+      )).toBeGreaterThan(1);
+      await expect(page.locator('[data-coverage-apply-capture-a]')).toBeVisible();
+    }
     expect(pageErrors, pageErrors.join('\n')).toHaveLength(0);
   });
 });

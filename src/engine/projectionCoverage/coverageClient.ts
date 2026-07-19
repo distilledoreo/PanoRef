@@ -42,7 +42,15 @@ export function runCoverageOptimization(
       worker.terminate();
       reject(new Error(event.message || 'Coverage analysis worker failed.'));
     };
-    worker.postMessage({ id, request });
+    const { scene } = request;
+    worker.postMessage({ id, request }, [
+      scene.positions.buffer,
+      scene.indices.buffer,
+      scene.triangleMeshIds.buffer,
+      scene.meshMatrices.buffer,
+      scene.floorTriangleIndices.buffer,
+      scene.floorBounds.buffer,
+    ]);
   });
 
   return {
@@ -55,4 +63,3 @@ export function runCoverageOptimization(
     },
   };
 }
-

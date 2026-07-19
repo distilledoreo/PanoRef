@@ -185,6 +185,8 @@ export interface ProjectedSceneOptions {
   texture: THREE.Texture;
   origin: Vec3;
   rotation: Euler;
+  panoramaWidth?: number;
+  panoramaHeight?: number;
   settings: ProjectedStyleSettings;
   /** Dispose projected materials with the scene (export / one-shot). */
   disposableMaterials?: boolean;
@@ -197,6 +199,8 @@ export interface ProjectedSceneOptions {
   secondaryTexture?: THREE.Texture;
   secondaryOrigin?: Vec3;
   secondaryRotation?: Euler;
+  secondaryPanoramaWidth?: number;
+  secondaryPanoramaHeight?: number;
 
   secondaryOcclusionTexture?: THREE.CubeTexture;
   secondaryOcclusionNearMeters?: number;
@@ -362,6 +366,8 @@ function applyProjectedStyleToObject(
     texture: projected.texture,
     origin: projected.origin,
     rotation: projected.rotation,
+    panoramaWidth: projected.panoramaWidth,
+    panoramaHeight: projected.panoramaHeight,
     settings: projected.settings,
     fallbackColor: projected.settings.fallbackMode === 'neutral' ? 0xb0b6b2 : fallbackColor,
     disposable: projected.disposableMaterials ?? true,
@@ -372,6 +378,8 @@ function applyProjectedStyleToObject(
     secondaryTexture: projected.secondaryTexture,
     secondaryOrigin: projected.secondaryOrigin,
     secondaryRotation: projected.secondaryRotation,
+    secondaryPanoramaWidth: projected.secondaryPanoramaWidth,
+    secondaryPanoramaHeight: projected.secondaryPanoramaHeight,
     secondaryOcclusionTexture: projected.secondaryOcclusionTexture,
     secondaryOcclusionNearMeters: projected.secondaryOcclusionNearMeters,
     secondaryOcclusionFarMeters: projected.secondaryOcclusionFarMeters,
