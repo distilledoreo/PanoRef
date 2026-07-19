@@ -21,7 +21,20 @@ import {
   acquireProjectedStyleTexture,
   releaseProjectedStyleTexture,
 } from './projectedStyleMaterials';
-import { buildScene, disposeScene, type ProjectedSceneOptions, type SceneVisualTheme } from './sceneObjects';
+import {
+  buildScene,
+  disposeScene,
+  type ProjectedSceneOptions,
+  type SceneVisualTheme,
+} from './sceneObjects';
+import {
+  computeProjectorOcclusionKey,
+  DEFAULT_OCCLUSION_FACE_SIZE,
+  DEFAULT_OCCLUSION_NEAR,
+  generateProjectorOcclusionMap,
+  type ProjectorOcclusionMap,
+  type ProjectorOcclusionSet,
+} from './projectorOcclusion';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 
 /** Load primary (+ optional secondary) textures for projected export/render. */
@@ -254,18 +267,11 @@ export async function renderShotCameraMoveMp4(
   }
 
   const appearance = options.appearance ?? 'clay';
-  let projectedLoad: Awaited<ReturnType<typeof loadProjectedSceneOptions>>;
 
-  if (appearance === 'projected') {
-    if (!canUseProjectedAppearance(project)) {
-      throw new Error(
-        'Projected camera-move MP4 requires an importable styled panorama with a valid image asset.',
-      );
-    }
-    projectedLoad = await loadProjectedSceneOptions(project);
-    if (!projectedLoad) {
-      throw new Error('Projected camera-move MP4 could not resolve the projector panorama asset.');
-    }
+  if (appearance === 'projected' && !canUseProjectedAppearance(project)) {
+    throw new Error(
+      'Projected camera-move MP4 requires an importable styled panorama with a valid image asset.',
+    );
   }
 
   const frameRate = options.frameRate ?? 30;
@@ -274,11 +280,15 @@ export async function renderShotCameraMoveMp4(
   const height = shot.exportSettings.height;
   await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
+  let projectedResources: ProjectedSceneResources | undefined;
+  if (appearance === 'projected') {
+    projectedResources = await loadProjectedSceneResources(renderer, project);
+  }
   const scene = buildScene(project, {
     showHelpers: false,
     hiddenObjectTypes: ['sun_marker'],
-    appearance: appearance === 'projected' && projectedLoad ? 'projected' : 'clay',
-    projected: appearance === 'projected' && projectedLoad ? projectedLoad.options : undefined,
+    appearance: projectedResources ? 'projected' : 'clay',
+    projected: projectedResources?.options,
   });
   const camera = new THREE.PerspectiveCamera(
     shot.camera.fovDegrees,
@@ -291,10 +301,7 @@ export async function renderShotCameraMoveMp4(
   if (!captureStream) {
     disposeScene(scene);
     disposeRenderer(renderer);
-    if (projectedLoad) {
-      releaseProjectedStyleTexture(projectedLoad.primaryUrl);
-      releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
-    }
+    projectedResources?.dispose();
     throw new Error('Canvas video capture is not supported in this browser.');
   }
 
@@ -391,10 +398,7 @@ export async function renderShotCameraMoveMp4(
     stream.getTracks().forEach((track) => track.stop());
     disposeScene(scene);
     disposeRenderer(renderer);
-    if (projectedLoad) {
-      releaseProjectedStyleTexture(projectedLoad.primaryUrl);
-      releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
-    }
+    projectedResources?.dispose();
   }
 
   const blob = new Blob(chunks, { type: mimeType });
@@ -488,6 +492,116 @@ export async function renderViewportClay(
   return { dataUrl, width, height };
 }
 
+export interface ProjectedSceneResources {
+  options: ProjectedSceneOptions;
+  dispose(): void;
+}
+
+/**
+ * Resolve primary (and optional secondary) projector panoramas, acquire their
+ * color textures, and generate live geometry-occlusion cubemaps. Returns
+ * complete scene options plus a single cleanup function releasing textures and
+ * disposing cubemap render targets.
+ *
+ * Occlusion generation failures are non-fatal: the helper falls back to plain
+ * (legacy) projection so an export never crashes because a depth map failed.
+ */
+export async function loadProjectedSceneResources(
+  renderer: THREE.WebGLRenderer,
+  project: LocationProject,
+): Promise<ProjectedSceneResources | undefined> {
+  if (!canUseProjectedAppearance(project)) return undefined;
+  const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const pano = resolveProjectedStylePano(project);
+  const imageUrl = getProjectedStyleAssetUri(project, pano);
+  if (!pano || !imageUrl) return undefined;
+
+  await ensureHumanMannequinModel();
+  const texture = await acquireProjectedStyleTexture(imageUrl);
+  if (!texture) return undefined;
+
+  // Optional secondary projector.
+  let secondaryPano = undefined as ReturnType<typeof resolveProjectedStylePano> | undefined;
+  let secondaryTexture: THREE.Texture | null = null;
+  let secondaryUrl: string | undefined;
+  if (settings.secondaryPanoId) {
+    const found = project.panoRefs.find((p) => p.id === settings.secondaryPanoId);
+    if (found && found.id !== pano.id) {
+      secondaryPano = found;
+      secondaryUrl = getProjectedStyleAssetUri(project, found);
+      if (secondaryUrl) secondaryTexture = await acquireProjectedStyleTexture(secondaryUrl);
+    }
+  }
+
+  const occlusionSet: ProjectorOcclusionSet = { dispose() { /* populated below */ } };
+  let primaryOcclusion: ProjectorOcclusionMap | undefined;
+  let secondaryOcclusion: ProjectorOcclusionMap | undefined;
+
+  if (settings.occlusionEnabled && renderer) {
+    try {
+      primaryOcclusion = generateProjectorOcclusionMap(renderer, project, pano.origin, {
+        faceSize: DEFAULT_OCCLUSION_FACE_SIZE,
+        nearMeters: DEFAULT_OCCLUSION_NEAR,
+      });
+      // Reuse a single map when both origins are identical.
+      const sameOrigin = secondaryPcclusionSameOrigin(pano.origin, secondaryPano?.origin);
+      if (secondaryPano && secondaryTexture && !sameOrigin) {
+        secondaryOcclusion = generateProjectorOcclusionMap(renderer, project, secondaryPano.origin, {
+          faceSize: DEFAULT_OCCLUSION_FACE_SIZE,
+          nearMeters: DEFAULT_OCCLUSION_NEAR,
+        });
+      } else if (secondaryPano && secondaryTexture && sameOrigin) {
+        secondaryOcclusion = primaryOcclusion;
+      }
+      occlusionSet.dispose = () => {
+        primaryOcclusion?.dispose();
+        if (secondaryOcclusion && secondaryOcclusion !== primaryOcclusion) secondaryOcclusion.dispose();
+      };
+    } catch (error) {
+      console.error('[projected-occlusion] generation failed; using legacy projection:', error);
+      primaryOcclusion = undefined;
+      secondaryOcclusion = undefined;
+      occlusionSet.dispose = () => {};
+    }
+  }
+
+  const options: ProjectedSceneOptions = {
+    texture,
+    origin: pano.origin,
+    rotation: pano.rotation,
+    settings,
+    disposableMaterials: true,
+    occlusionTexture: primaryOcclusion?.texture,
+    occlusionNearMeters: primaryOcclusion?.nearMeters,
+    occlusionFarMeters: primaryOcclusion?.farMeters,
+    occlusionFaceSize: primaryOcclusion?.faceSize,
+    secondaryTexture: secondaryTexture ?? undefined,
+    secondaryOrigin: secondaryPano?.origin,
+    secondaryRotation: secondaryPano?.rotation,
+    secondaryOcclusionTexture: secondaryOcclusion?.texture,
+    secondaryOcclusionNearMeters: secondaryOcclusion?.nearMeters,
+    secondaryOcclusionFarMeters: secondaryOcclusion?.farMeters,
+    secondaryOcclusionFaceSize: secondaryOcclusion?.faceSize,
+  };
+
+  return {
+    options,
+    dispose() {
+      occlusionSet.dispose();
+      releaseProjectedStyleTexture(imageUrl);
+      if (secondaryUrl) releaseProjectedStyleTexture(secondaryUrl);
+    },
+  };
+}
+
+function secondaryPcclusionSameOrigin(
+  a: Vec3 | undefined,
+  b: Vec3 | undefined,
+): boolean {
+  if (!a || !b) return false;
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
 /**
  * Render a camera frame with world-space projected style appearance.
  * Throws when projected export is requested but no valid projector is available.
@@ -498,23 +612,21 @@ export async function renderViewportProjected(
   width: number,
   height: number,
 ): Promise<ImageRenderResult> {
-  if (!canUseProjectedAppearance(project)) {
+  await ensureHumanMannequinModel();
+  const renderer = createRenderer(width, height);
+  const resources = await loadProjectedSceneResources(renderer, project);
+  if (!resources) {
+    disposeRenderer(renderer);
     throw new Error(
       'Projected viewport export requires an importable styled panorama with a valid image asset.',
     );
   }
-  const projectedLoad = await loadProjectedSceneOptions(project);
-  if (!projectedLoad) {
-    throw new Error('Projected viewport export could not resolve the projector panorama asset.');
-  }
 
-  await ensureHumanMannequinModel();
-  const renderer = createRenderer(width, height);
   const scene = buildScene(project, {
     showHelpers: false,
     hiddenObjectTypes: ['sun_marker'],
     appearance: 'projected',
-    projected: projectedLoad.options,
+    projected: resources.options,
   });
   const camera = new THREE.PerspectiveCamera(
     cameraData.fovDegrees,
@@ -535,8 +647,7 @@ export async function renderViewportProjected(
 
   disposeScene(scene);
   disposeRenderer(renderer);
-  releaseProjectedStyleTexture(projectedLoad.primaryUrl);
-  releaseProjectedStyleTexture(projectedLoad.secondaryUrl);
+  resources.dispose();
 
   return { dataUrl, width, height };
 }

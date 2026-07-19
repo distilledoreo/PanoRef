@@ -188,10 +188,20 @@ export interface ProjectedSceneOptions {
   settings: ProjectedStyleSettings;
   /** Dispose projected materials with the scene (export / one-shot). */
   disposableMaterials?: boolean;
-  /** Optional secondary projector for multi-origin blend. */
+
+  occlusionTexture?: THREE.CubeTexture;
+  occlusionNearMeters?: number;
+  occlusionFarMeters?: number;
+  occlusionFaceSize?: number;
+
   secondaryTexture?: THREE.Texture;
   secondaryOrigin?: Vec3;
   secondaryRotation?: Euler;
+
+  secondaryOcclusionTexture?: THREE.CubeTexture;
+  secondaryOcclusionNearMeters?: number;
+  secondaryOcclusionFarMeters?: number;
+  secondaryOcclusionFaceSize?: number;
 }
 
 export function buildScene(
@@ -355,9 +365,17 @@ function applyProjectedStyleToObject(
     settings: projected.settings,
     fallbackColor: projected.settings.fallbackMode === 'neutral' ? 0xb0b6b2 : fallbackColor,
     disposable: projected.disposableMaterials ?? true,
+    occlusionTexture: projected.occlusionTexture,
+    occlusionNearMeters: projected.occlusionNearMeters,
+    occlusionFarMeters: projected.occlusionFarMeters,
+    occlusionFaceSize: projected.occlusionFaceSize,
     secondaryTexture: projected.secondaryTexture,
     secondaryOrigin: projected.secondaryOrigin,
     secondaryRotation: projected.secondaryRotation,
+    secondaryOcclusionTexture: projected.secondaryOcclusionTexture,
+    secondaryOcclusionNearMeters: projected.secondaryOcclusionNearMeters,
+    secondaryOcclusionFarMeters: projected.secondaryOcclusionFarMeters,
+    secondaryOcclusionFaceSize: projected.secondaryOcclusionFaceSize,
   });
   // Keep a tiny emissive edge so selection remains readable under projection.
   if (root.userData?.sceneObjectId && projected.disposableMaterials === false) {

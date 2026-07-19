@@ -241,3 +241,47 @@ None confirmed after `misc-bugfixes`. The main critical-class issues (graybox re
 | Tests at audit time? | **Green (156 + tsc).** |
 
 **Do not treat the revamp as feature-stripped.** Engines and package paths survived. **`misc-bugfixes` is a necessary follow-up** for I/O and graybox reliability. Remaining blockers are **session-reset completeness** and a handful of **discoverability regressions** (alignment controls, rename, warning text, build shortcuts). Fix P0, re-run the suite, then merge is reasonable.
+
+---
+
+## Projected 360° texture occlusion (added after audit)
+
+Each styled pano now projects like a real point-light 360° projector. A per-projector
+**radial-depth occlusion cubemap** is generated at runtime from the graybox geometry and
+used to hide texture on surfaces the projector can't physically reach (rear faces,
+occluded interiors). Where the primary projector is blocked, a secondary styled pano can
+fill; otherwise a neutral clay/neutral fallback shows.
+
+### Scope guarantees
+- **Viewport and all projected export paths share one resource loader** (`loadProjectedSceneResources`
+  in `src/engine/renderers.ts`), so occlusion looks identical in preview, still export,
+  and camera-move MP4.
+- **No GPU resources are persisted to project JSON.** The occlusion cubemap and packed
+  depth textures are built in-memory and disposed on regeneration/unmount. Settings schema
+  carries only scalars (`occlusionEnabled`, `occlusionBiasMeters`, `occlusionSoftness`,
+  `occlusionDebugMode`, `secondaryPanoId`, `blendMode`); `normalizeProjectedStyleSettings`
+  fills defaults and clamps.
+- **Occlusion key** (`computeProjectorOcclusionKey`) is a geometry-only FNV-1a hash
+  (visible objects, transforms, dimensions, model ids, origins) so depth maps are
+  regenerated only when geometry actually moves. Camera, selection, and exposure changes
+  are deliberately ignored.
+- **Legacy fallback**: if cubemap generation fails, status reports `Unavailable` and the
+  shader falls back to the pre-occlusion projection; a fragment with no recorded hit or a
+  missing map is treated as visible.
+
+### Test coverage
+| Test file | What it proves |
+|-----------|----------------|
+| `tests/projectorOcclusion.test.ts` | Depth packing round-trips, blue hit-flag semantics, front/rear/seam visibility, dual-origin fill + both-occluded fallback, occlusion key stability/exclusion, settings normalization (no GPU resources serialized) |
+| `tests/projectedStyleMath.test.ts` | Pack/unpack/decode math + blend-weight gating |
+| `tests/projectedStyleCompile.test.ts` | Real WebGL compile of every variant: single/dual, occlusion on/off, primary/secondary-only occlusion, coverage debug |
+| `tests/uiFidelity.test.ts` | Viewport stays free of build-mode globals; occlusion status flows via an `onOcclusionStatusChange` callback, not a direct store import |
+| `scripts/goal-workflow-smoke.mjs` | End-to-end: opens Projected Style panel, toggles Geometry occlusion, asserts the engine reaches `Ready` or `Unavailable` |
+
+**Automated checks (at feature completion):**
+
+| Command | Result |
+|---------|--------|
+| `npm test` | 303/303 passed |
+| `npm run lint` (`tsc --noEmit`) | Clean |
+

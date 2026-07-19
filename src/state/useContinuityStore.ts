@@ -179,6 +179,9 @@ interface ContinuityStore {
   alignmentIntroRequest: number;
   alignmentRetryModalRequest: number;
   seenAlignmentIntroForPanoId?: string;
+  /** Live projected-style occlusion status reported by the viewport. */
+  projectedOcclusionStatus: 'disabled' | 'generating' | 'ready' | 'failed';
+  setProjectedOcclusionStatus: (status: 'disabled' | 'generating' | 'ready' | 'failed') => void;
   dismissWorkflowAdvance: (promptKey: string) => void;
   markObjectiveSeen: (workspace: Workspace) => void;
   requestObjectiveModal: () => void;
@@ -222,6 +225,9 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   alignmentIntroRequest: 0,
   alignmentRetryModalRequest: 0,
   seenAlignmentIntroForPanoId: undefined,
+
+  projectedOcclusionStatus: 'disabled',
+  setProjectedOcclusionStatus: (status) => set({ projectedOcclusionStatus: status }),
 
   beginBuildHistoryBatch: () => set((state) => {
     const nextDepth = state.buildHistoryBatchDepth + 1;

@@ -6,13 +6,8 @@ import {
   projectedStyleStatusLabel,
   resolveProjectedStylePano,
 } from '../../engine/projectedStyle';
-import {
-  PROJECTOR_BLEND_MODE_LABELS,
-  type ProjectorBlendMode,
-  canUseDualProjectorBlend,
-  resolveProjectors,
-} from '../../engine/multiOriginProjection';
-import { Field, Select, TextInput } from './Field';
+import { useContinuityStore } from '../../state/useContinuityStore';
+import { Field, Select, TextInput, Toggle } from './Field';
 
 const BLEND_OPTIONS: ProjectorBlendMode[] = [
   'primary_only',
@@ -28,6 +23,7 @@ export function ProjectedStylePanel({
   project: LocationProject;
   onChange: (settings: ProjectedStyleSettings) => void;
 }) {
+  const occlusionStatus = useContinuityStore((state) => state.projectedOcclusionStatus);
   const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
   const eligible = listEligibleProjectedStylePanos(project);
   const allPanos = project.panoRefs;
@@ -41,7 +37,12 @@ export function ProjectedStylePanel({
     onChange(normalizeProjectedStyleSettings({ ...settings, ...partial }));
   };
 
-  const secondaryCandidates = allPanos.filter((pano) => pano.id !== (settings.panoId ?? active?.id));
+  const occlusionStatusLabel = {
+    disabled: 'Disabled',
+    generating: 'Generating…',
+    ready: 'Ready',
+    failed: 'Unavailable — using legacy projection',
+  }[occlusionStatus];
 
   return (
     <div className="space-y-3" data-projected-style-panel>
@@ -154,6 +155,114 @@ export function ProjectedStylePanel({
           Import and align a styled panorama first for best results. Graybox can be selected
           explicitly if needed.
         </p>
+      )}
+
+      <Field label="Secondary panorama">
+        <Select
+          value={settings.secondaryPanoId ?? ''}
+          onChange={(event) => {
+            const value = event.target.value;
+            update({ secondaryPanoId: value || undefined });
+          }}
+          disabled={allPanos.length === 0}
+        >
+          <option value="">None</option>
+          {allPanos
+            .filter((pano) => pano.id !== (settings.panoId ?? active?.id))
+            .map((pano) => (
+              <option key={pano.id} value={pano.id}>
+                {pano.name}
+                {pano.type === 'graybox_render' ? ' (graybox)' : ''}
+              </option>
+            ))}
+        </Select>
+      </Field>
+
+      {settings.secondaryPanoId && (
+        <Field label="Blend mode">
+          <Select
+            value={settings.blendMode ?? 'both'}
+            onChange={(event) => update({
+              blendMode: event.target.value === 'primary'
+                ? 'primary'
+                : event.target.value === 'secondary' ? 'secondary' : 'both',
+            })}
+          >
+            <option value="both">Both (nearest fills)</option>
+            <option value="primary">Primary only</option>
+            <option value="secondary">Secondary only</option>
+          </Select>
+        </Field>
+      )}
+
+      <Field
+        label="Geometry occlusion"
+        hint="Behaves like a real 360° projector. Surfaces hidden behind other geometry do not receive this panorama."
+      >
+        <Toggle
+          checked={settings.occlusionEnabled ?? true}
+          onChange={(value) => update({ occlusionEnabled: value })}
+        />
+      </Field>
+
+      {settings.occlusionEnabled && (
+        <div className="rounded-lg border border-subtle bg-surface-base px-3 py-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-primary">Occlusion status</span>
+            <span className={
+              occlusionStatus === 'ready' ? 'text-green-700 dark:text-green-300'
+                : occlusionStatus === 'failed' ? 'text-amber-700 dark:text-amber-300'
+                  : 'text-secondary'
+            }>{occlusionStatusLabel}</span>
+          </div>
+
+          <div className="mt-2">
+            <Field label="Coverage preview">
+              <Toggle
+                checked={settings.occlusionDebugMode === 'coverage'}
+                onChange={(value) => update({ occlusionDebugMode: value ? 'coverage' : 'off' })}
+              />
+            </Field>
+            <p className="mt-1 text-[11px] leading-snug text-secondary">
+              Cyan: visible from primary only · Magenta: secondary only · White: both · Red: neither · Gray: unavailable.
+            </p>
+          </div>
+
+          <details className="mt-2">
+            <summary className="cursor-pointer select-none text-primary">Precision</summary>
+            <div className="mt-2 space-y-2">
+              <Field label={`Occlusion bias (${settings.occlusionBiasMeters?.toFixed(3)} m)`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={0.5}
+                  step={0.005}
+                  value={settings.occlusionBiasMeters ?? 0.04}
+                  onChange={(event) => update({ occlusionBiasMeters: Number(event.target.value) })}
+                  className="w-full accent-[var(--accent)]"
+                />
+              </Field>
+              <Field label={`Edge softness (${settings.occlusionSoftness?.toFixed(2)})`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={settings.occlusionSoftness ?? 1}
+                  onChange={(event) => update({ occlusionSoftness: Number(event.target.value) })}
+                  className="w-full accent-[var(--accent)]"
+                />
+              </Field>
+              <button
+                type="button"
+                className="text-[11px] text-accent underline"
+                onClick={() => update({ occlusionBiasMeters: 0.04, occlusionSoftness: 1 })}
+              >
+                Reset precision
+              </button>
+            </div>
+          </details>
+        </div>
       )}
 
       <Field label={`Opacity (${Math.round(settings.opacity * 100)}%)`}>

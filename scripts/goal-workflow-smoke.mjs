@@ -92,6 +92,27 @@ try {
     'shots workspace',
   );
 
+  // Projected-style occlusion: open settings and confirm the occlusion
+  // engine reaches a terminal state (Ready or Unavailable/legacy fallback).
+  await clickOptionalButton(client, 'Camera settings', 4000);
+  await waitFor(
+    client,
+    `document.querySelector('[data-projected-style-panel]') !== null`,
+    'projected-style panel',
+    8000,
+  );
+  await clickOptionalButton(client, 'Geometry occlusion', 2000);
+  await waitFor(
+    client,
+    `document.body.textContent.includes('Occlusion status')
+      && (
+        document.body.textContent.includes('Ready')
+        || document.body.textContent.includes('Unavailable')
+      )`,
+    'occlusion engine terminal state',
+    20000,
+  );
+
   // Capture a still if shutter is available.
   if (await isButtonEnabled(client, 'Capture')) {
     await clickButton(client, 'Capture');

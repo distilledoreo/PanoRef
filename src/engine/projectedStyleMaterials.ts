@@ -173,15 +173,27 @@ export interface ProjectedMaterialParams {
   fallbackColor: THREE.ColorRepresentation;
   /** When true, materials mark themselves disposable (export path). */
   disposable?: boolean;
-  /** Optional secondary projector for multi-origin blend. */
+
+  occlusionTexture?: THREE.CubeTexture;
+  occlusionNearMeters?: number;
+  occlusionFarMeters?: number;
+  occlusionFaceSize?: number;
+
   secondaryTexture?: THREE.Texture;
   secondaryOrigin?: Vec3;
   secondaryRotation?: Euler;
+
+  secondaryOcclusionTexture?: THREE.CubeTexture;
+  secondaryOcclusionNearMeters?: number;
+  secondaryOcclusionFarMeters?: number;
+  secondaryOcclusionFaceSize?: number;
 }
 
 /**
- * World-space equirect projection material.
- * Dual-projector blend uses distance-based weights (not true occlusion).
+ * World-space equirect projection material with optional geometry occlusion.
+ * A panorama behaves like a real 360° projector: the first surface along a ray
+ * receives the panorama, hidden surfaces fall back or may be filled by another
+ * projector.
  */
 export function createProjectedStyleMaterial(params: ProjectedMaterialParams): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({
@@ -202,14 +214,15 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
   const exposure = params.settings.exposure;
   const lightingContribution = params.settings.lightingContribution;
   const useNeutralFallback = params.settings.fallbackMode === 'neutral';
-  const blendMode = params.settings.blendMode ?? 'primary_only';
-  const blendModeId = blendMode === 'secondary_only'
-    ? 1
-    : blendMode === 'primary_dominant'
-      ? 2
-      : blendMode === 'secondary_dominant'
-        ? 3
-        : 0;
+  const useOcclusion = Boolean(params.occlusionTexture);
+  const useSecondary = Boolean(params.secondaryTexture);
+  const secondaryOrigin = params.secondaryOrigin ? new THREE.Vector3(...params.secondaryOrigin) : new THREE.Vector3(0, 0, 0);
+  const secondaryYaw = degreesToRadians(params.secondaryRotation?.[1] ?? 0);
+  const useSecondaryOcclusion = useSecondary && Boolean(params.secondaryOcclusionTexture);
+  const occlusionBias = params.settings.occlusionBiasMeters ?? 0.04;
+  const occlusionSoftness = params.settings.occlusionSoftness ?? 1;
+  const debugCoverage = params.settings.occlusionDebugMode === 'coverage';
+  const blendMode = params.settings.blendMode === 'primary' ? 0 : params.settings.blendMode === 'secondary' ? 2 : 1;
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.projectedPanoMap = { value: params.texture };
@@ -225,6 +238,27 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
     shader.uniforms.projectedLighting = { value: lightingContribution };
     shader.uniforms.projectedFallbackColor = { value: fallback };
     shader.uniforms.projectedUseNeutralFallback = { value: useNeutralFallback ? 1 : 0 };
+
+    shader.uniforms.projectedUseOcclusion = { value: useOcclusion ? 1 : 0 };
+    shader.uniforms.projectedOcclusionCube = { value: params.occlusionTexture ?? null };
+    shader.uniforms.projectedOcclusionNear = { value: params.occlusionNearMeters ?? 0.05 };
+    shader.uniforms.projectedOcclusionFar = { value: params.occlusionFarMeters ?? 100 };
+    shader.uniforms.projectedOcclusionFaceSize = { value: params.occlusionFaceSize ?? 512 };
+    shader.uniforms.projectedOcclusionBias = { value: occlusionBias };
+    shader.uniforms.projectedOcclusionSoftness = { value: occlusionSoftness };
+
+    shader.uniforms.projectedUseSecondary = { value: useSecondary ? 1 : 0 };
+    shader.uniforms.projectedSecondaryPanoMap = { value: params.secondaryTexture ?? null };
+    shader.uniforms.projectedSecondaryOrigin = { value: secondaryOrigin };
+    shader.uniforms.projectedSecondaryYaw = { value: secondaryYaw };
+    shader.uniforms.projectedUseSecondaryOcclusion = { value: useSecondaryOcclusion ? 1 : 0 };
+    shader.uniforms.projectedSecondaryOcclusionCube = { value: params.secondaryOcclusionTexture ?? null };
+    shader.uniforms.projectedSecondaryOcclusionNear = { value: params.secondaryOcclusionNearMeters ?? 0.05 };
+    shader.uniforms.projectedSecondaryOcclusionFar = { value: params.secondaryOcclusionFarMeters ?? 100 };
+    shader.uniforms.projectedSecondaryOcclusionFaceSize = { value: params.secondaryOcclusionFaceSize ?? 512 };
+
+    shader.uniforms.projectedDebugCoverage = { value: debugCoverage ? 1 : 0 };
+    shader.uniforms.projectedBlendMode = { value: blendMode };
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -255,6 +289,24 @@ uniform float projectedExposure;
 uniform float projectedLighting;
 uniform vec3 projectedFallbackColor;
 uniform int projectedUseNeutralFallback;
+uniform int projectedUseOcclusion;
+uniform samplerCube projectedOcclusionCube;
+uniform float projectedOcclusionNear;
+uniform float projectedOcclusionFar;
+uniform float projectedOcclusionFaceSize;
+uniform float projectedOcclusionBias;
+uniform float projectedOcclusionSoftness;
+uniform int projectedUseSecondary;
+uniform sampler2D projectedSecondaryPanoMap;
+uniform vec3 projectedSecondaryOrigin;
+uniform float projectedSecondaryYaw;
+uniform int projectedUseSecondaryOcclusion;
+uniform samplerCube projectedSecondaryOcclusionCube;
+uniform float projectedSecondaryOcclusionNear;
+uniform float projectedSecondaryOcclusionFar;
+uniform float projectedSecondaryOcclusionFaceSize;
+uniform int projectedDebugCoverage;
+uniform int projectedBlendMode;
 varying vec3 vProjectedWorldPos;
 const float PROJECTED_PI = 3.141592653589793;
 const float PROJECTED_FALLOFF = 6.0;
@@ -263,22 +315,13 @@ ${PROJECTED_STYLE_GLSL.applyInversePanoYaw}
 
 ${PROJECTED_STYLE_GLSL.equirectUvFromDirection}
 
-float projectedConfidence(vec3 worldPos, vec3 origin) {
-  float dist = length(worldPos - origin);
-  return PROJECTED_FALLOFF / (PROJECTED_FALLOFF + dist);
-}
+${PROJECTED_STYLE_GLSL.occlusionDepthHelpers}
 
-vec3 sampleProjectedPano(sampler2D map, vec3 origin, float yaw, vec3 worldPos) {
-  vec3 offset = worldPos - origin;
-  float distSq = dot(offset, offset);
-  if (distSq < 1e-8) {
-    return projectedUseNeutralFallback == 1 ? projectedFallbackColor : vec3(-1.0);
-  }
-  vec3 direction = applyInversePanoYaw(normalize(offset), yaw);
-  vec2 panoUv = equirectUvFromDirection(direction);
-  panoUv.x = fract(panoUv.x);
-  panoUv.y = clamp(panoUv.y, 0.0, 1.0);
-  return texture2D(map, panoUv).rgb * projectedExposure;
+${PROJECTED_STYLE_GLSL.occlusionVisibility}
+
+float projectedConfidenceAt(vec3 worldPos, vec3 origin) {
+  float d = length(worldPos - origin);
+  return 1.0 / (1.0 + d * 0.05);
 }
 `,
       )
@@ -286,35 +329,130 @@ vec3 sampleProjectedPano(sampler2D map, vec3 origin, float yaw, vec3 worldPos) {
         '#include <color_fragment>',
         `#include <color_fragment>
 {
-  vec3 sampleA = sampleProjectedPano(projectedPanoMap, projectedPanoOrigin, projectedPanoYaw, vProjectedWorldPos);
-  vec3 sampleColor = sampleA;
-  if (sampleA.x < 0.0) {
-    sampleColor = projectedUseNeutralFallback == 1 ? projectedFallbackColor : diffuseColor.rgb;
-  } else if (projectedHasSecondary == 1 && projectedBlendMode != 0) {
-    vec3 sampleB = sampleProjectedPano(projectedPanoMapB, projectedPanoOriginB, projectedPanoYawB, vProjectedWorldPos);
-    if (sampleB.x >= 0.0) {
-      float confA = projectedConfidence(vProjectedWorldPos, projectedPanoOrigin);
-      float confB = projectedConfidence(vProjectedWorldPos, projectedPanoOriginB);
-      float wA = 1.0;
-      if (projectedBlendMode == 1) {
-        wA = 0.0;
-      } else if (projectedBlendMode == 2) {
-        float total = confA + confB;
-        wA = total <= 1e-8 ? 1.0 : (confA >= confB ? min(1.0, 0.55 + confA * 0.55) : confA / total);
-      } else if (projectedBlendMode == 3) {
-        float total = confA + confB;
-        wA = total <= 1e-8 ? 0.0 : (confB >= confA ? max(0.0, 0.45 - confB * 0.45) : confA / total);
-      }
-      sampleColor = mix(sampleB, sampleA, clamp(wA, 0.0, 1.0));
-    }
-  }
   vec3 fallbackAlbedo = projectedUseNeutralFallback == 1
     ? projectedFallbackColor
     : diffuseColor.rgb;
-  diffuseColor.rgb = mix(fallbackAlbedo, sampleColor, clamp(projectedOpacity, 0.0, 1.0));
+
+  // --- Per-projector visibility from radial-depth occlusion cubemaps ---
+  float primaryVisibility = 1.0;
+  float secondaryVisibility = 1.0;
+  if (projectedUseOcclusion == 1) {
+    primaryVisibility = sampleProjectorVisibility(
+      vProjectedWorldPos,
+      projectedPanoOrigin,
+      projectedOcclusionCube,
+      projectedOcclusionNear,
+      projectedOcclusionFar,
+      projectedOcclusionFaceSize,
+      projectedOcclusionBias,
+      projectedOcclusionSoftness
+    );
+  }
+  if (projectedUseSecondaryOcclusion == 1) {
+    secondaryVisibility = sampleProjectorVisibility(
+      vProjectedWorldPos,
+      projectedSecondaryOrigin,
+      projectedSecondaryOcclusionCube,
+      projectedSecondaryOcclusionNear,
+      projectedSecondaryOcclusionFar,
+      projectedSecondaryOcclusionFaceSize,
+      projectedOcclusionBias,
+      projectedOcclusionSoftness
+    );
+  }
+
+  vec3 primarySample = fallbackAlbedo;
+  vec3 secondarySample = fallbackAlbedo;
+  float secondaryValid = 0.0;
+
+  // Primary pano sample.
+  {
+    vec3 offset = vProjectedWorldPos - projectedPanoOrigin;
+    if (dot(offset, offset) >= 1e-8) {
+      vec3 direction = applyInversePanoYaw(normalize(offset), projectedPanoYaw);
+      vec2 panoUv = equirectUvFromDirection(direction);
+      panoUv.x = fract(panoUv.x);
+      panoUv.y = clamp(panoUv.y, 0.0, 1.0);
+      vec4 panoSample = texture2D(projectedPanoMap, panoUv);
+      primarySample = panoSample.rgb * projectedExposure;
+    }
+  }
+
+  // Secondary pano sample (only when a secondary projector exists).
+  if (projectedUseSecondary == 1 && projectedSecondaryOrigin != vec3(0.0)) {
+    vec3 offset = vProjectedWorldPos - projectedSecondaryOrigin;
+    if (dot(offset, offset) >= 1e-8) {
+      vec3 direction = applyInversePanoYaw(normalize(offset), projectedSecondaryYaw);
+      vec2 panoUv = equirectUvFromDirection(direction);
+      panoUv.x = fract(panoUv.x);
+      panoUv.y = clamp(panoUv.y, 0.0, 1.0);
+      vec4 panoSample = texture2D(projectedSecondaryPanoMap, panoUv);
+      secondarySample = panoSample.rgb * projectedExposure;
+    }
+    secondaryValid = 1.0;
+  }
+
+  // --- Blend gating: visibility gates confidence-based dominance ---
+  float primaryWeight = 0.0;
+  float secondaryWeight = 0.0;
+
+  if (projectedUseSecondary == 1 && secondaryValid > 0.5) {
+    if (projectedBlendMode == 0) {
+      // primary-only mode
+      primaryWeight = primaryVisibility;
+    } else if (projectedBlendMode == 2) {
+      // secondary-only mode
+      secondaryWeight = secondaryVisibility;
+    } else {
+      // both: visibility-gated dominance
+      bool pVis = primaryVisibility > 0.5;
+      bool sVis = secondaryVisibility > 0.5;
+      if (pVis && !sVis) {
+        primaryWeight = 1.0;
+      } else if (!pVis && sVis) {
+        secondaryWeight = 1.0;
+      } else if (!pVis && !sVis) {
+        primaryWeight = 0.0;
+        secondaryWeight = 0.0;
+      } else {
+        float pConf = projectedConfidenceAt(vProjectedWorldPos, projectedPanoOrigin);
+        float sConf = projectedConfidenceAt(vProjectedWorldPos, projectedSecondaryOrigin);
+        float total = pConf + sConf;
+        if (total > 0.0) {
+          primaryWeight = pConf / total;
+          secondaryWeight = sConf / total;
+        }
+      }
+    }
+  } else {
+    primaryWeight = primaryVisibility;
+  }
+
+  // --- Coverage diagnostic (same visibility functions as projection) ---
+  if (projectedDebugCoverage == 1) {
+    vec3 cov;
+    if (projectedUseSecondary == 1 && secondaryValid > 0.5) {
+      if (primaryVisibility > 0.5 && secondaryVisibility > 0.5) cov = vec3(1.0);
+      else if (primaryVisibility > 0.5) cov = vec3(0.0, 1.0, 1.0);
+      else if (secondaryVisibility > 0.5) cov = vec3(1.0, 0.0, 1.0);
+      else cov = vec3(1.0, 0.0, 0.0);
+    } else {
+      cov = primaryVisibility > 0.5 ? vec3(0.0, 1.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    }
+    diffuseColor.rgb = cov;
+  } else {
+    vec3 projectedColor = primarySample * primaryWeight + secondarySample * secondaryWeight;
+    // When fully occluded (no weight), keep the fallback albedo.
+    float totalWeight = primaryWeight + secondaryWeight;
+    vec3 resultColor = totalWeight > 0.0
+      ? mix(fallbackAlbedo, projectedColor, clamp(projectedOpacity, 0.0, 1.0) * clamp(totalWeight, 0.0, 1.0))
+      : fallbackAlbedo;
+    diffuseColor.rgb = resultColor;
+  }
 }
 `,
       )
+      // Lighting contract is ONLY post-aomap mixing of reflectedLight.
       .replace(
         '#include <aomap_fragment>',
         `#include <aomap_fragment>
@@ -334,7 +472,13 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v4:${params.settings.fallbackMode}:${hasSecondary ? 'dual' : 'single'}:${params.disposable ? 'd' : 's'}`
+    `projected-style-v4:${params.settings.fallbackMode}:`
+    + `${params.disposable ? 'd' : 's'}:`
+    + `${useOcclusion ? 'o' : 'n'}:`
+    + `${useSecondary ? 's' : 'p'}:`
+    + `${useSecondaryOcclusion ? 'so' : 'sn'}:`
+    + `${debugCoverage ? 'c' : 'x'}:`
+    + `${blendMode}`
   );
 
   (material as THREE.MeshStandardMaterial & { userData: Record<string, unknown> }).userData.projectedStyle = true;

@@ -456,7 +456,7 @@ export function ReferenceWorkspace() {
             </span>
           </label>
 
-          <div className="border-t border-subtle pt-4">
+            <div className="border-t border-subtle pt-4">
             <ProjectedStylePanel
               project={project}
               onChange={(projectedStyle) => updateProjectSettings({ projectedStyle })}
