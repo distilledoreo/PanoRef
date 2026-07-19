@@ -174,7 +174,12 @@ export interface ShotExportSettings {
   includePrompt: boolean;
 }
 
-export type ProjectorBlendMode = 'primary' | 'secondary' | 'both';
+/** Multi-origin selection after per-projector occlusion and quality scoring. */
+export type ProjectorBlendMode =
+  | 'primary_only'
+  | 'secondary_only'
+  | 'primary_dominant'
+  | 'secondary_dominant';
 
 /** Project-level projector configuration (no GPU resources). */
 export interface ProjectedStyleSettings {

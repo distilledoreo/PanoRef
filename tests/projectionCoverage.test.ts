@@ -144,6 +144,10 @@ describe('projection coverage engine', () => {
 
   it('extracts one imported room object and retains its concave empty interior', async () => {
     const triangles = [...floorTriangles(0, 3)];
+    const propTopStart = triangles.length;
+    // A disconnected upward-facing tabletop lives in the same imported mesh.
+    // It must not become a legal camera floor merely because it faces upward.
+    triangles.push(...floorTriangles(0.8, 0.7));
     triangles.push(
       { a: [-3, 0, -3], b: [-3, 3, -3], c: [3, 3, -3] },
       { a: [-3, 0, -3], b: [3, 3, -3], c: [3, 0, -3] },
@@ -174,9 +178,12 @@ describe('projection coverage engine', () => {
     project.scene.objects = [object];
     project.assets.assets[asset.id] = asset;
     const scene = await extractCoverageScene(project);
+    expect(Array.from(scene.floorTriangleIndices)).not.toContain(propTopStart);
+    expect(Array.from(scene.floorTriangleIndices)).not.toContain(propTopStart + 1);
     const options = resolveCoverageOptions(scene, { candidateSpacing: 1, cameraClearanceRadius: 0.3 });
     const candidates = generateOriginCandidates(scene, options, buildSceneAcceleration(scene));
     expect(candidates.some((candidate) => Math.hypot(candidate.position[0], candidate.position[2]) < 0.1)).toBe(true);
+    expect(candidates.every((candidate) => candidate.position[1] < 2)).toBe(true);
   });
 
   it('uses one fine validation bank for reachable metrics and enforces fixed-first separation', () => {
@@ -252,7 +259,7 @@ describe('projection coverage engine', () => {
     expect(Math.max(...positions)).toBeLessThan(0.25);
   });
 
-  it('builds a flat BVH for a 100k-triangle indexed fixture without object expansion', () => {
+  it('runs both complete optimizer modes on a 100k+ triangle indexed fixture', () => {
     const cells = 225;
     const side = cells + 1;
     const positions = new Float32Array(side * side * 3);
@@ -277,16 +284,60 @@ describe('projection coverage engine', () => {
       indices,
       triangleMeshIds: new Uint32Array(indices.length / 3),
       meshMatrices: new Float32Array(IDENTITY_MATRIX),
-      floorTriangleIndices: new Uint32Array(0),
-      floorBounds: new Float32Array(0),
+      floorTriangleIndices: new Uint32Array(indices.length / 3),
+      floorBounds: new Float32Array((indices.length / 3) * 4),
       bounds: { min: [0, 0, 0], max: [22.5, 0, 22.5] },
       diagonal: Math.hypot(22.5, 22.5),
     };
+    for (let triangleIndex = 0; triangleIndex < scene.floorTriangleIndices.length; triangleIndex += 1) {
+      scene.floorTriangleIndices[triangleIndex] = triangleIndex;
+      const indexOffset = triangleIndex * 3;
+      const a = scene.indices[indexOffset] * 3;
+      const b = scene.indices[indexOffset + 1] * 3;
+      const c = scene.indices[indexOffset + 2] * 3;
+      scene.floorBounds.set([
+        Math.min(scene.positions[a], scene.positions[b], scene.positions[c]),
+        Math.max(scene.positions[a], scene.positions[b], scene.positions[c]),
+        Math.min(scene.positions[a + 2], scene.positions[b + 2], scene.positions[c + 2]),
+        Math.max(scene.positions[a + 2], scene.positions[b + 2], scene.positions[c + 2]),
+      ], triangleIndex * 4);
+    }
     const packedBytes = positions.byteLength + indices.byteLength
       + scene.triangleMeshIds.byteLength + scene.meshMatrices.byteLength;
     expect(indices.length / 3).toBeGreaterThan(100_000);
     expect(packedBytes).toBeLessThan(3_000_000);
     const acceleration = buildSceneAcceleration(scene);
     expect(acceleration.distanceToGeometry([11, 1.6, 11])).toBeCloseTo(1.6, 3);
-  }, 30_000);
+    const options = resolveCoverageOptions(scene, {
+      candidateSpacing: 5,
+      maximumCandidateCount: 16,
+      cameraClearanceRadius: 0.3,
+      minimumOriginSeparation: 4,
+      coarseSampleCount: 128,
+      fineSampleCount: 256,
+      coarsePairSeedCount: 4,
+      localRefinementLevels: 1,
+      minimumTexelDensity: 0,
+      targetTexelDensity: 1,
+    });
+    const fixed = optimizeProjectionCoverage({
+      mode: 'fixed-first',
+      scene,
+      firstOrigin: [2.5, 1.6, 2.5],
+      options,
+    });
+    const joint = optimizeProjectionCoverage({ mode: 'joint-pair', scene, options });
+    for (const result of [fixed, joint]) {
+      expect(result.sampleCount).toBe(256);
+      expect(result.candidateCount).toBeGreaterThan(2);
+      expect(result.reachableCoverage).toBeGreaterThanOrEqual(result.combinedCoverage);
+      expect(result.originA.every(Number.isFinite)).toBe(true);
+      expect(result.originB.every(Number.isFinite)).toBe(true);
+      expect(Math.hypot(
+        result.originA[0] - result.originB[0],
+        result.originA[1] - result.originB[1],
+        result.originA[2] - result.originB[2],
+      )).toBeGreaterThanOrEqual(4);
+    }
+  }, 60_000);
 });

@@ -128,15 +128,15 @@ export function runProjectedReceiveGate(): ProjectedReceiveResult {
     const base: ProjectedStyleSettings = {
       panoId: 'x', opacity: 1, exposure: 1, lightingContribution: 0, fallbackMode: 'neutral',
       occlusionEnabled: true, occlusionBiasMeters: 0.04, occlusionSoftness: 1,
-      occlusionDebugMode: 'off', blendMode: 'both',
-    } as ProjectedStyleSettings;
+      occlusionDebugMode: 'off', blendMode: 'primary_dominant',
+    };
 
     // Front receiver plane at x=3.0 (clearly in front of the box's ~3.5m near face).
     result.frontPixel = renderReceiver(renderer, ORIGIN, pano, occlusion, 3.0, base);
     // Rear receiver plane at x=7 (behind the box => occluded => fallback blue).
     result.rearPixel = renderReceiver(renderer, ORIGIN, pano, occlusion, 7, base);
     // Primary-only mode front receiver.
-    result.primaryModeFront = renderReceiver(renderer, ORIGIN, pano, occlusion, 3.0, { ...base, blendMode: 'primary' });
+    result.primaryModeFront = renderReceiver(renderer, ORIGIN, pano, occlusion, 3.0, { ...base, blendMode: 'primary_only' });
 
     result.ok = true;
   } catch (error) {

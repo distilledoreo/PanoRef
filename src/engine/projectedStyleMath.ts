@@ -336,12 +336,12 @@ export function computeProjectorBlendWeights(params: ProjectorBlendInput): Proje
   const primaryVisibility = params.primaryVisibility ?? 1;
   const secondaryVisibility = params.secondaryOrigin ? (params.secondaryVisibility ?? 1) : 0;
 
-  const mode = params.mode ?? 'both';
+  const mode = params.mode ?? 'primary_only';
   const hasSecondary = Boolean(params.secondaryOrigin);
 
   // Single-projector cases.
   if (!hasSecondary) {
-    if (mode === 'secondary') {
+    if (mode === 'secondary_only') {
       return { primary: 0, secondary: 0, bothOccluded: secondaryVisibility < 0.5 };
     }
     // primary or both with no secondary => primary only.
@@ -351,14 +351,14 @@ export function computeProjectorBlendWeights(params: ProjectorBlendInput): Proje
   const primaryVisible = primaryVisibility >= 0.5;
   const secondaryVisible = secondaryVisibility >= 0.5;
 
-  if (mode === 'primary') {
+  if (mode === 'primary_only') {
     return {
       primary: primaryVisible ? 1 : 0,
       secondary: 0,
       bothOccluded: !primaryVisible,
     };
   }
-  if (mode === 'secondary') {
+  if (mode === 'secondary_only') {
     return {
       primary: 0,
       secondary: secondaryVisible ? 1 : 0,
@@ -366,7 +366,8 @@ export function computeProjectorBlendWeights(params: ProjectorBlendInput): Proje
     };
   }
 
-  // both (dominant-projector bias by distance confidence)
+  // Dominant modes fill from the other projector when their preferred source
+  // is occluded, then bias quality/confidence ties toward the selected source.
   if (primaryVisible && !secondaryVisible) {
     return { primary: 1, secondary: 0, bothOccluded: false };
   }
@@ -380,9 +381,19 @@ export function computeProjectorBlendWeights(params: ProjectorBlendInput): Proje
   const primaryConf = params.primaryConfidence ?? projectedConfidence(params.worldPosition, params.primaryOrigin);
   const secondaryConf = params.secondaryConfidence ?? projectedConfidence(params.worldPosition, params.secondaryOrigin as Vec3);
   const total = primaryConf + secondaryConf || 1;
+  let primaryWeight = primaryConf / total;
+  if (mode === 'primary_dominant') {
+    primaryWeight = primaryConf >= secondaryConf
+      ? Math.min(1, 0.55 + primaryConf * 0.55)
+      : primaryConf / total;
+  } else {
+    primaryWeight = secondaryConf >= primaryConf
+      ? Math.max(0, 0.45 - secondaryConf * 0.45)
+      : primaryConf / total;
+  }
   return {
-    primary: primaryConf / total,
-    secondary: secondaryConf / total,
+    primary: primaryWeight,
+    secondary: 1 - primaryWeight,
     bothOccluded: false,
   };
 }

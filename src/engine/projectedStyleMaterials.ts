@@ -220,14 +220,19 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
   const useNeutralFallback = params.settings.fallbackMode === 'neutral';
   const useOcclusion = params.settings.occlusionEnabled !== false
     && Boolean(params.occlusionTexture);
-  const useSecondary = Boolean(params.secondaryTexture);
-  const secondaryOrigin = params.secondaryOrigin ? new THREE.Vector3(...params.secondaryOrigin) : new THREE.Vector3(0, 0, 0);
-  const secondaryYaw = degreesToRadians(params.secondaryRotation?.[1] ?? 0);
+  const useSecondary = hasSecondary;
   const useSecondaryOcclusion = useSecondary && useOcclusion && Boolean(params.secondaryOcclusionTexture);
   const occlusionBias = params.settings.occlusionBiasMeters ?? 0.04;
   const occlusionSoftness = params.settings.occlusionSoftness ?? 1;
   const debugCoverage = params.settings.occlusionDebugMode === 'coverage';
-  const blendMode = params.settings.blendMode === 'primary' ? 0 : params.settings.blendMode === 'secondary' ? 2 : 1;
+  const blendMode = params.settings.blendMode ?? 'primary_only';
+  const blendModeId = blendMode === 'secondary_only'
+    ? 1
+    : blendMode === 'primary_dominant'
+      ? 2
+      : blendMode === 'secondary_dominant'
+        ? 3
+        : 0;
   const texelConstant = (width: number, height: number) => width * height / (2 * Math.PI * Math.PI);
 
   material.onBeforeCompile = (shader) => {
@@ -264,7 +269,7 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
     shader.uniforms.projectedSecondaryOcclusionFaceSize = { value: params.secondaryOcclusionFaceSize ?? 512 };
 
     shader.uniforms.projectedDebugCoverage = { value: debugCoverage ? 1 : 0 };
-    shader.uniforms.projectedBlendMode = { value: blendMode };
+    shader.uniforms.projectedBlendMode = { value: blendModeId };
     shader.uniforms.projectedPrimaryTexelConstant = {
       value: texelConstant(params.panoramaWidth ?? 8_192, params.panoramaHeight ?? 4_096),
     };
@@ -318,12 +323,10 @@ uniform float projectedSecondaryOcclusionNear;
 uniform float projectedSecondaryOcclusionFar;
 uniform float projectedSecondaryOcclusionFaceSize;
 uniform int projectedDebugCoverage;
-uniform int projectedBlendMode;
 uniform float projectedPrimaryTexelConstant;
 uniform float projectedSecondaryTexelConstant;
 varying vec3 vProjectedWorldPos;
 const float PROJECTED_PI = 3.141592653589793;
-const float PROJECTED_FALLOFF = 6.0;
 
 ${PROJECTED_STYLE_GLSL.applyInversePanoYaw}
 
@@ -422,7 +425,7 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
   // fallback and blend modes are honored.
   float hasSecondary = (projectedUseSecondary == 1 && secondaryValid > 0.5) ? 1.0 : 0.0;
 
-  float primaryEnabled = projectedBlendMode == 2 ? 0.0 : 1.0;
+  float primaryEnabled = projectedBlendMode == 1 ? 0.0 : 1.0;
   float secondaryEnabled = projectedBlendMode == 0 ? 0.0 : hasSecondary;
 
   float primaryQuality = projectedQualityAt(
@@ -434,8 +437,10 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
     ? projectedQualityAt(vProjectedWorldPos, projectedSecondaryOrigin, projectedSecondaryTexelConstant)
     : 0.0;
 
-  float primaryScore = primaryEnabled * primaryVisibility * primaryQuality;
-  float secondaryScore = secondaryEnabled * secondaryVisibility * secondaryQuality;
+  float primaryDominance = projectedBlendMode == 2 ? 1.15 : 1.0;
+  float secondaryDominance = projectedBlendMode == 3 ? 1.15 : 1.0;
+  float primaryScore = primaryEnabled * primaryVisibility * primaryQuality * primaryDominance;
+  float secondaryScore = secondaryEnabled * secondaryVisibility * secondaryQuality * secondaryDominance;
   // Winner-takes-most weighting follows the optimizer's max-quality objective
   // while retaining a narrow transition when qualities are nearly equal.
   float primaryWeight = pow(primaryScore, 4.0);

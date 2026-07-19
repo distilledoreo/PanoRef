@@ -158,13 +158,6 @@ export function runProjectedStyleCompileGate(): ProjectedCompileResult {
 
   const cases = variants.map((spec) => tryVariant(renderer, spec));
 
-  // Dual projector tests with pixel readback
-  const dualModes = ['primary_only', 'secondary_only', 'primary_dominant', 'secondary_dominant'];
-  const dualCases = dualModes.map((mode) => {
-    const result = tryDualBlend(renderer, mode);
-    return { mode, ...result };
-  });
-
   renderer.dispose();
   console.error = originalError;
 

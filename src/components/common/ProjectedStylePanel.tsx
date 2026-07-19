@@ -6,6 +6,12 @@ import {
   projectedStyleStatusLabel,
   resolveProjectedStylePano,
 } from '../../engine/projectedStyle';
+import {
+  PROJECTOR_BLEND_MODE_LABELS,
+  type ProjectorBlendMode,
+  canUseDualProjectorBlend,
+  resolveProjectors,
+} from '../../engine/multiOriginProjection';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, Select, TextInput, Toggle } from './Field';
 import { CoverageOptimizerPanel } from './CoverageOptimizerPanel';
@@ -32,9 +38,10 @@ export function ProjectedStylePanel({
   const allPanos = project.panoRefs;
   const status = projectedStyleStatusLabel(project);
   const active = resolveProjectedStylePano(project);
-  const secondary = settings.secondaryPanoId
-    ? project.panoRefs.find((pano) => pano.id === settings.secondaryPanoId)
-    : undefined;
+  const resolved = resolveProjectors(project, settings);
+  const dualAvailable = allPanos.length >= 2;
+  const dualReady = canUseDualProjectorBlend(project, settings);
+  const secondaryCandidates = allPanos.filter((pano) => pano.id !== (settings.panoId ?? active?.id));
 
   const update = (partial: Partial<ProjectedStyleSettings>) => {
     onChange(normalizeProjectedStyleSettings({ ...settings, ...partial }));
@@ -158,44 +165,6 @@ export function ProjectedStylePanel({
           Import and align a styled panorama first for best results. Graybox can be selected
           explicitly if needed.
         </p>
-      )}
-
-      <Field label="Secondary panorama">
-        <Select
-          value={settings.secondaryPanoId ?? ''}
-          onChange={(event) => {
-            const value = event.target.value;
-            update({ secondaryPanoId: value || undefined });
-          }}
-          disabled={allPanos.length === 0}
-        >
-          <option value="">None</option>
-          {allPanos
-            .filter((pano) => pano.id !== (settings.panoId ?? active?.id))
-            .map((pano) => (
-              <option key={pano.id} value={pano.id}>
-                {pano.name}
-                {pano.type === 'graybox_render' ? ' (graybox)' : ''}
-              </option>
-            ))}
-        </Select>
-      </Field>
-
-      {settings.secondaryPanoId && (
-        <Field label="Blend mode">
-          <Select
-            value={settings.blendMode ?? 'both'}
-            onChange={(event) => update({
-              blendMode: event.target.value === 'primary'
-                ? 'primary'
-                : event.target.value === 'secondary' ? 'secondary' : 'both',
-            })}
-          >
-            <option value="both">Both (nearest fills)</option>
-            <option value="primary">Primary only</option>
-            <option value="secondary">Secondary only</option>
-          </Select>
-        </Field>
       )}
 
       <Field

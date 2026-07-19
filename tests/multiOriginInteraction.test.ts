@@ -280,13 +280,15 @@ describe('blend formula parity', () => {
     expect(w.wSecondary).toBe(1);
   });
 
-  it('projected blend GLSL snippet uses consistent falloff constant', () => {
+  it('projected blend GLSL uses coverage quality with explicit dominant-mode bias', () => {
     const materials = readFileSync(
       new URL('../src/engine/projectedStyleMaterials.ts', import.meta.url),
       'utf8',
     );
-    expect(materials).toContain('PROJECTED_FALLOFF = 6.0');
-    expect(materials).toContain('projectedConfidence');
+    expect(materials).toContain('projectedQualityAt');
+    expect(materials).toContain('projectedBlendMode == 2 ? 1.15 : 1.0');
+    expect(materials).toContain('projectedBlendMode == 3 ? 1.15 : 1.0');
+    expect(materials).not.toContain('projectedConfidence');
   });
 });
 

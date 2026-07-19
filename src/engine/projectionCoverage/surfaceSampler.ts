@@ -16,6 +16,124 @@ import type {
 
 const MIN_TRIANGLE_AREA = 1e-8;
 const COPY_CHUNK_VALUES = 262_144;
+const FLOOR_VERTEX_QUANTIZATION_METERS = 1e-4;
+const MIN_IMPORTED_FLOOR_AREA_SQUARE_METERS = 2.5;
+const MIN_IMPORTED_FLOOR_LONG_SPAN_METERS = 1.5;
+const MIN_IMPORTED_FLOOR_SHORT_SPAN_METERS = 0.65;
+
+interface ImportedFloorComponent {
+  root: number;
+  area: number;
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
+function quantizedVertexKey(x: number, y: number, z: number): string {
+  const scale = 1 / FLOOR_VERTEX_QUANTIZATION_METERS;
+  return `${Math.round(x * scale)}:${Math.round(y * scale)}:${Math.round(z * scale)}`;
+}
+
+/**
+ * Imported meshes commonly contain floors, shelves, tables, roofs, and props in
+ * one object. Group upward triangles by connected world-space vertices and keep
+ * only components large enough to plausibly support a camera. This preserves
+ * multiple substantial floor levels while rejecting isolated prop tops.
+ */
+function filterImportedFloorComponents(
+  scene: CoverageSceneData,
+  floorFlags: Uint8Array,
+): Uint8Array {
+  const parent = new Int32Array(floorFlags.length);
+  parent.fill(-1);
+  const vertexOwner = new Map<string, number>();
+  const triangleScratch = new Float64Array(9);
+
+  const find = (value: number): number => {
+    let root = value;
+    while (parent[root] !== root) root = parent[root];
+    let current = value;
+    while (parent[current] !== current) {
+      const next = parent[current];
+      parent[current] = root;
+      current = next;
+    }
+    return root;
+  };
+  const union = (a: number, b: number) => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parent[rootB] = rootA;
+  };
+
+  for (let triangleIndex = 0; triangleIndex < floorFlags.length; triangleIndex += 1) {
+    if (floorFlags[triangleIndex] !== 1) continue;
+    parent[triangleIndex] = triangleIndex;
+    readWorldTriangle(scene, triangleIndex, triangleScratch);
+    for (let vertex = 0; vertex < 3; vertex += 1) {
+      const offset = vertex * 3;
+      const key = quantizedVertexKey(
+        triangleScratch[offset],
+        triangleScratch[offset + 1],
+        triangleScratch[offset + 2],
+      );
+      const owner = vertexOwner.get(key);
+      if (owner === undefined) vertexOwner.set(key, triangleIndex);
+      else union(triangleIndex, owner);
+    }
+  }
+
+  const normalScratch = new Float64Array(3);
+  const components = new Map<number, ImportedFloorComponent>();
+  for (let triangleIndex = 0; triangleIndex < floorFlags.length; triangleIndex += 1) {
+    if (floorFlags[triangleIndex] !== 1) continue;
+    const root = find(triangleIndex);
+    readWorldTriangle(scene, triangleIndex, triangleScratch);
+    const area = triangleAreaNormal(triangleScratch, normalScratch);
+    const component = components.get(root) ?? {
+      root,
+      area: 0,
+      minX: Infinity,
+      maxX: -Infinity,
+      minZ: Infinity,
+      maxZ: -Infinity,
+    };
+    component.area += area;
+    component.minX = Math.min(component.minX, triangleScratch[0], triangleScratch[3], triangleScratch[6]);
+    component.maxX = Math.max(component.maxX, triangleScratch[0], triangleScratch[3], triangleScratch[6]);
+    component.minZ = Math.min(component.minZ, triangleScratch[2], triangleScratch[5], triangleScratch[8]);
+    component.maxZ = Math.max(component.maxZ, triangleScratch[2], triangleScratch[5], triangleScratch[8]);
+    components.set(root, component);
+  }
+
+  const ranked = [...components.values()].sort((a, b) => b.area - a.area);
+  const largestArea = ranked[0]?.area ?? 0;
+  const minimumArea = Math.max(
+    MIN_IMPORTED_FLOOR_AREA_SQUARE_METERS,
+    Math.min(8, largestArea * 0.03),
+  );
+  const acceptedRoots = new Set(ranked.filter((component) => {
+    const width = component.maxX - component.minX;
+    const depth = component.maxZ - component.minZ;
+    const longSpan = Math.max(width, depth);
+    const shortSpan = Math.min(width, depth);
+    return component.area >= minimumArea
+      && longSpan >= MIN_IMPORTED_FLOOR_LONG_SPAN_METERS
+      && shortSpan >= MIN_IMPORTED_FLOOR_SHORT_SPAN_METERS;
+  }).map((component) => component.root));
+  // A small but otherwise valid imported platform must not collapse analysis to
+  // zero candidates. Keep the largest component as the deterministic fallback.
+  if (acceptedRoots.size === 0 && ranked[0]) acceptedRoots.add(ranked[0].root);
+
+  const selected = new Uint8Array(floorFlags.length);
+  for (let triangleIndex = 0; triangleIndex < floorFlags.length; triangleIndex += 1) {
+    if (floorFlags[triangleIndex] === 1 && acceptedRoots.has(find(triangleIndex))) {
+      selected[triangleIndex] = 1;
+    }
+  }
+  return selected;
+}
 
 function toVec3(vector: THREE.Vector3): Vec3 {
   return [vector.x, vector.y, vector.z];
@@ -165,17 +283,20 @@ export async function extractCoverageScene(
     meshId += 1;
   }, onProgress, 0.15, 0.7);
 
+  const selectedFloorFlags = explicitFloorSeen
+    ? floorFlags
+    : filterImportedFloorComponents(scene, floorFlags);
   const selectedFlag = explicitFloorSeen ? 2 : 1;
   let floorCount = 0;
   for (let triangleIndex = 0; triangleIndex < floorFlags.length; triangleIndex += 1) {
-    if (floorFlags[triangleIndex] === selectedFlag) floorCount += 1;
+    if (selectedFloorFlags[triangleIndex] === selectedFlag) floorCount += 1;
   }
   scene.floorTriangleIndices = new Uint32Array(floorCount);
   scene.floorBounds = new Float32Array(floorCount * 4);
   const boundsScratch = new Float32Array(6);
   let floorOffset = 0;
   for (let triangleIndex = 0; triangleIndex < floorFlags.length; triangleIndex += 1) {
-    if (floorFlags[triangleIndex] !== selectedFlag) continue;
+    if (selectedFloorFlags[triangleIndex] !== selectedFlag) continue;
     scene.floorTriangleIndices[floorOffset] = triangleIndex;
     readWorldTriangle(scene, triangleIndex, triangleScratch);
     writeTriangleBounds(triangleScratch, boundsScratch, 0);

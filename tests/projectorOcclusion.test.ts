@@ -129,44 +129,44 @@ describe('visibility-gated multi-origin blend weights', () => {
   const world = [1, 0, 0] as const;
 
   it('both visible -> confidence-weighted', () => {
-    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'both', primaryVisibility: 1, secondaryVisibility: 1 });
+    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'primary_dominant', primaryVisibility: 1, secondaryVisibility: 1 });
     expect(w.primary + w.secondary).toBeCloseTo(1, 5);
     expect(w.bothOccluded).toBe(false);
   });
 
   it('primary only visible -> primary weight 1', () => {
-    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'both', primaryVisibility: 1, secondaryVisibility: 0 });
+    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'primary_dominant', primaryVisibility: 1, secondaryVisibility: 0 });
     expect(w.primary).toBe(1);
     expect(w.secondary).toBe(0);
   });
 
   it('secondary only visible -> secondary weight 1', () => {
-    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'both', primaryVisibility: 0, secondaryVisibility: 1 });
+    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'primary_dominant', primaryVisibility: 0, secondaryVisibility: 1 });
     expect(w.primary).toBe(0);
     expect(w.secondary).toBe(1);
   });
 
   it('neither visible -> bothOccluded', () => {
-    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'both', primaryVisibility: 0, secondaryVisibility: 0 });
+    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'primary_dominant', primaryVisibility: 0, secondaryVisibility: 0 });
     expect(w.primary).toBe(0);
     expect(w.secondary).toBe(0);
     expect(w.bothOccluded).toBe(true);
   });
 
   it('primary-only mode with primary occluded -> fallback', () => {
-    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], mode: 'primary', primaryVisibility: 0 });
+    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], mode: 'primary_only', primaryVisibility: 0 });
     expect(w.primary).toBe(0);
     expect(w.bothOccluded).toBe(true);
   });
 
   it('secondary-only mode with secondary occluded -> fallback', () => {
-    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'secondary', primaryVisibility: 1, secondaryVisibility: 0 });
+    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'secondary_only', primaryVisibility: 1, secondaryVisibility: 0 });
     expect(w.secondary).toBe(0);
     expect(w.bothOccluded).toBe(true);
   });
 
   it('omitted visibility defaults to 1 (legacy / non-occlusion paths)', () => {
-    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'both' });
+    const w = computeProjectorBlendWeights({ worldPosition: [...world], primaryOrigin: [...primary], secondaryOrigin: [...secondary], mode: 'primary_dominant' });
     expect(w.primary + w.secondary).toBeCloseTo(1, 5);
   });
 });
@@ -218,7 +218,7 @@ describe('normalized occlusion settings (backward compatible)', () => {
     expect(s.occlusionBiasMeters).toBe(0.04);
     expect(s.occlusionSoftness).toBe(1);
     expect(s.occlusionDebugMode).toBe('off');
-    expect(s.blendMode).toBe('both');
+    expect(s.blendMode).toBe('primary_only');
   });
 
   it('clamps bias and softness', () => {
@@ -300,7 +300,7 @@ describe('synthetic geometry: dual-origin fill', () => {
       worldPosition: world, projectorOrigin: secondary, packedDepth: null, nearMeters: NEAR, farMeters: FAR,
     }).visible ? 1 : 0;
     const w = computeProjectorBlendWeights({
-      worldPosition: world, primaryOrigin: primary, secondaryOrigin: secondary, mode: 'both',
+      worldPosition: world, primaryOrigin: primary, secondaryOrigin: secondary, mode: 'primary_dominant',
       primaryVisibility: primaryVis, secondaryVisibility: secondaryVis,
     });
     expect(w.primary).toBe(0);
@@ -317,7 +317,7 @@ describe('synthetic geometry: dual-origin fill', () => {
       worldPosition: world, projectorOrigin: secondary, packedDepth: hitAt(1), nearMeters: NEAR, farMeters: FAR,
     }).visible ? 1 : 0;
     const w = computeProjectorBlendWeights({
-      worldPosition: world, primaryOrigin: primary, secondaryOrigin: secondary, mode: 'both',
+      worldPosition: world, primaryOrigin: primary, secondaryOrigin: secondary, mode: 'primary_dominant',
       primaryVisibility: primaryVis, secondaryVisibility: secondaryVis,
     });
     expect(w.bothOccluded).toBe(true);

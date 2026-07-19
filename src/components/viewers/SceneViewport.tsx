@@ -255,6 +255,8 @@ export function SceneViewport({
   const [projectedTexture, setProjectedTexture] = useState<THREE.Texture | null>(null);
   const [projectedSecondaryTexture, setProjectedSecondaryTexture] = useState<THREE.Texture | null>(null);
   const [projectedTextureReadyUrl, setProjectedTextureReadyUrl] = useState<string | undefined>();
+  const [projectedSecondaryReadyUrl, setProjectedSecondaryReadyUrl] = useState<string | undefined>();
+  const [secondaryLoadError, setSecondaryLoadError] = useState(false);
 
   // Live geometry-occlusion cubemaps (shared across all projected objects).
   const primaryOcclusionRef = useRef<ProjectorOcclusionMap | undefined>();
@@ -1352,18 +1354,6 @@ export function SceneViewport({
     ?? project.settings.projectedStyle?.blendMode
     ?? 'primary_only';
 
-  const projectedPano = resolveProjectedStylePano(project);
-  const projectedSettings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
-  const projectedActive = appearance === 'projected'
-    && Boolean(projectedTexture)
-    && projectedTextureReadyUrl === projectedAssetKey
-    && Boolean(projectedPano);
-
-  // Resolve optional secondary projector for dual-origin occlusion.
-  const secondaryPano = projectedSettings.secondaryPanoId
-    ? project.panoRefs.find((pano) => pano.id === projectedSettings.secondaryPanoId)
-    : undefined;
-
   // Load / release shared projected-style texture when appearance or projector changes.
   useEffect(() => {
     let cancelled = false;
@@ -1443,56 +1433,6 @@ export function SceneViewport({
     disposeProjectedTextureOwnership(secondaryOwnershipRef.current);
   }, []);
 
-  // Load / release the optional secondary projector's panorama texture
-  // independently of the primary so dual-origin projection shows two distinct
-  // panoramas rather than reprojecting the primary from a second origin.
-  const secondaryTextureUrlRef = useRef<string | undefined>();
-  const [secondaryProjectedTexture, setSecondaryProjectedTexture] = useState<THREE.Texture | null>(null);
-  const secondaryAssetKey = (() => {
-    if (appearance !== 'projected') return '';
-    if (!projectedSettings.secondaryPanoId) return '';
-    const pano = project.panoRefs.find((p) => p.id === projectedSettings.secondaryPanoId);
-    if (!pano || pano.id === projectedPano?.id) return '';
-    return getProjectedStyleAssetUri(project, pano) ?? '';
-  })();
-
-  useEffect(() => {
-    let cancelled = false;
-    const url = secondaryAssetKey || undefined;
-    if (!url) {
-      const previousUrl = secondaryTextureUrlRef.current;
-      secondaryTextureUrlRef.current = undefined;
-      setSecondaryProjectedTexture(null);
-      releaseProjectedStyleTexture(previousUrl);
-      return () => {
-        cancelled = true;
-      };
-    }
-    if (secondaryTextureUrlRef.current === url) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    const previousUrl = secondaryTextureUrlRef.current;
-    secondaryTextureUrlRef.current = url;
-    void acquireProjectedStyleTexture(url).then((texture) => {
-      if (cancelled || !texture) {
-        if (texture) releaseProjectedStyleTexture(url);
-        return;
-      }
-      setSecondaryProjectedTexture(texture);
-      if (previousUrl && previousUrl !== url) releaseProjectedStyleTexture(previousUrl);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [secondaryAssetKey]);
-
-  useEffect(() => () => {
-    releaseProjectedStyleTexture(secondaryTextureUrlRef.current);
-    secondaryTextureUrlRef.current = undefined;
-  }, []);
-
   useEffect(() => {
     if (!shotFraming || dragRef.current.kind === 'shot_framing') return;
     // Re-seed fly pose only when the shot or stored camera pose changes.
@@ -1522,6 +1462,24 @@ export function SceneViewport({
     Boolean(shotFraming),
   ]);
 
+  const projectedSettings = projectedProjectors?.settings
+    ?? normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const projectedPano = projectedProjectors?.primary;
+  const projectedSecondary = projectedProjectors?.secondary;
+  const projectedState = computeProjectedAppearanceState({
+    appearance,
+    primaryTextureReady: Boolean(projectedTexture),
+    primaryReadyUrl: projectedTextureReadyUrl ?? '',
+    primaryAssetKey: projectedAssetKey,
+    primaryPanoExists: Boolean(projectedPano),
+    blendMode: projectedBlendMode,
+    secondaryPanoIdExists: Boolean(projectedSecondaryPanoId),
+    secondaryTextureReady: Boolean(projectedSecondaryTexture),
+    secondaryReadyUrl: projectedSecondaryReadyUrl ?? '',
+    secondaryAssetKey: projectedSecondaryAssetKey,
+  });
+  const { projectedActive, dualActive } = projectedState;
+
   const occlusionWanted = projectedActive
     && projectedSettings.occlusionEnabled
     && Boolean(rendererRef.current);
@@ -1537,8 +1495,8 @@ export function SceneViewport({
     if (!renderer) return;
 
     const primaryOrigin = projectedPano.origin;
-    const secondaryOrigin = (secondaryPano && secondaryPano.id !== projectedPano.id)
-      ? secondaryPano.origin
+    const secondaryOrigin = (projectedSecondary && projectedSecondary.id !== projectedPano.id)
+      ? projectedSecondary.origin
       : undefined;
     const key = computeProjectorOcclusionKey(project, primaryOrigin, secondaryOrigin);
     if (key === occlusionKeyRef.current && primaryOcclusionRef.current) {
@@ -1608,10 +1566,10 @@ export function SceneViewport({
     projectedPano?.origin[0],
     projectedPano?.origin[1],
     projectedPano?.origin[2],
-    secondaryPano?.id,
-    secondaryPano?.origin[0],
-    secondaryPano?.origin[1],
-    secondaryPano?.origin[2],
+    projectedSecondary?.id,
+    projectedSecondary?.origin[0],
+    projectedSecondary?.origin[1],
+    projectedSecondary?.origin[2],
   ]);
 
   // Dispose occlusion maps on unmount (also covered by the renderer cleanup,
@@ -1653,11 +1611,11 @@ export function SceneViewport({
           occlusionNearMeters: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.nearMeters : undefined,
           occlusionFarMeters: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.farMeters : undefined,
           occlusionFaceSize: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.faceSize : undefined,
-          secondaryTexture: secondaryProjectedTexture ?? undefined,
-          secondaryOrigin: secondaryPano?.origin,
-          secondaryRotation: secondaryPano?.rotation,
-          secondaryPanoramaWidth: secondaryPano?.width,
-          secondaryPanoramaHeight: secondaryPano?.height,
+          secondaryTexture: dualActive ? projectedSecondaryTexture ?? undefined : undefined,
+          secondaryOrigin: dualActive ? projectedSecondary?.origin : undefined,
+          secondaryRotation: dualActive ? projectedSecondary?.rotation : undefined,
+          secondaryPanoramaWidth: projectedSecondary?.width,
+          secondaryPanoramaHeight: projectedSecondary?.height,
           secondaryOcclusionTexture: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.texture : undefined,
           secondaryOcclusionNearMeters: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.nearMeters : undefined,
           secondaryOcclusionFarMeters: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.farMeters : undefined,
@@ -1688,8 +1646,7 @@ export function SceneViewport({
     projectedSettings.occlusionDebugMode,
     projectedSettings.blendMode,
     projectedTexture,
-    secondaryProjectedTexture,
-    secondaryPano?.id,
+    dualActive,
     primaryOcclusionRef.current?.key,
     secondaryOcclusionRef.current?.key,
     selectedShotId,

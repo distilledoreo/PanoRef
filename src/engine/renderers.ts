@@ -38,34 +38,6 @@ import {
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 import { computeGrayboxPanoFarPlane } from './sceneBounds';
 
-/** Load primary (+ optional secondary) textures for projected export/render. */
-async function loadProjectedSceneOptions(
-  project: LocationProject,
-): Promise<{ options: ProjectedSceneOptions; primaryUrl: string; secondaryUrl?: string } | undefined> {
-  const assets = resolveProjectedProjectorAssets(project);
-  if (!assets) return undefined;
-  const texture = await acquireProjectedStyleTexture(assets.primaryUrl);
-  if (!texture) return undefined;
-  let secondaryTexture: THREE.Texture | undefined;
-  if (assets.secondaryUrl) {
-    secondaryTexture = (await acquireProjectedStyleTexture(assets.secondaryUrl)) ?? undefined;
-  }
-  return {
-    primaryUrl: assets.primaryUrl,
-    secondaryUrl: secondaryTexture ? assets.secondaryUrl : undefined,
-    options: {
-      texture,
-      origin: assets.primary.origin,
-      rotation: assets.primary.rotation,
-      settings: assets.settings,
-      disposableMaterials: true,
-      secondaryTexture,
-      secondaryOrigin: secondaryTexture && assets.secondary ? assets.secondary.origin : undefined,
-      secondaryRotation: secondaryTexture && assets.secondary ? assets.secondary.rotation : undefined,
-    },
-  };
-}
-
 export interface ImageRenderResult {
   dataUrl: string;
   width: number;
@@ -498,26 +470,23 @@ export async function loadProjectedSceneResources(
   project: LocationProject,
 ): Promise<ProjectedSceneResources | undefined> {
   if (!canUseProjectedAppearance(project)) return undefined;
-  const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
-  const pano = resolveProjectedStylePano(project);
-  const imageUrl = getProjectedStyleAssetUri(project, pano);
-  if (!pano || !imageUrl) return undefined;
+  const assets = resolveProjectedProjectorAssets(project);
+  if (!assets) return undefined;
+  const settings = assets.settings;
+  const pano = assets.primary;
+  const imageUrl = assets.primaryUrl;
 
   await ensureHumanMannequinModel();
   const texture = await acquireProjectedStyleTexture(imageUrl);
   if (!texture) return undefined;
 
   // Optional secondary projector.
-  let secondaryPano = undefined as ReturnType<typeof resolveProjectedStylePano> | undefined;
+  let secondaryPano = assets.secondary;
   let secondaryTexture: THREE.Texture | null = null;
   let secondaryUrl: string | undefined;
-  if (settings.secondaryPanoId) {
-    const found = project.panoRefs.find((p) => p.id === settings.secondaryPanoId);
-    if (found && found.id !== pano.id) {
-      secondaryPano = found;
-      secondaryUrl = getProjectedStyleAssetUri(project, found);
-      if (secondaryUrl) secondaryTexture = await acquireProjectedStyleTexture(secondaryUrl);
-    }
+  if (secondaryPano && assets.secondaryUrl) {
+    secondaryUrl = assets.secondaryUrl;
+    secondaryTexture = await acquireProjectedStyleTexture(secondaryUrl);
   }
 
   const occlusionSet: ProjectorOcclusionSet = { dispose() { /* populated below */ } };
