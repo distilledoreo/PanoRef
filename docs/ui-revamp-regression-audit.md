@@ -295,6 +295,6 @@ The Projected Style panel now feeds both dual-origin search modes from one cover
 
 | Command | Result |
 |---------|--------|
-| `npm test` | 303/303 passed |
+| `npm test -- --run` | 373/373 passed |
 | `npm run lint` (`tsc --noEmit`) | Clean |
 
