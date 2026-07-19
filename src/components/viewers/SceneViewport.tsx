@@ -1322,9 +1322,19 @@ export function SceneViewport({
     ?? project.settings.projectedStyle?.blendMode
     ?? 'primary_only';
 
-  // Load / release primary projected-style texture when appearance or projector changes.
-  // Ownership: release currently *owned* URL immediately on change; never release a
-  // captured previousUrl from the completion callback (A→B→C leak / double-release).
+  const projectedPano = resolveProjectedStylePano(project);
+  const projectedSettings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
+  const projectedActive = appearance === 'projected'
+    && Boolean(projectedTexture)
+    && projectedTextureReadyUrl === projectedAssetKey
+    && Boolean(projectedPano);
+
+  // Resolve optional secondary projector for dual-origin occlusion.
+  const secondaryPano = projectedSettings.secondaryPanoId
+    ? project.panoRefs.find((pano) => pano.id === projectedSettings.secondaryPanoId)
+    : undefined;
+
+  // Load / release shared projected-style texture when appearance or projector changes.
   useEffect(() => {
     let cancelled = false;
     const url = projectedAssetKey || undefined;
@@ -1482,28 +1492,6 @@ export function SceneViewport({
     Boolean(shotFraming),
   ]);
 
-  const projectedSettings = projectedProjectors?.settings
-    ?? normalizeProjectedStyleSettings(project.settings.projectedStyle);
-  const projectedPano = projectedProjectors?.primary;
-  const projectedSecondary = projectedProjectors?.secondary;
-  const projectedState = computeProjectedAppearanceState({
-    appearance,
-    primaryTextureReady: Boolean(projectedTexture),
-    primaryReadyUrl: projectedTextureReadyUrl ?? '',
-    primaryAssetKey: projectedAssetKey,
-    primaryPanoExists: Boolean(projectedPano),
-    blendMode: projectedBlendMode,
-    secondaryPanoIdExists: Boolean(projectedSecondaryPanoId),
-    secondaryTextureReady: Boolean(projectedSecondaryTexture),
-    secondaryReadyUrl: projectedSecondaryReadyUrl ?? '',
-    secondaryAssetKey: projectedSecondaryAssetKey,
-  });
-  const { projectedActive, dualActive } = projectedState;
-
-  // Resolve optional secondary projector for dual-origin occlusion.
-  const secondaryPano = projectedSettings.secondaryPanoId
-    ? project.panoRefs.find((pano) => pano.id === projectedSettings.secondaryPanoId)
-    : undefined;
   const occlusionWanted = projectedActive
     && projectedSettings.occlusionEnabled
     && Boolean(rendererRef.current);

@@ -380,7 +380,7 @@ float projectedConfidenceAt(vec3 worldPos, vec3 origin) {
   }
 
   // Secondary pano sample (only when a secondary projector exists).
-  if (projectedUseSecondary == 1 && projectedSecondaryOrigin != vec3(0.0)) {
+  if (projectedUseSecondary == 1) {
     vec3 offset = vProjectedWorldPos - projectedSecondaryOrigin;
     if (dot(offset, offset) >= 1e-8) {
       vec3 direction = applyInversePanoYaw(normalize(offset), projectedSecondaryYaw);
@@ -394,32 +394,39 @@ float projectedConfidenceAt(vec3 worldPos, vec3 origin) {
   }
 
   // --- Continuous visibility scores (no hard 0.5 thresholding) ---
-  float primaryConfidence = 1.0;
-  float secondaryConfidence = 1.0;
-  if (projectedUseSecondary == 1 && secondaryValid > 0.5) {
-    primaryConfidence = projectedConfidenceAt(vProjectedWorldPos, projectedPanoOrigin);
-    secondaryConfidence = projectedConfidenceAt(vProjectedWorldPos, projectedSecondaryOrigin);
-  }
+  // Gate everything by the actual availability of a secondary projector AND the
+  // selected blend mode, so single-projector output is never mixed with the
+  // fallback and blend modes are honored.
+  float hasSecondary = (projectedUseSecondary == 1 && secondaryValid > 0.5) ? 1.0 : 0.0;
 
-  float primaryScore = primaryVisibility * primaryConfidence;
-  float secondaryScore = secondaryVisibility * secondaryConfidence;
+  float primaryEnabled = projectedBlendMode == 2 ? 0.0 : 1.0;
+  float secondaryEnabled = projectedBlendMode == 0 ? 0.0 : hasSecondary;
+
+  float primaryConfidence = hasSecondary > 0.5
+    ? projectedConfidenceAt(vProjectedWorldPos, projectedPanoOrigin)
+    : 1.0;
+  float secondaryConfidence = hasSecondary > 0.5
+    ? projectedConfidenceAt(vProjectedWorldPos, projectedSecondaryOrigin)
+    : 0.0;
+
+  float primaryScore = primaryEnabled * primaryVisibility * primaryConfidence;
+  float secondaryScore = secondaryEnabled * secondaryVisibility * secondaryConfidence;
   float scoreTotal = primaryScore + secondaryScore;
 
-  // --- Coverage (single-projector modes use that projector's visibility) ---
-  float primaryCoverage = primaryVisibility;
-  float secondaryCoverage = (projectedUseSecondary == 1 && secondaryValid > 0.5)
-    ? secondaryVisibility
-    : (projectedUseSecondary == 1 ? 0.0 : primaryVisibility);
-  float coverage = max(primaryCoverage, secondaryCoverage);
+  float coverage = max(
+    primaryEnabled * primaryVisibility,
+    secondaryEnabled * secondaryVisibility
+  );
 
-  // --- Coverage diagnostic (continuous visibility, not thresholded) ---
+  // --- Coverage diagnostic (four-state: red/cyan/magenta/white) ---
   if (projectedDebugCoverage == 1) {
-    vec3 cov;
-    if (projectedUseSecondary == 1 && secondaryValid > 0.5) {
-      cov = vec3(1.0 - coverage, coverage, 1.0 - coverage);
-    } else {
-      cov = vec3(1.0 - primaryVisibility, primaryVisibility, 1.0 - primaryVisibility);
-    }
+    float p = primaryEnabled * primaryVisibility;
+    float s = secondaryEnabled * secondaryVisibility;
+    vec3 cov =
+        vec3(1.0, 0.0, 0.0) * (1.0 - p) * (1.0 - s) // red: neither
+      + vec3(0.0, 1.0, 1.0) * p * (1.0 - s)         // cyan: primary only
+      + vec3(1.0, 0.0, 1.0) * (1.0 - p) * s          // magenta: secondary only
+      + vec3(1.0) * p * s;                           // white: both
     diffuseColor.rgb = cov;
   } else {
     vec3 projectedColor = (primarySample * primaryScore + secondarySample * secondaryScore)
