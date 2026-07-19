@@ -140,28 +140,19 @@ export function ReferenceWorkspace() {
     setPanoView({ yawDegrees: targetYaw, pitchDegrees: targetPitch });
   };
 
-  const openFillGapsIfEligible = () => {
-    if (styledCount === 1) {
-      setFillGapsOpen(true);
-      return true;
-    }
-    return false;
-  };
-
   const approveReference = () => {
     if (canCalibrate && needsReferenceAlignment(project) && !alignmentAccepted) {
+      // Advance modal opens with Continue vs Fill missing areas once reference is ready.
       acceptReferenceAlignment();
-      openFillGapsIfEligible();
       return;
     }
     if (grayboxPano && !hasReferenceCandidate(project)) {
       approveGrayboxForReference();
       return;
     }
-    if (isReferenceReady(project) || hasStyledCanonicalPano(project)) {
-      if (!openFillGapsIfEligible()) {
-        setWorkspace('shots');
-      }
+    // Already approved — reopen the fill-gaps panel only when a second capture is still optional.
+    if (styledCount === 1) {
+      setFillGapsOpen(true);
     }
   };
 

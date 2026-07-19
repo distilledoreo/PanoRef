@@ -248,6 +248,14 @@ describe('ui revamp fidelity surfaces', () => {
     expect(fork).toContain('About ');
     expect(fork).toContain('remaining');
     expect(fork).toContain('prepareSuggestedSecondCapture');
+    expect(fork).toContain('export function SecondCaptureForkContent');
+  });
+
+  it('embeds second-capture fork in the reference advance modal', () => {
+    const guidance = readFileSync(new URL('../src/components/common/WorkflowGuidance.tsx', import.meta.url), 'utf8');
+    expect(guidance).toContain('showSecondCaptureFork');
+    expect(guidance).toContain('SecondCaptureForkContent');
+    expect(guidance).toContain("completedStep === 'reference'");
   });
 
   it('simplifies projected style with a happy-path blend toggle', () => {

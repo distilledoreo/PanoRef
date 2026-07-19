@@ -15,6 +15,8 @@ import { Workspace } from '../../domain/types';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { AlignmentRetryContent, GrayboxReferencePromptBuilder } from './GrayboxReferenceGuide';
 import { Modal } from './Modal';
+import { SecondCaptureForkContent } from './SecondCaptureForkPanel';
+import { countStyledPanoramas } from '../../engine/multiOriginProjection';
 
 const WORKSPACE_LABELS: Record<Workspace, string> = {
   build: 'Build',
@@ -224,6 +226,13 @@ export function WorkflowGuidance() {
     setActiveDialog('none');
   };
 
+  const showSecondCaptureFork = Boolean(
+    advancePrompt
+    && advancePrompt.completedStep === 'reference'
+    && advancePrompt.nextStep === 'shots'
+    && countStyledPanoramas(project) === 1,
+  );
+
   const downloadGrayboxForAi = async () => {
     if (!grayboxAsset || !grayboxPano) return;
     setIsDownloadingGraybox(true);
@@ -330,9 +339,13 @@ export function WorkflowGuidance() {
 
       <Modal
         open={activeDialog === 'advance' && Boolean(advancePrompt)}
-        title={advancePrompt?.title ?? 'Ready for the next step'}
+        title={showSecondCaptureFork
+          ? 'Reference ready'
+          : (advancePrompt?.title ?? 'Ready for the next step')}
         onClose={handleAdvanceDismiss}
-        footer={(
+        size={showSecondCaptureFork ? 'lg' : 'md'}
+        scrollBody={showSecondCaptureFork}
+        footer={showSecondCaptureFork ? undefined : (
           <>
             <button
               type="button"
@@ -352,7 +365,20 @@ export function WorkflowGuidance() {
           </>
         )}
       >
-        <p className="text-sm text-secondary">{advancePrompt?.body}</p>
+        {showSecondCaptureFork ? (
+          <SecondCaptureForkContent
+            open={activeDialog === 'advance' && showSecondCaptureFork}
+            compactIntro
+            onContinue={handleAdvanceNext}
+            onClose={handleAdvanceDismiss}
+            onAwaitingImport={() => {
+              // Keep the modal open so the user can import the second capture.
+            }}
+            onPlaceInBuild={handleAdvanceDismiss}
+          />
+        ) : (
+          <p className="text-sm text-secondary">{advancePrompt?.body}</p>
+        )}
       </Modal>
     </>
   );

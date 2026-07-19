@@ -19,16 +19,22 @@ import { StyledPanoImportButton } from './StyledPanoImportButton';
 
 type ForkStep = 'choose' | 'place_method' | 'running' | 'awaiting_import' | 'failed';
 
-export function SecondCaptureForkPanel({
+export function SecondCaptureForkContent({
   open,
   onClose,
   onContinue,
   onAwaitingImport,
+  onPlaceInBuild,
+  compactIntro = false,
 }: {
   open: boolean;
   onClose: () => void;
   onContinue: () => void;
   onAwaitingImport: () => void;
+  /** Called after switching to Build origin mode (default closes). */
+  onPlaceInBuild?: () => void;
+  /** Hide the small “Reference ready” eyebrow when the parent modal already titles the step. */
+  compactIntro?: boolean;
 }) {
   const project = useContinuityStore((state) => state.project);
   const setPanoOrigin = useContinuityStore((state) => state.setPanoOrigin);
@@ -134,188 +140,216 @@ export function SecondCaptureForkPanel({
   const goPlaceInBuild = () => {
     setBuildMode('pano_origin');
     setWorkspace('build');
+    onPlaceInBuild?.();
     onClose();
   };
 
   return (
+    <div className="space-y-3" data-second-capture-fork>
+      {step === 'choose' && (
+        <>
+          <div>
+            {!compactIntro && (
+              <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Reference ready</div>
+            )}
+            <p className={`text-sm text-primary ${compactIntro ? '' : 'mt-1'}`}>
+              Continue with this capture, or add a second vantage to fill areas that look thin far from the origin.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onContinue}
+            className="w-full rounded-lg bg-[var(--accent)] px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)]"
+            data-second-capture-continue
+          >
+            Continue with this reference
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep('place_method')}
+            className="w-full rounded-lg border border-subtle px-3 py-2.5 text-sm font-medium text-primary transition hover:border-[var(--accent)] hover:text-accent"
+            data-second-capture-fill-gaps
+          >
+            Fill missing areas
+          </button>
+          <p className="text-[11px] leading-snug text-muted">
+            Projection is strongest near this capture. Distant walls and corners can look weak — a second vantage fills those gaps when blended.
+          </p>
+        </>
+      )}
+
+      {step === 'place_method' && (
+        <>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Second vantage</div>
+            <p className="mt-1 text-sm text-primary">
+              How do you want to pick the next capture point?
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={startAutoSuggest}
+            className="flex w-full items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2.5 text-left text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)]"
+            data-second-capture-suggest
+          >
+            <Sparkles className="h-4 w-4 shrink-0" />
+            <span>
+              Suggest a spot for me
+              <span className="mt-0.5 block text-[11px] font-normal text-white/85">
+                Finds a complementary origin, moves capture there, and downloads a projected 360 seed.
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={goPlaceInBuild}
+            className="flex w-full items-center gap-2 rounded-lg border border-subtle px-3 py-2.5 text-left text-sm font-medium text-primary transition hover:border-[var(--accent)] hover:text-accent"
+            data-second-capture-place-build
+          >
+            <Wrench className="h-4 w-4 shrink-0" />
+            <span>
+              I&apos;ll place it in Build
+              <span className="mt-0.5 block text-[11px] font-normal text-muted">
+                Opens Origin mode so you can move the capture yourself.
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep('choose')}
+            className="text-xs font-medium text-secondary hover:text-accent"
+          >
+            Back
+          </button>
+        </>
+      )}
+
+      {step === 'running' && (
+        <div className="space-y-3" data-second-capture-progress aria-live="polite">
+          <div className="flex items-start gap-2">
+            <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-accent" />
+            <div>
+              <div className="text-sm font-semibold text-primary">
+                {phaseLabel(progress?.phase)}
+              </div>
+              <p className="mt-0.5 text-xs text-secondary">
+                {progress?.message ?? 'Working…'}
+              </p>
+            </div>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-surface-muted">
+            <div
+              className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-300"
+              style={{ width: `${Math.round((progress?.progress ?? 0.05) * 100)}%` }}
+              data-second-capture-progress-bar
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted">
+            <span data-second-capture-eta>
+              About {formatDurationSeconds(remainingSeconds)} remaining
+              <span className="text-secondary"> · {formatElapsed(elapsedMs)} elapsed</span>
+            </span>
+            <span>{Math.round((progress?.progress ?? 0) * 100)}%</span>
+          </div>
+          <p className="text-[11px] leading-snug text-muted">
+            Coverage search can take half a minute on larger sets — the app is still working.
+          </p>
+          <button
+            type="button"
+            onClick={cancelRunning}
+            className="text-xs font-medium text-secondary hover:text-accent"
+            data-second-capture-cancel
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {step === 'awaiting_import' && (
+        <>
+          <div>
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-secondary">
+              <MapPin className="h-3.5 w-3.5 text-accent" />
+              Ready for second capture
+            </div>
+            <p className="mt-1 text-sm text-primary">
+              Capture origin moved to the suggested spot. A projected 360 seed was downloaded — style or inpaint it, then import here to blend.
+            </p>
+          </div>
+          <StyledPanoImportButton
+            modeAware
+            primary
+            onImported={(mode) => {
+              if (mode === 'add_secondary') {
+                onAwaitingImport();
+                onClose();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs font-medium text-secondary hover:text-accent"
+          >
+            Dismiss
+          </button>
+        </>
+      )}
+
+      {step === 'failed' && (
+        <>
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {error ?? 'Could not suggest a second vantage.'}
+          </p>
+          <p className="text-xs text-secondary">
+            You can place the second origin manually in Build instead.
+          </p>
+          <button
+            type="button"
+            onClick={goPlaceInBuild}
+            className="w-full rounded-lg bg-[var(--accent)] px-3 py-2.5 text-sm font-semibold text-white"
+            data-second-capture-fallback-build
+          >
+            Place in Build
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep('place_method')}
+            className="text-xs font-medium text-secondary hover:text-accent"
+          >
+            Try again
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function SecondCaptureForkPanel({
+  open,
+  onClose,
+  onContinue,
+  onAwaitingImport,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onContinue: () => void;
+  onAwaitingImport: () => void;
+}) {
+  if (!open) return null;
+
+  return (
     <div
       className="pointer-events-auto absolute inset-x-3 top-3 z-30 mx-auto max-w-md sm:inset-x-auto sm:left-5 sm:right-auto"
-      data-second-capture-fork
+      data-second-capture-fork-panel
     >
-      <ContextualPanel className="space-y-3 shadow-soft">
-        {step === 'choose' && (
-          <>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Reference ready</div>
-              <p className="mt-1 text-sm text-primary">
-                Continue with this capture, or add a second vantage to fill areas that look thin far from the origin.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onContinue}
-              className="w-full rounded-lg bg-[var(--accent)] px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)]"
-              data-second-capture-continue
-            >
-              Continue with this reference
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep('place_method')}
-              className="w-full rounded-lg border border-subtle px-3 py-2.5 text-sm font-medium text-primary transition hover:border-[var(--accent)] hover:text-accent"
-              data-second-capture-fill-gaps
-            >
-              Fill missing areas
-            </button>
-            <p className="text-[11px] leading-snug text-muted">
-              Projection is strongest near this capture. Distant walls and corners can look weak — a second vantage fills those gaps when blended.
-            </p>
-          </>
-        )}
-
-        {step === 'place_method' && (
-          <>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Second vantage</div>
-              <p className="mt-1 text-sm text-primary">
-                How do you want to pick the next capture point?
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={startAutoSuggest}
-              className="flex w-full items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2.5 text-left text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)]"
-              data-second-capture-suggest
-            >
-              <Sparkles className="h-4 w-4 shrink-0" />
-              <span>
-                Suggest a spot for me
-                <span className="mt-0.5 block text-[11px] font-normal text-white/85">
-                  Finds a complementary origin, moves capture there, and downloads a projected 360 seed.
-                </span>
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={goPlaceInBuild}
-              className="flex w-full items-center gap-2 rounded-lg border border-subtle px-3 py-2.5 text-left text-sm font-medium text-primary transition hover:border-[var(--accent)] hover:text-accent"
-              data-second-capture-place-build
-            >
-              <Wrench className="h-4 w-4 shrink-0" />
-              <span>
-                I&apos;ll place it in Build
-                <span className="mt-0.5 block text-[11px] font-normal text-muted">
-                  Opens Origin mode so you can move the capture yourself.
-                </span>
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep('choose')}
-              className="text-xs font-medium text-secondary hover:text-accent"
-            >
-              Back
-            </button>
-          </>
-        )}
-
-        {step === 'running' && (
-          <div className="space-y-3" data-second-capture-progress aria-live="polite">
-            <div className="flex items-start gap-2">
-              <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-accent" />
-              <div>
-                <div className="text-sm font-semibold text-primary">
-                  {phaseLabel(progress?.phase)}
-                </div>
-                <p className="mt-0.5 text-xs text-secondary">
-                  {progress?.message ?? 'Working…'}
-                </p>
-              </div>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-surface-muted">
-              <div
-                className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-300"
-                style={{ width: `${Math.round((progress?.progress ?? 0.05) * 100)}%` }}
-                data-second-capture-progress-bar
-              />
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted">
-              <span data-second-capture-eta>
-                About {formatDurationSeconds(remainingSeconds)} remaining
-                <span className="text-secondary"> · {formatElapsed(elapsedMs)} elapsed</span>
-              </span>
-              <span>{Math.round((progress?.progress ?? 0) * 100)}%</span>
-            </div>
-            <p className="text-[11px] leading-snug text-muted">
-              Coverage search can take half a minute on larger sets — the app is still working.
-            </p>
-            <button
-              type="button"
-              onClick={cancelRunning}
-              className="text-xs font-medium text-secondary hover:text-accent"
-              data-second-capture-cancel
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-
-        {step === 'awaiting_import' && (
-          <>
-            <div>
-              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-secondary">
-                <MapPin className="h-3.5 w-3.5 text-accent" />
-                Ready for second capture
-              </div>
-              <p className="mt-1 text-sm text-primary">
-                Capture origin moved to the suggested spot. A projected 360 seed was downloaded — style or inpaint it, then import here to blend.
-              </p>
-            </div>
-            <StyledPanoImportButton
-              modeAware
-              primary
-              onImported={(mode) => {
-                if (mode === 'add_secondary') {
-                  onAwaitingImport();
-                  onClose();
-                }
-              }}
-            />
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-xs font-medium text-secondary hover:text-accent"
-            >
-              Dismiss
-            </button>
-          </>
-        )}
-
-        {step === 'failed' && (
-          <>
-            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-              {error ?? 'Could not suggest a second vantage.'}
-            </p>
-            <p className="text-xs text-secondary">
-              You can place the second origin manually in Build instead.
-            </p>
-            <button
-              type="button"
-              onClick={goPlaceInBuild}
-              className="w-full rounded-lg bg-[var(--accent)] px-3 py-2.5 text-sm font-semibold text-white"
-              data-second-capture-fallback-build
-            >
-              Place in Build
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep('place_method')}
-              className="text-xs font-medium text-secondary hover:text-accent"
-            >
-              Try again
-            </button>
-          </>
-        )}
+      <ContextualPanel className="shadow-soft">
+        <SecondCaptureForkContent
+          open={open}
+          onClose={onClose}
+          onContinue={onContinue}
+          onAwaitingImport={onAwaitingImport}
+        />
       </ContextualPanel>
     </div>
   );
