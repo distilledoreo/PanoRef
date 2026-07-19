@@ -1,5 +1,6 @@
 import type { ProjectionRegion, Vec2, Vec3 } from '../domain/types';
-import { applyYawRotation, equirectUvToUnitDirection } from './projectionAlignmentMath';
+import { applyInverseYawRotation, applyYawRotation, equirectUvToUnitDirection, unitDirectionToEquirectUv } from './projectionAlignmentMath';
+import { degreesToRadians } from './sync';
 
 export const MAX_REGION_FIT_ORIGIN_DISTANCE_METERS = 0.25;
 export const MAX_REGION_ANGULAR_SPAN_DEGREES = 100;
@@ -11,6 +12,23 @@ const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 export interface TangentPlaneBasis { center: Vec3; right: Vec3; up: Vec3 }
 export interface ProjectionRegionCoordinateDiagnostics { valid: boolean; status: 'ready' | 'origin-mismatch' | 'too-large' | 'behind-plane' | 'unstable-pole' | 'error'; message?: string }
 export interface CommonPlaneRegion { target: Vec2[]; source: Vec2[]; basis: TangentPlaneBasis; diagnostics: ProjectionRegionCoordinateDiagnostics }
+
+/** Convert a target panorama UV into the source panorama's local UV at the same world direction. */
+export function targetUvToSourceUv(
+  targetUv: Vec2,
+  targetYawDegrees: number,
+  sourceYawDegrees: number,
+): Vec2 {
+  const yawDelta = ((sourceYawDegrees - targetYawDegrees + 540) % 360) - 180;
+  if (Math.abs(yawDelta) < 1e-9) return [...targetUv];
+  const worldDirection = applyYawRotation(
+    equirectUvToUnitDirection(targetUv),
+    degreesToRadians(targetYawDegrees),
+  );
+  return unitDirectionToEquirectUv(
+    applyInverseYawRotation(worldDirection, degreesToRadians(sourceYawDegrees)),
+  );
+}
 
 export function unitDirectionToTangentPlane(direction: Vec3, basis: TangentPlaneBasis): Vec2 | undefined {
   const depth = dot(direction, basis.center);

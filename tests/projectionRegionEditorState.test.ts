@@ -11,7 +11,7 @@ const outline: [number, number][] = [[0.2, 0.2], [0.4, 0.2], [0.4, 0.4], [0.2, 0
 function pending() { return completeTargetPolygon(createProjectionRegionDraft('styled', 'graybox'), outline, 'Canopy'); }
 
 describe('Projection Region editor draft', () => {
-  it('clones one target drawing with identical IDs and coordinates then advances to styled', () => {
+  it('clones one target drawing with identical IDs and coordinates when panorama yaws are equal', () => {
     const draft = pending();
     expect(draft.step).toBe('adjust-source');
     expect(draft.pendingRegion?.vertices.map((vertex) => vertex.sourceUv)).toEqual(outline);
@@ -67,6 +67,17 @@ describe('Projection Region editor draft', () => {
     expect(draft.regions.find((region) => region.id === first)?.vertices).toHaveLength(3);
     expect(removeRegion(draft, first).regions).toHaveLength(1);
     expect(isProjectionRegionDraftDirty(draft)).toBe(true);
+  });
+
+  it('clones a target drawing into source-local UVs for different panorama yaws', () => {
+    const draft = completeTargetPolygon(
+      createProjectionRegionDraft('styled', 'graybox'),
+      outline,
+      'Canopy',
+      { targetYawDegrees: 0, sourceYawDegrees: 60 },
+    );
+    expect(draft.pendingRegion?.vertices[0].sourceUv[0]).not.toBeCloseTo(outline[0][0], 4);
+    expect(draft.pendingRegion?.vertices.map((vertex) => vertex.targetUv)).toEqual(outline);
   });
 
   it('coalesces a pointer gesture into one undo entry after transient updates', () => {

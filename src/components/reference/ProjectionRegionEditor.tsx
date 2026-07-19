@@ -54,6 +54,7 @@ import {
   translateSourceRegion,
   undoRegionAction,
   type ProjectionRegionDraft,
+  type ProjectionRegionYawPair,
 } from "./projectionRegionEditorState";
 import { createProjectionRegionPreviewProject } from "./projectionRegionPreviewProject";
 import { ProjectionRegionResultPreview } from "./ProjectionRegionResultPreview";
@@ -248,11 +249,15 @@ export function ProjectionRegionEditor({
     )
       onClose();
   };
+  const regionYaws: ProjectionRegionYawPair = {
+    targetYawDegrees: target?.rotation[1] ?? 0,
+    sourceYawDegrees: source.rotation[1] ?? 0,
+  };
   const finishTarget = (points: { uv: Vec2 }[]) => {
     const positions = points.map((point) => point.uv);
     const next = redrawRegionId
-      ? replaceTargetPolygon(draft, redrawRegionId, positions)
-      : completeTargetPolygon(draft, positions);
+      ? replaceTargetPolygon(draft, redrawRegionId, positions, regionYaws)
+      : completeTargetPolygon(draft, positions, undefined, regionYaws);
     const nextRegion = next.pendingRegion ?? next.regions.find((region) => region.id === next.activeRegionId);
     if (nextRegion) {
       setSourceView(
@@ -685,7 +690,7 @@ export function ProjectionRegionEditor({
                       aria-label="Reset to graybox outline"
                       onClick={() =>
                         setDraft((current) =>
-                          resetSourceRegion(current, active.id),
+                          resetSourceRegion(current, active.id, regionYaws),
                         )
                       }
                       className="rounded border px-2 py-1 text-xs"

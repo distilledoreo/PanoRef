@@ -1,6 +1,7 @@
 import type { ProjectionRegion, ProjectionRegionAlignment, Vec2 } from '../../domain/types';
 import { createProjectionRegion, createProjectionRegionAlignment, createProjectionRegionVertexPair, MAX_REGION_EDGE_SOFTNESS } from '../../domain/defaults';
 import { insertPairedVertex, removePairedVertex, rotateSourceMask, scaleSourceMask, translateSourceMask } from '../../engine/projectionRegionPolygon';
+import { targetUvToSourceUv } from '../../engine/projectionRegionCoordinates';
 
 export type RegionEditorStep = 'draw-target' | 'adjust-source' | 'review';
 export interface ProjectionRegionDraft {
@@ -14,6 +15,7 @@ export interface ProjectionRegionDraft {
 }
 
 interface DraftMeta { baseline: string; undo: ProjectionRegionDraft[] }
+export interface ProjectionRegionYawPair { targetYawDegrees: number; sourceYawDegrees: number }
 const metadata = new WeakMap<ProjectionRegionDraft, DraftMeta>();
 const cloneRegion = (region: ProjectionRegion): ProjectionRegion => ({ ...region, vertices: region.vertices.map((vertex) => ({ ...vertex, targetUv: [...vertex.targetUv], sourceUv: [...vertex.sourceUv] })) });
 const cloneDraft = (draft: ProjectionRegionDraft): ProjectionRegionDraft => ({ ...draft, regions: draft.regions.map(cloneRegion), pendingRegion: draft.pendingRegion ? cloneRegion(draft.pendingRegion) : undefined });
@@ -36,10 +38,10 @@ export function createProjectionRegionDraft(sourcePanoId: string, targetGrayboxP
   const draft: ProjectionRegionDraft = { sourcePanoId, targetGrayboxPanoId: alignment?.targetGrayboxPanoId ?? targetGrayboxPanoId, regions: alignment?.regions.map(cloneRegion) ?? [], strength: Math.min(1, Math.max(0, alignment?.strength ?? 1)), step: 'review' };
   return register(draft);
 }
-export function cloneTargetIntoSource(region: ProjectionRegion): ProjectionRegion { return { ...cloneRegion(region), vertices: region.vertices.map((vertex) => ({ ...vertex, targetUv: [...vertex.targetUv], sourceUv: [...vertex.targetUv] })) }; }
-export function completeTargetPolygon(draft: ProjectionRegionDraft, points: Vec2[], name = `Region ${draft.regions.length + 1}`): ProjectionRegionDraft {
+export function cloneTargetIntoSource(region: ProjectionRegion, yaws?: ProjectionRegionYawPair): ProjectionRegion { return { ...cloneRegion(region), vertices: region.vertices.map((vertex) => ({ ...vertex, targetUv: [...vertex.targetUv], sourceUv: yaws ? targetUvToSourceUv(vertex.targetUv, yaws.targetYawDegrees, yaws.sourceYawDegrees) : [...vertex.targetUv] })) }; }
+export function completeTargetPolygon(draft: ProjectionRegionDraft, points: Vec2[], name = `Region ${draft.regions.length + 1}`, yaws?: ProjectionRegionYawPair): ProjectionRegionDraft {
   if (points.length < 3) return draft;
-  const pendingRegion = cloneTargetIntoSource(createProjectionRegion(points.map((point, index) => createProjectionRegionVertexPair(point, point, `vertex-${Date.now()}-${index + 1}`)), name));
+  const pendingRegion = cloneTargetIntoSource(createProjectionRegion(points.map((point, index) => createProjectionRegionVertexPair(point, point, `vertex-${Date.now()}-${index + 1}`)), name), yaws);
   pendingRegion.order = draft.regions.length;
   return update(draft, { ...draft, pendingRegion, activeRegionId: pendingRegion.id, step: 'adjust-source' });
 }
@@ -52,12 +54,12 @@ export const moveTargetVertexTransient = (draft: ProjectionRegionDraft, regionId
 export const translateSourceRegionTransient = (draft: ProjectionRegionDraft, regionId: string, delta: Vec2) => mapRegionTransient(draft, regionId, (region) => translateSourceMask(region, delta));
 export const scaleSourceRegion = (draft: ProjectionRegionDraft, regionId: string, scale: number) => mapRegion(draft, regionId, (region) => scaleSourceMask(region, scale));
 export const rotateSourceRegion = (draft: ProjectionRegionDraft, regionId: string, radians: number) => mapRegion(draft, regionId, (region) => rotateSourceMask(region, radians));
-export const resetSourceRegion = (draft: ProjectionRegionDraft, regionId: string) => mapRegion(draft, regionId, cloneTargetIntoSource);
+export const resetSourceRegion = (draft: ProjectionRegionDraft, regionId: string, yaws?: ProjectionRegionYawPair) => mapRegion(draft, regionId, (region) => cloneTargetIntoSource(region, yaws));
 export const insertRegionVertexPair = (draft: ProjectionRegionDraft, regionId: string, edgeStartVertexId: string, edgeT: number) => mapRegion(draft, regionId, (region) => insertPairedVertex(region, edgeStartVertexId, edgeT));
 export const removeRegionVertexPair = (draft: ProjectionRegionDraft, regionId: string, vertexId: string) => mapRegion(draft, regionId, (region) => removePairedVertex(region, vertexId));
 export function commitPendingRegion(draft: ProjectionRegionDraft): ProjectionRegionDraft { if (!draft.pendingRegion) return draft; const regions = [...draft.regions.map(cloneRegion), { ...cloneRegion(draft.pendingRegion), order: draft.regions.length }]; return update(draft, { ...draft, regions, pendingRegion: undefined, activeRegionId: regions.at(-1)?.id, step: 'review' }); }
 export function cancelPendingRegion(draft: ProjectionRegionDraft): ProjectionRegionDraft { if (!draft.pendingRegion) return draft; return update(draft, { ...draft, pendingRegion: undefined, activeRegionId: undefined, step: 'review' }); }
-export function replaceTargetPolygon(draft: ProjectionRegionDraft, regionId: string, points: Vec2[]): ProjectionRegionDraft { if (points.length < 3) return draft; return mapRegion(draft, regionId, (region) => cloneTargetIntoSource({ ...region, vertices: points.map((point, index) => createProjectionRegionVertexPair(point, point, region.vertices[index]?.id)) })); }
+export function replaceTargetPolygon(draft: ProjectionRegionDraft, regionId: string, points: Vec2[], yaws?: ProjectionRegionYawPair): ProjectionRegionDraft { if (points.length < 3) return draft; return mapRegion(draft, regionId, (region) => cloneTargetIntoSource({ ...region, vertices: points.map((point, index) => createProjectionRegionVertexPair(point, point, region.vertices[index]?.id)) }, yaws)); }
 export function removeRegion(draft: ProjectionRegionDraft, regionId: string): ProjectionRegionDraft { if (!draft.regions.some((region) => region.id === regionId)) return draft; return update(draft, { ...draft, regions: draft.regions.filter((region) => region.id !== regionId).map((region, order) => ({ ...cloneRegion(region), order })), activeRegionId: draft.activeRegionId === regionId ? undefined : draft.activeRegionId }); }
 export const renameRegion = (draft: ProjectionRegionDraft, regionId: string, name: string) => mapRegion(draft, regionId, (region) => ({ ...region, name: name.trim() || region.name }));
 export const toggleRegion = (draft: ProjectionRegionDraft, regionId: string, enabled?: boolean) => mapRegion(draft, regionId, (region) => ({ ...region, enabled: enabled ?? !region.enabled }));
