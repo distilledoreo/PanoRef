@@ -49,6 +49,7 @@ import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, Panel, Select, TextArea, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { ShotCameraRollThumbnail } from '../common/ShotCameraRollThumbnail';
+import { ShotMediaModal } from '../common/ShotMediaModal';
 import { ShotsLibraryCard } from '../common/ShotsLibraryCard';
 import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
@@ -147,6 +148,7 @@ export function ShotsWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [mediaModalShotId, setMediaModalShotId] = useState<string | null>(null);
   const [captureMode, setCaptureMode] = useState<CaptureMode>('still');
   const [appearance, setAppearance] = useState<'clay' | 'projected'>('clay');
   const [landFlash, setLandFlash] = useState(false);
@@ -259,6 +261,12 @@ export function ShotsWorkspace() {
 
   const handleOpenShotFromLibrary = useCallback((shotId: string) => {
     selectShot(shotId);
+    setLibraryOpen(false);
+  }, [selectShot]);
+
+  const handleOpenShotFromMedia = useCallback((shotId: string) => {
+    selectShot(shotId);
+    setMediaModalShotId(null);
     setLibraryOpen(false);
   }, [selectShot]);
 
@@ -979,7 +987,7 @@ export function ShotsWorkspace() {
                       landed={landed}
                       canDelete={canDelete}
                       framePreviewSrc={framePreviewByShotId[shot.id]}
-                      onOpenMedia={() => undefined}
+                      onOpenMedia={setMediaModalShotId}
                       onOpenShot={handleOpenShotFromLibrary}
                       onRename={handleLibraryRename}
                       onDelete={removeShot}
@@ -1001,6 +1009,17 @@ export function ShotsWorkspace() {
             </div>
           </div>
         )}
+
+        <ShotMediaModal
+          open={mediaModalShotId != null}
+          project={project}
+          shots={project.shots}
+          shotId={mediaModalShotId}
+          onClose={() => setMediaModalShotId(null)}
+          onOpenShot={handleOpenShotFromMedia}
+          onUpdateShot={updateShot}
+          onNavigateShot={setMediaModalShotId}
+        />
 
         {/* Bottom camera chrome */}
         <div
