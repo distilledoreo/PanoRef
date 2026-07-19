@@ -374,6 +374,10 @@ export function ShotsWorkspace() {
         height: video.height,
         durationSeconds: video.durationSeconds,
         frameRate: video.frameRate,
+        encodeMode: video.encodeMode ?? preferredMode,
+        codecString: video.codecString,
+        frameCount: video.frameCount,
+        resolutionPreset: videoResolutionPreset,
       });
       setCameraMovePreviewUrl(asset.uri);
       // Download from the encoded blob — multi‑MB data: URLs fail as anchor hrefs.

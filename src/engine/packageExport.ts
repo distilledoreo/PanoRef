@@ -70,6 +70,22 @@ export function isPackageExportCancelled(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Resolve-safe packages always re-encode clay motion when keyframes exist.
+ * Stored assets are only copied when rerendering is impossible (no keyframes).
+ */
+export type ClayCameraMovePackageSource = 'encode' | 'copy' | 'skip';
+
+export function resolveClayCameraMovePackageSource(
+  shot: Shot,
+  asset?: { uri?: string } | null,
+): ClayCameraMovePackageSource {
+  if (!shot.exportSettings.includeCameraMoveVideo) return 'skip';
+  if (hasRenderableCameraMove(shot.cameraKeyframes)) return 'encode';
+  if (asset?.uri) return 'copy';
+  return 'skip';
+}
+
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
     throw new DOMException('Export cancelled.', 'AbortError');
@@ -435,12 +451,10 @@ async function appendShotPackageToZip(
   }
 
   if (shot.exportSettings.includeCameraMoveVideo) {
-    if (cameraMoveVideoAsset?.uri) {
-      throwIfAborted(signal);
-      emit('packaging', 'Adding clay camera-move video…');
-      addBinaryToZip(zip, `${rootFolder}/inputs/viewport_clay_motion.mp4`, cameraMoveVideoAsset.uri);
-      finishUnit('packaging', 'Clay camera-move video added');
-    } else if (hasRenderableCameraMove(shot.cameraKeyframes)) {
+    const clayMotionSource = resolveClayCameraMovePackageSource(shot, cameraMoveVideoAsset);
+    if (clayMotionSource === 'encode') {
+      // Always generate deterministic Resolve-safe clay MP4 when keyframes exist.
+      // Do not reuse a stored Quick Preview / legacy MediaRecorder asset beside a fresh projected encode.
       throwIfAborted(signal);
       emit('encoding', 'Encoding clay camera move…', { indeterminate: true });
       try {
@@ -458,7 +472,10 @@ async function appendShotPackageToZip(
             });
           },
         });
-        zip.file(`${rootFolder}/inputs/viewport_clay_motion.mp4`, video.blob);
+        zip.file(
+          `${rootFolder}/inputs/viewport_clay_motion.mp4`,
+          await video.blob.arrayBuffer(),
+        );
         finishUnit('encoding', 'Clay camera-move video ready');
       } catch (error) {
         if (isPackageExportCancelled(error)) throw error;
@@ -468,6 +485,12 @@ async function appendShotPackageToZip(
             : 'Camera move MP4 export failed. Try Chrome or Edge, or disable “Camera move MP4” in export settings.',
         );
       }
+    } else if (clayMotionSource === 'copy' && cameraMoveVideoAsset?.uri) {
+      // Legacy fallback only when rerendering is impossible (no renderable keyframes).
+      throwIfAborted(signal);
+      emit('packaging', 'Adding clay camera-move video…');
+      addBinaryToZip(zip, `${rootFolder}/inputs/viewport_clay_motion.mp4`, cameraMoveVideoAsset.uri);
+      finishUnit('packaging', 'Clay camera-move video added');
     }
   }
 
@@ -494,7 +517,10 @@ async function appendShotPackageToZip(
           });
         },
       });
-      zip.file(`${rootFolder}/inputs/viewport_projected_motion.mp4`, video.blob);
+      zip.file(
+        `${rootFolder}/inputs/viewport_projected_motion.mp4`,
+        await video.blob.arrayBuffer(),
+      );
       finishUnit('encoding', 'Projected camera-move video ready');
     } catch (error) {
       if (isPackageExportCancelled(error)) throw error;

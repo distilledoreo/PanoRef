@@ -1,13 +1,24 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
 import { createDefaultProject, createPanoAsset, createPanoReference } from '../src/domain/defaults';
+import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
 import {
   buildMultiShotPackage,
   buildShotPackage,
   countShotPackageUnits,
   PackageExportProgress,
+  resolveClayCameraMovePackageSource,
 } from '../src/engine/packageExport';
+import { renderShotCameraMoveMp4 } from '../src/engine/renderers';
+
+vi.mock('../src/engine/renderers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/engine/renderers')>();
+  return {
+    ...actual,
+    renderShotCameraMoveMp4: vi.fn(actual.renderShotCameraMoveMp4),
+  };
+});
 
 function withGrayboxAndShot(name = 'Temple') {
   const project = createDefaultProject();
@@ -41,7 +52,10 @@ function withGrayboxAndShot(name = 'Temple') {
       includeFullPano: false,
       includeGrayboxPano: false,
       includeCameraMoveVideo: false,
+      includeProjectedCameraMoveVideo: false,
       includeCameraMoveReferenceFrames: false,
+      includeProjectedCameraMoveReferenceFrames: false,
+      includeProjectedViewport: false,
       includeMetadata: true,
       includePrompt: true,
     };
@@ -56,14 +70,151 @@ async function zipPaths(blob: Blob): Promise<string[]> {
 }
 
 describe('package export', () => {
+  beforeEach(() => {
+    vi.mocked(renderShotCameraMoveMp4).mockReset();
+    vi.mocked(renderShotCameraMoveMp4).mockImplementation(async () => {
+      throw new Error('renderShotCameraMoveMp4 should be mocked in camera-move package tests');
+    });
+  });
+
   it('generates camera move MP4 during packaging when keyframes exist without a pre-exported asset', () => {
     const source = readFileSync(new URL('../src/engine/packageExport.ts', import.meta.url), 'utf8');
+    expect(source).toContain('resolveClayCameraMovePackageSource');
     expect(source).toContain('hasRenderableCameraMove(shot.cameraKeyframes)');
     expect(source).toContain('renderShotCameraMoveMp4');
     expect(source).toContain('viewport_clay_motion.mp4');
     expect(source).toContain("resolutionPreset: '1080p'");
     expect(source).toContain("mode: 'render'");
+    expect(source).toContain('Legacy fallback only when rerendering is impossible');
     expect(source).not.toContain('getSupportedCameraMoveMp4MimeType');
+  });
+
+  it('prefers fresh deterministic clay encode over a stored Quick Preview asset when keyframes exist', () => {
+    const project = withGrayboxAndShot();
+    const shot = project.shots[0];
+    shot.exportSettings = {
+      ...shot.exportSettings,
+      includeCameraMoveVideo: true,
+    };
+    shot.cameraKeyframes = setTwoPointCameraKeyframe({
+      keyframes: [],
+      slot: 'start',
+      camera: shot.camera,
+      durationSeconds: 2,
+    });
+    shot.cameraKeyframes = setTwoPointCameraKeyframe({
+      keyframes: shot.cameraKeyframes,
+      slot: 'end',
+      camera: {
+        ...shot.camera,
+        position: [1, 1.6, 3],
+        target: [1, 1.6, 8],
+      },
+      durationSeconds: 2,
+    });
+
+    const legacyId = 'legacy-quick-preview';
+    project.assets.assets[legacyId] = {
+      id: legacyId,
+      type: 'video',
+      name: 'legacy_quick_preview.mp4',
+      uri: `data:video/mp4;base64,${Buffer.from('LEGACY_QUICK_PREVIEW_BYTES').toString('base64')}`,
+      mimeType: 'video/mp4',
+      width: 1280,
+      height: 720,
+      createdAt: new Date().toISOString(),
+      metadata: {
+        source: 'graybox_camera_keyframes',
+        encodeMode: 'quickPreview',
+      },
+    };
+    shot.assets.cameraMoveVideoAssetId = legacyId;
+
+    expect(resolveClayCameraMovePackageSource(shot, project.assets.assets[legacyId])).toBe('encode');
+  });
+
+  it('ignores a stored Quick Preview clay asset and packs a freshly encoded MP4 when keyframes exist', async () => {
+    const project = withGrayboxAndShot();
+    const shot = project.shots[0];
+    shot.exportSettings = {
+      ...shot.exportSettings,
+      includeCameraMoveVideo: true,
+    };
+    shot.cameraKeyframes = setTwoPointCameraKeyframe({
+      keyframes: [],
+      slot: 'start',
+      camera: shot.camera,
+      durationSeconds: 2,
+    });
+    shot.cameraKeyframes = setTwoPointCameraKeyframe({
+      keyframes: shot.cameraKeyframes,
+      slot: 'end',
+      camera: {
+        ...shot.camera,
+        position: [1, 1.6, 3],
+        target: [1, 1.6, 8],
+      },
+      durationSeconds: 2,
+    });
+
+    const legacyId = 'legacy-quick-preview';
+    project.assets.assets[legacyId] = {
+      id: legacyId,
+      type: 'video',
+      name: 'legacy_quick_preview.mp4',
+      uri: `data:video/mp4;base64,${Buffer.from('LEGACY_QUICK_PREVIEW_BYTES').toString('base64')}`,
+      mimeType: 'video/mp4',
+      width: 1280,
+      height: 720,
+      createdAt: new Date().toISOString(),
+      metadata: {
+        source: 'graybox_camera_keyframes',
+        encodeMode: 'quickPreview',
+      },
+    };
+    shot.assets.cameraMoveVideoAssetId = legacyId;
+
+    vi.mocked(renderShotCameraMoveMp4).mockResolvedValue({
+      blob: new Blob([Uint8Array.from(Buffer.from('FRESH_DETERMINISTIC_ENCODE'))], { type: 'video/mp4' }),
+      width: 1920,
+      height: 1080,
+      durationSeconds: 2,
+      frameRate: 30,
+      mimeType: 'video/mp4',
+      fileExtension: 'mp4',
+      encodeMode: 'render',
+      frameCount: 60,
+      codecString: 'avc1.640028',
+    });
+
+    const result = await buildShotPackage(project, shot);
+    expect(renderShotCameraMoveMp4).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(renderShotCameraMoveMp4).mock.calls[0]?.[2]).toMatchObject({
+      mode: 'render',
+      appearance: 'clay',
+      resolutionPreset: '1080p',
+    });
+    expect(result.manifestPaths.some((path) => path.includes('viewport_clay_motion.mp4'))).toBe(true);
+
+    // Confirm the packed bytes came from the fresh encode, not the legacy data-URL asset.
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer());
+    const motionPath = Object.keys(zip.files).find((path) => path.endsWith('viewport_clay_motion.mp4'));
+    expect(motionPath).toBeTruthy();
+    const packed = new TextDecoder().decode(await zip.file(motionPath!)!.async('uint8array'));
+    expect(packed).toContain('FRESH_DETERMINISTIC_ENCODE');
+    expect(packed).not.toContain('LEGACY_QUICK_PREVIEW_BYTES');
+  });
+
+  it('copies a stored clay asset only when keyframes cannot be re-encoded', () => {
+    const project = withGrayboxAndShot();
+    const shot = project.shots[0];
+    shot.exportSettings = {
+      ...shot.exportSettings,
+      includeCameraMoveVideo: true,
+    };
+    shot.cameraKeyframes = [];
+    expect(resolveClayCameraMovePackageSource(shot, { uri: 'data:video/mp4;base64,AAA' })).toBe('copy');
+    expect(resolveClayCameraMovePackageSource(shot, null)).toBe('skip');
   });
 
   it('builds a single-shot package zip', async () => {
