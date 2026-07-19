@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, Check, Download, FileJson, FolderArchive, Settings, X } from 'lucide-react';
+import { getShotDisplayName, getShotPrimaryLabel } from '../../domain/shotIdentity';
+import { getShotExportProgressLabel } from '../../engine/exportNaming';
 import { createShotPackageManifest, selectExportPathPreview } from '../../engine/exportManifest';
 import { reconcileExportSelectedShotIds } from '../../engine/exportSelection';
 import {
@@ -223,7 +225,7 @@ export function ExportWorkspace() {
                 currentShot: 1,
                 totalShots: 1,
                 shotId: selectedShot.id,
-                shotName: `Shot ${selectedShot.shotNumber}`,
+                shotName: getShotExportProgressLabel(selectedShot),
                 message: 'Package downloaded',
               }
         ));
@@ -390,7 +392,7 @@ export function ExportWorkspace() {
                       onChange={() => toggleShotSelection(shot.id)}
                       disabled={isExportingPackage}
                       className="h-5 w-5 accent-[var(--accent)]"
-                      aria-label={`Export Shot ${shot.shotNumber}`}
+                      aria-label={`Export ${getShotPrimaryLabel(shot)}`}
                     />
                     <button
                       type="button"
@@ -400,14 +402,14 @@ export function ExportWorkspace() {
                     >
                       <ShotThumbnail project={project} shot={shot} compact className="h-9 w-16 shrink-0" />
                       <span className="min-w-0 flex-1 leading-tight">
-                        <span className="block text-xs font-medium text-primary">Shot {shot.shotNumber}</span>
+                        <span className="block text-xs font-medium text-primary">{getShotPrimaryLabel(shot)}</span>
                         <span className="block truncate text-[11px] text-secondary">{shot.name}</span>
                       </span>
                     </button>
                     {shotWarnings.length > 0 ? (
                       <WarningDetailsButton
                         warnings={shotWarnings}
-                        title={`Shot ${shot.shotNumber}`}
+                        title={getShotPrimaryLabel(shot)}
                       />
                     ) : (
                       <span className="shrink-0 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
@@ -471,7 +473,7 @@ export function ExportWorkspace() {
               className="rounded-lg border border-subtle bg-surface-muted px-3 py-2 text-xs text-secondary"
             >
               Settings apply to the <span className="font-semibold text-primary">active shot</span>
-              {' '}(Shot {selectedShot.shotNumber}: {selectedShot.name}) only — not every checked shot in the multi-select list.
+              {' '}({getShotDisplayName(selectedShot)}) only — not every checked shot in the multi-select list.
             </p>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Width">

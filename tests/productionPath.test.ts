@@ -61,7 +61,7 @@ describe('workflow guidance UI', () => {
     expect(build).toContain('Render 360 Reference');
     expect(exportWorkspace).toContain('Camera move clay frames');
     expect(exportWorkspace).toContain('Export Settings');
-    expect(exportWorkspace).toContain('aria-label={`Export Shot');
+    expect(exportWorkspace).toContain('getShotPrimaryLabel(shot)');
     expect(exportWorkspace).toContain('Handoff packages');
     expect(app).not.toContain('ReviewWorkspace');
     expect(app).not.toContain("id: 'review'");
