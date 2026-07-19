@@ -43,7 +43,8 @@ describe('workflow guidance UI', () => {
     const shotInfoCard = readFileSync(new URL('../src/components/common/ShotInfoCard.tsx', import.meta.url), 'utf8');
     expect(shots).toContain('data-shots-camera-shell');
     expect(shots).toContain('data-shots-shutter');
-    expect(shots).toContain('ShotThumbnail');
+    expect(shots).toContain('ShotCameraRollThumbnail');
+    expect(shots).toContain('ShotsLibraryCard');
     expect(shotInfoCard).toContain('Open in 360');
     expect(shots).toContain('PrecisionDrawer');
     expect(shots).toContain('data-shots-advanced-settings');

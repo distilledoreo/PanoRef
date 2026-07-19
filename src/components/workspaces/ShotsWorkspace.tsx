@@ -30,6 +30,12 @@ import {
   setTwoPointCameraKeyframe,
   updateCameraMoveDuration,
 } from '../../engine/cameraKeyframes';
+import {
+  getCameraMoveDownloadName,
+  getProjectedCameraMoveDownloadName,
+  getProjectedStillDownloadName,
+  getViewportStillDownloadName,
+} from '../../engine/exportNaming';
 import { downloadBlob, downloadDataUrl } from '../../engine/projectIO';
 import {
   canUseRenderMp4Export,
@@ -180,10 +186,10 @@ export function ShotsWorkspace() {
   }, [getEffectiveCamera, selectedShot]);
 
   const exportFrameFileName = selectedShot
-    ? `${selectedShot.name.replace(/\s+/g, '_').toLowerCase()}_${selectedShot.exportSettings.width}x${selectedShot.exportSettings.height}.png`
+    ? getViewportStillDownloadName(selectedShot)
     : 'camera_frame.png';
   const cameraMoveFileName = selectedShot
-    ? `${selectedShot.name.replace(/\s+/g, '_').toLowerCase()}_camera_move.mp4`
+    ? getCameraMoveDownloadName(selectedShot)
     : 'camera_move.mp4';
   const cameraMoveKeyframes = useMemo(
     () => getSortedCameraKeyframes(selectedShot?.cameraKeyframes ?? []),
@@ -289,7 +295,9 @@ export function ShotsWorkspace() {
       if (canUseProjectedAppearance(project)) {
         try {
           const projected = await renderShotProjectedFrame(project, previewShot);
-          const projectedName = exportFrameFileName.replace(/\.png$/i, '_projected.png');
+          const projectedName = selectedShot
+            ? getProjectedStillDownloadName(selectedShot)
+            : exportFrameFileName.replace(/\.png$/i, '_projected.png');
           downloadDataUrl(projected.dataUrl, projectedName);
         } catch {
           // Soft-fail projected companion; clay already succeeded.
@@ -425,7 +433,7 @@ export function ShotsWorkspace() {
             },
           });
           if (cameraMoveAbortRef.current.cancelled) return;
-          const projectedName = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '_projected.mp4');
+          const projectedName = getProjectedCameraMoveDownloadName(selectedShot);
           downloadBlob(projectedVideo.blob, projectedName);
           // Optional still contact sheet companions (still export resolution).
           const frames = getCameraMoveReferenceFrames(selectedShot.cameraKeyframes);
@@ -556,12 +564,13 @@ export function ShotsWorkspace() {
       },
     };
     setSnapshotError(undefined);
-    const baseName = `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}`;
-    void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number])
+    const shotForNaming = previewShot as typeof latestProject.shots[number];
+    const viewportFileName = getViewportStillDownloadName(shotForNaming);
+    void renderShotFrame(latestProject, shotForNaming)
       .then(async (frame) => {
         setShotFramePreview(shot.id, frame.dataUrl);
         useContinuityStore.getState().attachViewportRenderToShot(shot.id, {
-          name: `${baseName}_viewport.png`,
+          name: viewportFileName,
           dataUrl: frame.dataUrl,
           width: frame.width,
           height: frame.height,
@@ -569,11 +578,11 @@ export function ShotsWorkspace() {
         // Dual download: clay control frame is attached; projected companion downloads when available.
         if (canUseProjectedAppearance(latestProject)) {
           try {
-            const projected = await renderShotProjectedFrame(
-              latestProject,
-              previewShot as typeof latestProject.shots[number],
+            const projected = await renderShotProjectedFrame(latestProject, shotForNaming);
+            downloadDataUrl(
+              projected.dataUrl,
+              getProjectedStillDownloadName(shotForNaming),
             );
-            downloadDataUrl(projected.dataUrl, `${baseName}_viewport_projected.png`);
           } catch {
             // Soft-fail projected companion.
           }
