@@ -212,12 +212,15 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain("buildMode === 'pano_origin'");
     expect(build).toContain('|| buildMode === \'pano_origin\'');
     expect(build).toContain("editingChromeVisible && (");
-    expect(build).toContain('{selectedObjects.length > 0 && editingChromeVisible && (');
+    expect(build).toContain('{selectedObjects.length > 0 && editingChromeVisible && buildMode !== \'pano_origin\' && (');
     expect(build).toContain('Esc exits');
     expect(build).toContain('tap Free camera to edit');
     expect(build).toContain('handleMovePanoOrigin');
     expect(build).toContain('onRotatePanoOrigin');
     expect(build).toContain('shouldWarnOnOriginMove');
+    expect(build).toContain('data-build-origin-coaching');
+    expect(build).toContain('data-build-origin-controls');
+    expect(build).toContain('data-build-free-camera-control');
   });
 
   it('surfaces reference alignment yaw/opacity on viewer chrome', () => {
@@ -228,6 +231,10 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).toContain('data-panoramas-card');
     expect(reference).toContain('data-reference-settings-gear');
     expect(reference).toContain('SecondCaptureForkPanel');
+    expect(reference).toContain('data-reference-pano-origins');
+    expect(reference).toContain('isCaptureOriginNearPano');
+    expect(reference).toContain('grayboxMatchesActive');
+    expect(reference).toContain('activePano?.origin ?? project.scene.panoOrigin');
   });
 
   it('exposes remove controls for pano references in reference settings', () => {

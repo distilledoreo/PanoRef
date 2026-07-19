@@ -9,6 +9,7 @@ import {
   canUseDualProjectorBlend,
   computeProjectorBlendWeights,
   countStyledPanoramas,
+  isCaptureOriginNearPano,
   originMoveWarningMessage,
   projectorConfidence,
   resolveProjectedProjectorAssets,
@@ -130,6 +131,44 @@ describe('multi-origin projection helpers', () => {
     expect(pano.origin).toEqual([1, 2, 3]);
     project.scene.panoOrigin[0] = 99;
     expect(pano.origin[0]).toBe(1);
+  });
+
+  it('matches graybox compare eligibility to each pano origin without requiring scene origin moves', () => {
+    const project = createDefaultProject();
+    const primary = createPanoReference({
+      name: 'Primary',
+      assetId: 'a1',
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: true,
+    });
+    const secondary = createPanoReference({
+      name: 'Secondary',
+      assetId: 'a2',
+      type: 'ai_global_reference',
+      origin: [4, 1.6, 2],
+      width: 4,
+      height: 2,
+      isCanonical: false,
+    });
+    const grayboxAtPrimary = createPanoReference({
+      name: 'Graybox',
+      assetId: 'g1',
+      type: 'graybox_render',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: false,
+    });
+
+    expect(isCaptureOriginNearPano(grayboxAtPrimary.origin, primary)).toBe(true);
+    expect(isCaptureOriginNearPano(grayboxAtPrimary.origin, secondary)).toBe(false);
+    // Reference preview can switch panos without relocating Build's live capture origin.
+    expect(isCaptureOriginNearPano(project.scene.panoOrigin, primary)).toBe(true);
+    project.scene.panoOrigin = [9, 1.6, 9];
+    expect(isCaptureOriginNearPano(grayboxAtPrimary.origin, primary)).toBe(true);
   });
 
   it('does not auto-pick graybox as dual secondary', () => {

@@ -18,6 +18,7 @@ import { PanoViewer } from '../viewers/PanoViewer';
 import { directionToYawPitch, subtract } from '../../engine/sync';
 import {
   countStyledPanoramas,
+  isCaptureOriginNearPano,
   resolveStyledImportMode,
   styledImportActionHint,
 } from '../../engine/multiOriginProjection';
@@ -60,7 +61,15 @@ export function ReferenceWorkspace() {
   const activeAsset = activePano ? project.assets.assets[activePano.imageAssetId] : undefined;
   const grayboxPano = getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
-  const canCalibrate = Boolean(activePano && activePano.type !== 'graybox_render' && grayboxPano);
+  // Compare/align only against a graybox captured at this pano's frozen origin — never move Build's capture origin.
+  const grayboxMatchesActive = Boolean(
+    activePano
+    && grayboxPano
+    && isCaptureOriginNearPano(grayboxPano.origin, activePano),
+  );
+  const compareGraybox = grayboxMatchesActive ? grayboxPano : undefined;
+  const compareGrayboxAsset = grayboxMatchesActive ? grayboxAsset : undefined;
+  const canCalibrate = Boolean(activePano && activePano.type !== 'graybox_render' && compareGraybox);
   const alignmentAccepted = isReferenceAlignmentAccepted(project);
   const styledCount = countStyledPanoramas(project);
   const importMode = resolveStyledImportMode(project, { pendingSecondaryStyledImport });
@@ -168,8 +177,8 @@ export function ReferenceWorkspace() {
               onViewChange={setPanoView}
               label={activePano?.name ?? 'Reference Workspace'}
               panoRotation={activePano?.rotation}
-              compareImageUrl={canCalibrate ? grayboxAsset?.uri : undefined}
-              compareRotation={grayboxPano?.rotation}
+              compareImageUrl={canCalibrate ? compareGrayboxAsset?.uri : undefined}
+              compareRotation={compareGraybox?.rotation}
               compareOpacity={compareOpacity}
             />
 
@@ -270,20 +279,49 @@ export function ReferenceWorkspace() {
                       <Settings className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <ul className="space-y-1">
-                    {styledPanos.map((pano) => (
-                      <li key={pano.id} className="truncate text-xs text-primary">
-                        <button
-                          type="button"
-                          onClick={() => setActivePano(pano.id)}
-                          className={`w-full truncate text-left ${pano.id === activePano?.id ? 'font-semibold text-accent' : 'hover:text-accent'}`}
-                        >
-                          {pano.name}
-                          {pano.isCanonical ? ' · reference' : ''}
-                        </button>
-                      </li>
-                    ))}
+                  <ul className="space-y-1" data-reference-pano-origins>
+                    {styledPanos.map((pano, index) => {
+                      const isActive = pano.id === activePano?.id;
+                      const captureLabel = styledPanos.length > 1
+                        ? `Origin ${String.fromCharCode(65 + index)}`
+                        : 'Origin';
+                      return (
+                        <li key={pano.id} className="text-xs text-primary">
+                          <button
+                            type="button"
+                            onClick={() => setActivePano(pano.id)}
+                            className={`w-full rounded-lg px-1.5 py-1 text-left transition ${
+                              isActive
+                                ? 'bg-accent-soft font-semibold text-accent'
+                                : 'hover:bg-surface-muted/80 hover:text-accent'
+                            }`}
+                            data-reference-pano-option={pano.id}
+                            aria-pressed={isActive}
+                          >
+                            <span className="block truncate">
+                              {pano.name}
+                              {pano.isCanonical ? ' · reference' : ''}
+                            </span>
+                            <span className="mt-0.5 block truncate text-[10px] font-normal text-secondary">
+                              {captureLabel}
+                              {' · '}
+                              {pano.origin.map((value) => value.toFixed(1)).join(', ')}
+                              {' m'}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
+                  {activePano && styledPanos.length > 1 && (
+                    <p className="text-[10px] leading-snug text-secondary" data-reference-active-origin-hint>
+                      Preview uses this capture’s origin for landmarks
+                      {!grayboxMatchesActive && grayboxPano
+                        ? ' · graybox is from another capture, so alignment is hidden'
+                        : ''}
+                      .
+                    </p>
+                  )}
                   <StyledPanoImportButton
                     modeAware
                     onImported={(mode) => {
@@ -519,6 +557,9 @@ export function ReferenceWorkspace() {
                       {pano.isCanonical ? ' · canonical' : ''}
                     </div>
                     <div className="truncate text-xs text-secondary">{typeLabel}</div>
+                    <div className="truncate text-[10px] text-secondary">
+                      Origin · {pano.origin.map((value) => value.toFixed(1)).join(', ')} m
+                    </div>
                   </button>
                   <button
                     type="button"
@@ -603,7 +644,13 @@ export function ReferenceWorkspace() {
               Render a graybox in Build first. Then open Objective for the image AI prompt.
             </p>
           )}
-          {!canCalibrate && grayboxPano && (
+          {!canCalibrate && grayboxPano && activePano && activePano.type !== 'graybox_render' && !grayboxMatchesActive && (
+            <p className="text-sm text-secondary" data-reference-origin-mismatch>
+              This panorama was captured at a different origin than the current graybox.
+              Landmarks still use this pano’s origin. Render a clay 360 at this capture point in Build if you need graybox alignment.
+            </p>
+          )}
+          {!canCalibrate && grayboxPano && (!activePano || activePano.type === 'graybox_render' || grayboxMatchesActive) && (
             <p className="text-sm text-secondary">
               Import a {STYLED_PANO.short} to compare it against the graybox.
             </p>

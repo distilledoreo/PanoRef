@@ -713,7 +713,7 @@ export function BuildWorkspace() {
           </div>
         )}
 
-        {selectedObjects.length > 0 && editingChromeVisible && (
+        {selectedObjects.length > 0 && editingChromeVisible && buildMode !== 'pano_origin' && (
           <div
             className="pointer-events-none absolute right-5 top-[calc(var(--stage-header-safe)+7.5rem)] z-10 sm:top-[calc(var(--stage-header-safe)+4rem)]"
             data-build-selection-tools
@@ -937,8 +937,13 @@ export function BuildWorkspace() {
 
         {buildMode === 'pano_origin' && (
           <div
-            className="pointer-events-none absolute left-5 z-10"
-            style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+            className="pointer-events-none absolute right-5 z-10"
+            style={{
+              top: editingChromeVisible
+                ? 'calc(var(--stage-header-safe) + 4rem)'
+                : 'calc(var(--stage-header-safe) + 0.35rem)',
+            }}
+            data-build-origin-coaching
           >
             <ContextualPanel className="max-w-sm space-y-1 text-sm text-secondary">
               <div>
@@ -962,6 +967,7 @@ export function BuildWorkspace() {
           <div
             className="pointer-events-none absolute right-5 z-10"
             style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+            data-build-origin-controls
           >
             <ContextualPanel>
               <div className="flex items-center gap-2">
