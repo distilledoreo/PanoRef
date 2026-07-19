@@ -4,7 +4,13 @@ import { readFileSync } from 'node:fs';
 import { createDefaultProject, createCameraData } from '../src/domain/defaults';
 import { computeCameraMoveClippingRange } from '../src/engine/exportClipping';
 import { createFinalRenderSceneOptions } from '../src/engine/finalRenderProfile';
-import { analyzeTimestamps } from '../src/engine/mp4Validate';
+import {
+  analyzeTimestamps,
+  evaluateAvcProfileAndLevel,
+  isAvcLevelSufficientFor,
+  macroblocksForFrame,
+  parseAvcCodecString,
+} from '../src/engine/mp4Validate';
 import { buildScene, disposeScene } from '../src/engine/sceneObjects';
 import {
   cameraMoveFrameTimeSeconds,
@@ -105,6 +111,57 @@ describe('reliable video export foundations', () => {
 
     const dupes = analyzeTimestamps([0, 0.1, 0.1, 0.2]);
     expect(dupes.duplicateTimestamps).toBe(true);
+  });
+
+  it('requires High profile and a level sufficient for the encoded frame, not an exact codec string', () => {
+    expect(parseAvcCodecString('avc1.640028')).toEqual({
+      profileIdc: 0x64,
+      constraintFlags: 0x00,
+      levelIdc: 0x28,
+      raw: 'avc1.640028',
+    });
+    expect(macroblocksForFrame(1920, 1080)).toBe(120 * 68);
+    expect(macroblocksForFrame(3840, 2160)).toBe(240 * 135);
+    expect(macroblocksForFrame(320, 180)).toBe(20 * 12);
+
+    // Production 1080p / 4K need their preset levels (or higher).
+    expect(isAvcLevelSufficientFor({ levelIdc: 0x28, width: 1920, height: 1080, frameRate: 30 })).toBe(true);
+    expect(isAvcLevelSufficientFor({ levelIdc: 0x1e, width: 1920, height: 1080, frameRate: 30 })).toBe(false);
+    expect(isAvcLevelSufficientFor({ levelIdc: 0x33, width: 3840, height: 2160, frameRate: 30 })).toBe(true);
+    expect(isAvcLevelSufficientFor({ levelIdc: 0x28, width: 3840, height: 2160, frameRate: 30 })).toBe(false);
+
+    // Tiny harness clip: Level 3.0 is enough even when the exporter requested Level 4.0.
+    expect(
+      evaluateAvcProfileAndLevel({
+        codecParam: 'avc1.640c1e',
+        presetCodecString: 'avc1.640028',
+        width: 320,
+        height: 180,
+        frameRate: 30,
+      }),
+    ).toBeUndefined();
+
+    // Same Level 3.0 bitstream is rejected for full 1080p.
+    expect(
+      evaluateAvcProfileAndLevel({
+        codecParam: 'avc1.640c1e',
+        presetCodecString: 'avc1.640028',
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+      })?.code,
+    ).toBe('profileLevel');
+
+    // Wrong profile fails even when the level would be enough.
+    expect(
+      evaluateAvcProfileAndLevel({
+        codecParam: 'avc1.42E01E',
+        presetCodecString: 'avc1.640028',
+        width: 320,
+        height: 180,
+        frameRate: 30,
+      })?.code,
+    ).toBe('profileLevel');
   });
 
   it('wires deterministic encode path without silent Render→Quick Preview downgrade', () => {
