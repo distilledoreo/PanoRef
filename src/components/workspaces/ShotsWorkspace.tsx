@@ -48,13 +48,18 @@ import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, Panel, Select, TextArea, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
-import { ShotThumbnail } from '../common/ShotThumbnail';
+import { ShotCameraRollThumbnail } from '../common/ShotCameraRollThumbnail';
+import { ShotsLibraryCard } from '../common/ShotsLibraryCard';
 import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
 import { canUseProjectedAppearance } from '../../engine/projectedStyle';
 import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { FullBleedLayout } from './WorkspaceShell';
+import {
+  normalizeProductionShotId,
+  normalizeShotTitle,
+} from '../../domain/shotIdentity';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
 const STATUS_LABELS: Record<ShotStatus, string> = {
@@ -242,6 +247,20 @@ export function ShotsWorkspace() {
   const setShotFramePreview = useCallback((shotId: string, dataUrl: string) => {
     setFramePreviewByShotId((current) => ({ ...current, [shotId]: dataUrl }));
   }, []);
+
+  const handleLibraryRename = useCallback((shotId: string, updates: { productionShotId?: string; name: string }) => {
+    const shot = project.shots.find((item) => item.id === shotId);
+    if (!shot) return;
+    updateShot(shotId, {
+      productionShotId: normalizeProductionShotId(updates.productionShotId),
+      name: normalizeShotTitle(shot, updates.name),
+    });
+  }, [project.shots, updateShot]);
+
+  const handleOpenShotFromLibrary = useCallback((shotId: string) => {
+    selectShot(shotId);
+    setLibraryOpen(false);
+  }, [selectShot]);
 
   const exportCameraFrame = useCallback(async () => {
     const previewShot = getPreviewShot();
@@ -952,50 +971,19 @@ export function ShotsWorkspace() {
                   const landed = isShotFramingAccepted(project, shot.id);
                   const canDelete = project.shots.length > 1;
                   return (
-                    <div
+                    <ShotsLibraryCard
                       key={shot.id}
-                      className={`relative shrink-0 overflow-hidden rounded-xl border transition ${
-                        selected
-                          ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]'
-                          : 'border-white/15'
-                      }`}
-                      data-shots-library-card
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          selectShot(shot.id);
-                          setLibraryOpen(false);
-                        }}
-                        className="block"
-                        aria-label={`Select shot ${shot.shotNumber}`}
-                      >
-                        <ShotThumbnail
-                          project={project}
-                          shot={shot}
-                          overrideSrc={framePreviewByShotId[shot.id]}
-                          className="h-20 w-28 object-cover"
-                        />
-                        <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                          {shot.shotNumber}{landed ? ' · ✓' : ''}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (!canDelete) return;
-                          removeShot(shot.id);
-                        }}
-                        disabled={!canDelete}
-                        className="absolute right-1 top-1 inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                        aria-label={canDelete ? `Delete shot ${shot.shotNumber}` : 'Cannot delete the only shot'}
-                        title={canDelete ? 'Delete shot' : 'Keep at least one shot'}
-                        data-shots-library-delete
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                      project={project}
+                      shot={shot}
+                      selected={selected}
+                      landed={landed}
+                      canDelete={canDelete}
+                      framePreviewSrc={framePreviewByShotId[shot.id]}
+                      onOpenMedia={() => undefined}
+                      onOpenShot={handleOpenShotFromLibrary}
+                      onRename={handleLibraryRename}
+                      onDelete={removeShot}
+                    />
                   );
                 })}
                 <button
@@ -1152,7 +1140,7 @@ export function ShotsWorkspace() {
               title="Previous shots"
             >
               {libraryThumbShot ? (
-                <ShotThumbnail
+                <ShotCameraRollThumbnail
                   project={project}
                   shot={libraryThumbShot}
                   overrideSrc={framePreviewByShotId[libraryThumbShot.id]}
