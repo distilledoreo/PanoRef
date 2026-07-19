@@ -18,15 +18,15 @@ import { parseProject, serializeProject } from '../src/engine/projectIO';
 describe('projected style settings', () => {
   it('normalizes missing and out-of-range fields', () => {
     expect(normalizeProjectedStyleSettings(undefined)).toEqual(defaultProjectedStyleSettings);
-    expect(normalizeProjectedStyleSettings({ opacity: 2, exposure: 0.1, lightingContribution: -1 })).toEqual({
-      panoId: undefined,
-      secondaryPanoId: undefined,
-      blendMode: 'primary_only',
-      opacity: 1,
-      exposure: 0.25,
-      lightingContribution: 0,
-      fallbackMode: 'clay',
+    const normalized = normalizeProjectedStyleSettings({
+      opacity: 2,
+      exposure: 0.1,
+      lightingContribution: -1,
     });
+    expect(normalized.opacity).toBe(1);
+    expect(normalized.exposure).toBe(0.25);
+    expect(normalized.lightingContribution).toBe(0);
+    expect(normalized.fallbackMode).toBe('clay');
     expect(normalizeProjectedStyleSettings({ fallbackMode: 'neutral', panoId: 'p1' }).panoId).toBe('p1');
   });
 

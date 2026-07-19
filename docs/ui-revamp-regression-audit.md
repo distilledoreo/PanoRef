@@ -241,3 +241,60 @@ None confirmed after `misc-bugfixes`. The main critical-class issues (graybox re
 | Tests at audit time? | **Green (156 + tsc).** |
 
 **Do not treat the revamp as feature-stripped.** Engines and package paths survived. **`misc-bugfixes` is a necessary follow-up** for I/O and graybox reliability. Remaining blockers are **session-reset completeness** and a handful of **discoverability regressions** (alignment controls, rename, warning text, build shortcuts). Fix P0, re-run the suite, then merge is reasonable.
+
+---
+
+## Projected 360° texture occlusion (added after audit)
+
+Each styled pano now projects like a real point-light 360° projector. A per-projector
+**radial-depth occlusion cubemap** is generated at runtime from the graybox geometry and
+used to hide texture on surfaces the projector can't physically reach (rear faces,
+occluded interiors). Where the primary projector is blocked, a secondary styled pano can
+fill; otherwise a neutral clay/neutral fallback shows.
+
+### Scope guarantees
+- **Viewport and all projected export paths share one resource loader** (`loadProjectedSceneResources`
+  in `src/engine/renderers.ts`), so occlusion looks identical in preview, still export,
+  and camera-move MP4.
+- **No GPU resources are persisted to project JSON.** The occlusion cubemap and packed
+  depth textures are built in-memory and disposed on regeneration/unmount. Settings schema
+  carries only scalars (`occlusionEnabled`, `occlusionBiasMeters`, `occlusionSoftness`,
+  `occlusionDebugMode`, `secondaryPanoId`, `blendMode`); `normalizeProjectedStyleSettings`
+  fills defaults and clamps.
+- **Occlusion key** (`computeProjectorOcclusionKey`) is a geometry-only FNV-1a hash
+  (visible objects, transforms, dimensions, model ids, origins) so depth maps are
+  regenerated only when geometry actually moves. Camera, selection, and exposure changes
+  are deliberately ignored.
+- **Legacy fallback**: if cubemap generation fails, status reports `Unavailable` and the
+  shader falls back to the pre-occlusion projection; a fragment with no recorded hit or a
+  missing map is treated as visible.
+
+### Test coverage
+| Test file | What it proves |
+|-----------|----------------|
+| `tests/projectorOcclusion.test.ts` | Depth packing round-trips, blue hit-flag semantics, front/rear/seam visibility, dual-origin fill + both-occluded fallback, occlusion key stability/exclusion, settings normalization (no GPU resources serialized) |
+| `tests/projectedStyleMath.test.ts` | Pack/unpack/decode math + blend-weight gating |
+| `tests/projectedStyleCompile.test.ts` | Real WebGL compile of every variant: single/dual, occlusion on/off, primary/secondary-only occlusion, coverage debug |
+| `tests/uiFidelity.test.ts` | Viewport stays free of build-mode globals; occlusion status flows via an `onOcclusionStatusChange` callback, not a direct store import |
+| `scripts/goal-workflow-smoke.mjs` | End-to-end: switches Shots to Projected, waits for viewport occlusion to reach `ready` or `unavailable`, captures a shot, and verifies a ZIP package download |
+
+### Shared projection-coverage optimization
+
+The Projected Style panel now feeds both dual-origin search modes from one coverage-analysis engine under `src/engine/projectionCoverage/`. The engine flattens the rendered solid meshes into world-space triangles, samples them deterministically by surface area, and uses a double-sided BVH segment query to reject occluded samples. Geometric face angle and approximate equirectangular texel density distinguish usable coverage from merely visible grazing surfaces.
+
+- **Fixed-first:** evaluates the selected primary panorama origin and ranks second origins by combined usable coverage, then quality gain, overlap, and clearance.
+- **Joint-pair:** ranks all coarse origin pairs by their coverage bitset union before fine evaluation, preserving candidates that are weak alone but complementary together.
+- **Search:** automatically derives candidates from upward-facing floors, rejects them with triangle-accurate camera clearance, evaluates 4,096 coarse samples, iteratively recenters four local refinement levels, and reports final pair plus reachable union on one shared 24,576-sample bank. Fixed-first applies the same minimum-separation rule as joint mode.
+- **Runtime isolation:** indexed positions, indices, mesh transforms, and floor ranges are stored in typed arrays. Main-thread extraction yields between objects and large buffer chunks, then transfers the ArrayBuffers to a module worker. The worker builds a flat typed-array BVH with in-place partitioning and allocation-free ray/clearance queries.
+- **Application:** results are capture-plan positions only. They can move the graybox capture origin to A or B so a new panorama can be rendered, styled, and imported. Existing panorama references remain immutable because changing their stored origin would misproject the already-captured pixels.
+- **Rendering parity:** dual-projector blending uses the same face-angle and approximate texel-density quality model as optimization, with winner-takes-most weighting; the coverage preview adds orange for visible but under-resolved/grazing surfaces.
+
+`tests/projectionCoverage.test.ts` locks deterministic area weighting, double-sided occlusion, marginal-versus-joint ranking, imported-room interior clearance, small prop-top filtering, explicit allowed-floor rejection of a large ambiguous top, common-bank reachability, fixed-first separation, sloped/multilevel floor reprojection, both search modes, and both complete optimizer branches over a 101,250-triangle indexed fixture. UI fidelity and browser tests assert that optimization never rewrites existing panorama origins. `docs/coverage-optimizer-benchmark.md` records the repeatable real imported production-set benchmark.
+
+**Automated checks (at feature completion):**
+
+| Command | Result |
+|---------|--------|
+| `npm test -- --run` | 373/373 passed |
+| `npm run lint` (`tsc --noEmit`) | Clean |
+

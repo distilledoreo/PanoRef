@@ -1,5 +1,5 @@
-import { Vec3 } from '../domain/types';
-import { clamp, normalize } from './sync';
+import { ProjectorBlendMode, Vec3 } from '../domain/types';
+import { clamp, length, normalize, subtract } from './sync';
 
 /**
  * Pure projection sampling math shared by tests and the Projected Style shader.
@@ -89,6 +89,80 @@ export const PROJECTED_STYLE_GLSL = {
     latitude / PROJECTED_PI + 0.5
   );
 }`,
+  occlusionDepthHelpers: `vec2 packDepth16GLSL(float value) {
+  float scaled = floor(clamp(value, 0.0, 1.0) * 65535.0 + 0.5);
+  float highByte = floor(scaled / 256.0);
+  float lowByte = scaled - highByte * 256.0;
+  return vec2(highByte, lowByte) / 255.0;
+}
+
+float unpackDepth16GLSL(vec4 packed) {
+  float highByte = floor(packed.r * 255.0 + 0.5);
+  float lowByte = floor(packed.g * 255.0 + 0.5);
+  return (highByte * 256.0 + lowByte) / 65535.0;
+}
+
+float decodeDepthMetersGLSL(vec4 packed, float nearMeters, float farMeters) {
+  float normalizedDepth = unpackDepth16GLSL(packed);
+  return mix(nearMeters, farMeters, normalizedDepth);
+}`,
+  occlusionVisibility: `float singleOcclusionSample(
+  vec3 sampleDirection,
+  vec3 worldPosition,
+  vec3 projectorOrigin,
+  samplerCube occlusionCube,
+  float nearMeters,
+  float farMeters,
+  float effectiveBias
+) {
+  vec3 projectorOffset = worldPosition - projectorOrigin;
+  float fragmentDistance = length(projectorOffset);
+  vec4 packedDepth = textureCube(occlusionCube, sampleDirection);
+  if (packedDepth.b < 0.5) {
+    return 1.0;
+  }
+  float firstHit = decodeDepthMetersGLSL(packedDepth, nearMeters, farMeters);
+  return fragmentDistance <= firstHit + effectiveBias ? 1.0 : 0.0;
+}
+
+float sampleProjectorVisibility(
+  vec3 worldPosition,
+  vec3 projectorOrigin,
+  samplerCube occlusionCube,
+  float nearMeters,
+  float farMeters,
+  float faceSize,
+  float baseBias,
+  float softness
+) {
+  vec3 projectorOffset = worldPosition - projectorOrigin;
+  float fragmentDistance = length(projectorOffset);
+  vec3 direction = normalize(projectorOffset);
+
+  float effectiveBias = baseBias
+    + fragmentDistance * 0.0015
+    + 2.0 * fwidth(fragmentDistance);
+
+  // Robust tangent basis for angular offsets.
+  vec3 helperAxis = abs(direction.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+  vec3 tangent = normalize(cross(helperAxis, direction));
+  vec3 bitangent = normalize(cross(direction, tangent));
+
+  float texelAngle = 2.0 / max(faceSize, 1.0);
+  float offsetAngle = texelAngle * max(softness, 0.0);
+
+  float v = 0.0;
+  v += singleOcclusionSample(direction, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  vec3 d1 = normalize(direction + tangent * offsetAngle);
+  v += singleOcclusionSample(d1, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  vec3 d2 = normalize(direction - tangent * offsetAngle);
+  v += singleOcclusionSample(d2, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  vec3 d3 = normalize(direction + bitangent * offsetAngle);
+  v += singleOcclusionSample(d3, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  vec3 d4 = normalize(direction - bitangent * offsetAngle);
+  v += singleOcclusionSample(d4, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  return clamp(v / 5.0, 0.0, 1.0);
+}`,
 } as const;
 
 // --- Synthetic directional pano helpers (tests + offline diagnostics) ---
@@ -158,4 +232,168 @@ export function rgbClose(a: Vec3, b: Vec3, epsilon = 1e-5): boolean {
   return Math.abs(a[0] - b[0]) <= epsilon
     && Math.abs(a[1] - b[1]) <= epsilon
     && Math.abs(a[2] - b[2]) <= epsilon;
+}
+
+// --- Radial-depth packing (mirrors GLSL packDepth16/unpackDepth16) ----------
+
+/** Pack a normalized [0,1] depth into two 8-bit channels (0..65535). */
+export function packDepth16(normalized: number): [number, number] {
+  const value = clamp(normalized, 0, 1);
+  const scaled = Math.min(65535, Math.max(0, Math.round(value * 65535)));
+  const highByte = Math.floor(scaled / 256);
+  const lowByte = scaled - highByte * 256;
+  return [highByte / 255, lowByte / 255];
+}
+
+/** Decode two packed 8-bit channels (0..255 byte values) back to [0,1]. */
+export function unpackDepth16(highByte: number, lowByte: number): number {
+  const h = Math.round(clamp(highByte, 0, 1) * 255);
+  const l = Math.round(clamp(lowByte, 0, 1) * 255);
+  return (h * 256 + l) / 65535;
+}
+
+/** Decode a packed RGBA tuple (each 0..1) into world-space meters. */
+export function decodeDepthMeters(
+  packed: [number, number, number, number],
+  nearMeters: number,
+  farMeters: number,
+): number {
+  const normalized = unpackDepth16(packed[0], packed[1]);
+  return nearMeters + (farMeters - nearMeters) * normalized;
+}
+
+// --- Visibility -------------------------------------------------------------
+
+export interface VisibilitySampleResult {
+  visible: boolean;
+  /** Decoded first-hit distance in meters (Infinity when no hit recorded). */
+  firstHitMeters: number;
+}
+
+/**
+ * Pure CPU visibility test for a fragment relative to one projector's depth map.
+ * `packedDepth` is the sampled cube value [r,g,b,a] with blue=hit flag.
+ * Missing map (null) => legacy behavior: always visible.
+ */
+export function sampleProjectorVisibility(params: {
+  worldPosition: Vec3;
+  projectorOrigin: Vec3;
+  packedDepth: [number, number, number, number] | null;
+  nearMeters: number;
+  farMeters: number;
+  biasMeters?: number;
+}): VisibilitySampleResult {
+  if (!params.packedDepth) {
+    return { visible: true, firstHitMeters: Infinity };
+  }
+  const [, , blue] = params.packedDepth;
+  if (blue < 0.5) {
+    // No occluder recorded along the ray.
+    return { visible: true, firstHitMeters: Infinity };
+  }
+  const fragmentDistance = length(subtract(params.worldPosition, params.projectorOrigin));
+  const firstHit = decodeDepthMeters(params.packedDepth, params.nearMeters, params.farMeters);
+  const bias = params.biasMeters ?? 0.04;
+  return {
+    visible: fragmentDistance <= firstHit + bias,
+    firstHitMeters: firstHit,
+  };
+}
+
+// --- Visibility-gated multi-origin blend weights ----------------------------
+
+export interface ProjectorBlendInput {
+  worldPosition: Vec3;
+  primaryOrigin: Vec3;
+  secondaryOrigin?: Vec3;
+  mode?: ProjectorBlendMode;
+  /** Omitted => 1 (legacy / non-occlusion paths stay valid). */
+  primaryVisibility?: number;
+  secondaryVisibility?: number;
+  /** Optional explicit confidence when both visible; defaults to distance confidence. */
+  primaryConfidence?: number;
+  secondaryConfidence?: number;
+}
+
+export interface ProjectorBlendWeights {
+  primary: number;
+  secondary: number;
+  /** True if both projectors are occluded (caller should use fallback). */
+  bothOccluded: boolean;
+}
+
+/**
+ * Distance confidence: closer projector wins. Returns a normalized 0..1 weight
+ * for the primary when both visible (secondary gets the complement).
+ */
+export function projectedConfidence(worldPosition: Vec3, origin: Vec3): number {
+  const d = length(subtract(worldPosition, origin));
+  // Closer = stronger. Soft falloff so far distances still contribute.
+  return 1 / (1 + d * 0.05);
+}
+
+export function computeProjectorBlendWeights(params: ProjectorBlendInput): ProjectorBlendWeights {
+  const primaryVisibility = params.primaryVisibility ?? 1;
+  const secondaryVisibility = params.secondaryOrigin ? (params.secondaryVisibility ?? 1) : 0;
+
+  const mode = params.mode ?? 'primary_only';
+  const hasSecondary = Boolean(params.secondaryOrigin);
+
+  // Single-projector cases.
+  if (!hasSecondary) {
+    if (mode === 'secondary_only') {
+      return { primary: 0, secondary: 0, bothOccluded: secondaryVisibility < 0.5 };
+    }
+    // primary or both with no secondary => primary only.
+    return { primary: primaryVisibility >= 0.5 ? 1 : 0, secondary: 0, bothOccluded: primaryVisibility < 0.5 };
+  }
+
+  const primaryVisible = primaryVisibility >= 0.5;
+  const secondaryVisible = secondaryVisibility >= 0.5;
+
+  if (mode === 'primary_only') {
+    return {
+      primary: primaryVisible ? 1 : 0,
+      secondary: 0,
+      bothOccluded: !primaryVisible,
+    };
+  }
+  if (mode === 'secondary_only') {
+    return {
+      primary: 0,
+      secondary: secondaryVisible ? 1 : 0,
+      bothOccluded: !secondaryVisible,
+    };
+  }
+
+  // Dominant modes fill from the other projector when their preferred source
+  // is occluded, then bias quality/confidence ties toward the selected source.
+  if (primaryVisible && !secondaryVisible) {
+    return { primary: 1, secondary: 0, bothOccluded: false };
+  }
+  if (!primaryVisible && secondaryVisible) {
+    return { primary: 0, secondary: 1, bothOccluded: false };
+  }
+  if (!primaryVisible && !secondaryVisible) {
+    return { primary: 0, secondary: 0, bothOccluded: true };
+  }
+
+  const primaryConf = params.primaryConfidence ?? projectedConfidence(params.worldPosition, params.primaryOrigin);
+  const secondaryConf = params.secondaryConfidence ?? projectedConfidence(params.worldPosition, params.secondaryOrigin as Vec3);
+  const total = primaryConf + secondaryConf || 1;
+  let primaryWeight = primaryConf / total;
+  if (mode === 'primary_dominant') {
+    primaryWeight = primaryConf >= secondaryConf
+      ? Math.min(1, 0.55 + primaryConf * 0.55)
+      : primaryConf / total;
+  } else {
+    primaryWeight = secondaryConf >= primaryConf
+      ? Math.max(0, 0.45 - secondaryConf * 0.45)
+      : primaryConf / total;
+  }
+  return {
+    primary: primaryWeight,
+    secondary: 1 - primaryWeight,
+    bothOccluded: false,
+  };
 }

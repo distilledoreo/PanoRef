@@ -26,6 +26,14 @@ import {
   resolveProjectedTextureRequest,
   type ProjectedTextureOwnership,
 } from '../../engine/projectedStyleMaterials';
+import {
+  computeProjectorOcclusionKey,
+  DEFAULT_OCCLUSION_FACE_SIZE,
+  DEFAULT_OCCLUSION_NEAR,
+  generateProjectorOcclusionMap,
+  type ProjectorOcclusionMap,
+  type ProjectorOcclusionSet,
+} from '../../engine/projectorOcclusion';
 import { buildScene, computeBuildFogRange, createPreviewMesh, disposePreviewMesh, disposeScene } from '../../engine/sceneObjects';
 import {
   angleInAxisPlane,
@@ -142,6 +150,7 @@ export function SceneViewport({
   frameRequest = 0,
   frameObjectIds = [],
   minHeightClassName = 'min-h-[420px]',
+  onOcclusionStatusChange,
 }: {
   project: LocationProject;
   selectedObjectIds?: string[];
@@ -189,6 +198,7 @@ export function SceneViewport({
   frameRequest?: number;
   frameObjectIds?: string[];
   minHeightClassName?: string;
+  onOcclusionStatusChange?: (status: 'disabled' | 'generating' | 'ready' | 'failed') => void;
 }) {
   const theme = useThemeStore((state) => state.theme);
   const [mannequinRevision, setMannequinRevision] = useState(getHumanMannequinRevision);
@@ -247,6 +257,41 @@ export function SceneViewport({
   const [projectedTextureReadyUrl, setProjectedTextureReadyUrl] = useState<string | undefined>();
   const [projectedSecondaryReadyUrl, setProjectedSecondaryReadyUrl] = useState<string | undefined>();
   const [secondaryLoadError, setSecondaryLoadError] = useState(false);
+
+  // Live geometry-occlusion cubemaps (shared across all projected objects).
+  const primaryOcclusionRef = useRef<ProjectorOcclusionMap | undefined>();
+  const secondaryOcclusionRef = useRef<ProjectorOcclusionMap | undefined>();
+  const occlusionGenerationTokenRef = useRef(0);
+  const occlusionKeyRef = useRef<string | undefined>();
+  const occlusionDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+  // Bumped whenever the renderer is recreated so occlusion regenerates for it.
+  const rendererRevisionRef = useRef(0);
+
+  // Idempotent cleanup for all renderer-owned occlusion maps. Clears the refs
+  // before disposal so it is safe to call from multiple cleanup paths.
+  const disposeOcclusionMaps = useCallback(() => {
+    const primary = primaryOcclusionRef.current;
+    const secondary = secondaryOcclusionRef.current;
+
+    primaryOcclusionRef.current = undefined;
+    secondaryOcclusionRef.current = undefined;
+    occlusionKeyRef.current = undefined;
+
+    occlusionGenerationTokenRef.current += 1;
+
+    if (occlusionDebounceRef.current) {
+      clearTimeout(occlusionDebounceRef.current);
+      occlusionDebounceRef.current = undefined;
+    }
+
+    if (secondary && secondary !== primary) {
+      secondary.dispose();
+    }
+
+    primary?.dispose();
+  }, []);
+  type ProjectionOcclusionStatus = 'disabled' | 'generating' | 'ready' | 'failed';
+  const [occlusionStatus, setOcclusionStatus] = useState<ProjectionOcclusionStatus>('disabled');
   const gizmoRef = useRef<THREE.Group | null>(null);
   const selectionOutlineRefs = useRef<THREE.BoxHelper[]>([]);
   const showSceneGuidesRef = useRef(showSceneGuides);
@@ -442,6 +487,7 @@ export function SceneViewport({
     renderer.domElement.className = 'absolute inset-0 block h-full w-full touch-none';
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+    rendererRevisionRef.current += 1;
 
     const camera = new THREE.PerspectiveCamera(framingFovRef.current, 1, 0.1, renderDistanceRef.current);
     cameraRef.current = camera;
@@ -1205,11 +1251,14 @@ export function SceneViewport({
       resizeObserver.disconnect();
       window.removeEventListener('resize', syncViewportSize);
       clearTransformGizmo();
+      // Render targets are owned by this WebGL context and must be released
+      // while the renderer can still dispose their GPU resources.
+      disposeOcclusionMaps();
       if (sceneRef.current) disposeScene(sceneRef.current);
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [clearTransformGizmo, emitFramingCamera, syncTransformGizmo, theme]);
+  }, [clearTransformGizmo, disposeOcclusionMaps, emitFramingCamera, syncTransformGizmo, theme]);
 
   useEffect(() => {
     const modeChanged = freeCameraModeRef.current !== freeCameraActive;
@@ -1305,9 +1354,7 @@ export function SceneViewport({
     ?? project.settings.projectedStyle?.blendMode
     ?? 'primary_only';
 
-  // Load / release primary projected-style texture when appearance or projector changes.
-  // Ownership: release currently *owned* URL immediately on change; never release a
-  // captured previousUrl from the completion callback (A→B→C leak / double-release).
+  // Load / release shared projected-style texture when appearance or projector changes.
   useEffect(() => {
     let cancelled = false;
     const url = projectedAssetKey || undefined;
@@ -1433,6 +1480,111 @@ export function SceneViewport({
   });
   const { projectedActive, dualActive } = projectedState;
 
+  const occlusionWanted = projectedActive
+    && projectedSettings.occlusionEnabled
+    && Boolean(rendererRef.current);
+
+  // Generate / regenerate geometry-occlusion cubemaps. The key is geometry-only
+  // so camera, selection, exposure, and color changes never trigger regeneration.
+  useEffect(() => {
+    if (!occlusionWanted || !projectedPano) {
+      setOcclusionStatus('disabled');
+      return;
+    }
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+
+    const primaryOrigin = projectedPano.origin;
+    const secondaryOrigin = (projectedSecondary && projectedSecondary.id !== projectedPano.id)
+      ? projectedSecondary.origin
+      : undefined;
+    const key = computeProjectorOcclusionKey(project, primaryOrigin, secondaryOrigin);
+    if (key === occlusionKeyRef.current && primaryOcclusionRef.current) {
+      return;
+    }
+
+    setOcclusionStatus('generating');
+    const token = occlusionGenerationTokenRef.current + 1;
+    occlusionGenerationTokenRef.current = token;
+
+    const run = () => {
+      try {
+        const primary = generateProjectorOcclusionMap(renderer, project, primaryOrigin, {
+          faceSize: DEFAULT_OCCLUSION_FACE_SIZE,
+          nearMeters: DEFAULT_OCCLUSION_NEAR,
+        });
+        let secondary: ProjectorOcclusionMap | undefined;
+        const sameOrigin = secondaryOrigin
+          && primaryOrigin[0] === secondaryOrigin[0]
+          && primaryOrigin[1] === secondaryOrigin[1]
+          && primaryOrigin[2] === secondaryOrigin[2];
+        if (secondaryOrigin && !sameOrigin) {
+          secondary = generateProjectorOcclusionMap(renderer, project, secondaryOrigin, {
+            faceSize: DEFAULT_OCCLUSION_FACE_SIZE,
+            nearMeters: DEFAULT_OCCLUSION_NEAR,
+          });
+        } else if (secondaryOrigin && sameOrigin) {
+          secondary = primary;
+        }
+
+        if (occlusionGenerationTokenRef.current !== token) {
+          // A newer generation superseded this one; discard immediately.
+          primary.dispose();
+          if (secondary && secondary !== primary) secondary.dispose();
+          return;
+        }
+
+        // Dispose stale maps before swapping in the new ones.
+        primaryOcclusionRef.current?.dispose();
+        if (secondaryOcclusionRef.current
+          && secondaryOcclusionRef.current !== primaryOcclusionRef.current) {
+          secondaryOcclusionRef.current.dispose();
+        }
+        primaryOcclusionRef.current = primary;
+        secondaryOcclusionRef.current = secondary;
+        occlusionKeyRef.current = key;
+        setOcclusionStatus('ready');
+      } catch (error) {
+        console.error('[projected-occlusion] viewport generation failed:', error);
+        if (occlusionGenerationTokenRef.current === token) {
+          setOcclusionStatus('failed');
+          occlusionKeyRef.current = undefined;
+        }
+      }
+    };
+
+    if (occlusionDebounceRef.current) clearTimeout(occlusionDebounceRef.current);
+    occlusionDebounceRef.current = setTimeout(run, 200);
+    return () => {
+      if (occlusionDebounceRef.current) clearTimeout(occlusionDebounceRef.current);
+    };
+  }, [
+    occlusionWanted,
+    project,
+    rendererRevisionRef.current,
+    projectedPano?.id,
+    projectedPano?.origin[0],
+    projectedPano?.origin[1],
+    projectedPano?.origin[2],
+    projectedSecondary?.id,
+    projectedSecondary?.origin[0],
+    projectedSecondary?.origin[1],
+    projectedSecondary?.origin[2],
+  ]);
+
+  // Dispose occlusion maps on unmount (also covered by the renderer cleanup,
+  // but kept for components that unmount without tearing down the renderer).
+  useEffect(() => () => {
+    disposeOcclusionMaps();
+  }, [disposeOcclusionMaps]);
+
+  // Report occlusion status changes to the host (for the projected-style panel).
+  const onOcclusionStatusChangeRef = useRef(onOcclusionStatusChange);
+  onOcclusionStatusChangeRef.current = onOcclusionStatusChange;
+  useEffect(() => {
+    onOcclusionStatusChangeRef.current?.(occlusionStatus);
+  }, [occlusionStatus]);
+
   useEffect(() => {
     previewMeshRef.current = null;
     if (sceneRef.current) disposeScene(sceneRef.current);
@@ -1451,11 +1603,23 @@ export function SceneViewport({
           texture: projectedTexture,
           origin: projectedPano.origin,
           rotation: projectedPano.rotation,
+          panoramaWidth: projectedPano.width,
+          panoramaHeight: projectedPano.height,
           settings: projectedSettings,
           disposableMaterials: true,
+          occlusionTexture: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.texture : undefined,
+          occlusionNearMeters: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.nearMeters : undefined,
+          occlusionFarMeters: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.farMeters : undefined,
+          occlusionFaceSize: projectedSettings.occlusionEnabled ? primaryOcclusionRef.current?.faceSize : undefined,
           secondaryTexture: dualActive ? projectedSecondaryTexture ?? undefined : undefined,
           secondaryOrigin: dualActive ? projectedSecondary?.origin : undefined,
           secondaryRotation: dualActive ? projectedSecondary?.rotation : undefined,
+          secondaryPanoramaWidth: projectedSecondary?.width,
+          secondaryPanoramaHeight: projectedSecondary?.height,
+          secondaryOcclusionTexture: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.texture : undefined,
+          secondaryOcclusionNearMeters: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.nearMeters : undefined,
+          secondaryOcclusionFarMeters: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.farMeters : undefined,
+          secondaryOcclusionFaceSize: projectedSettings.occlusionEnabled ? secondaryOcclusionRef.current?.faceSize : undefined,
         }
         : undefined,
     });
@@ -1478,7 +1642,13 @@ export function SceneViewport({
     projectedSettings.fallbackMode,
     projectedSettings.lightingContribution,
     projectedSettings.opacity,
+    projectedSettings.occlusionEnabled,
+    projectedSettings.occlusionDebugMode,
+    projectedSettings.blendMode,
     projectedTexture,
+    dualActive,
+    primaryOcclusionRef.current?.key,
+    secondaryOcclusionRef.current?.key,
     selectedShotId,
     shotFraming,
     showSceneGuides,
@@ -1531,6 +1701,7 @@ export function SceneViewport({
     <div
       className={`relative h-full ${minHeightClassName} overflow-hidden bg-surface-base ${cursorClass}`}
       data-testid="scene-viewport"
+      data-occlusion-status={occlusionStatus}
       ref={containerRef}
     >
       {shotFraming && (

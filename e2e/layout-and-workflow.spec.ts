@@ -164,6 +164,23 @@ test.describe('layout and core chrome', () => {
     expect(trayBox.y + trayBox.height).toBeLessThanOrEqual(viewport.height + 2);
     expect(trayBox.x + Math.min(trayBox.width, 40)).toBeLessThanOrEqual(viewport.width + 2);
 
+    const floatingControls = await Promise.all([
+      page.locator('[data-build-free-camera-control]').boundingBox(),
+      page.locator('[data-build-top-tools]').boundingBox(),
+      page.locator('[data-appearance-mode-toggle]').boundingBox(),
+    ]);
+    expect(floatingControls.every(Boolean)).toBe(true);
+    const overlapArea = (a: NonNullable<typeof floatingControls[number]>, b: NonNullable<typeof floatingControls[number]>) => (
+      Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
+      * Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
+    );
+    const [freeCamera, topTools, appearance] = floatingControls;
+    if (freeCamera && topTools && appearance) {
+      expect(overlapArea(freeCamera, topTools)).toBeLessThanOrEqual(1);
+      expect(overlapArea(freeCamera, appearance)).toBeLessThanOrEqual(1);
+      expect(overlapArea(topTools, appearance)).toBeLessThanOrEqual(1);
+    }
+
     if (testInfo.project.name === 'phone-390') {
       // Shortcut badges make accessible names like "3 Box".
       const boxTool = tray.getByRole('button', { name: /Box/i }).first();
@@ -378,5 +395,386 @@ test.describe('workflow path smoke', () => {
     expect(thumbnailSources[0]).toMatch(/^data:image\//);
     expect(thumbnailSources[1]).toMatch(/^data:image\//);
     expect(thumbnailSources[0]).not.toBe(thumbnailSources[1]);
+  });
+
+  test('projected occlusion unmounts cleanly into Export without a crash', async ({ page }) => {
+    test.setTimeout(180_000);
+
+    // Any uncaught error, window error, or rejected promise fails the test.
+    const pageErrors: string[] = [];
+    const unhandledRejections: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error' && /Uncaught|Cannot read propert|is not a function/.test(message.text())) {
+        pageErrors.push(message.text());
+      }
+    });
+    await page.exposeFunction('__reportRejection', (reason: string) => {
+      unhandledRejections.push(reason);
+    });
+    await page.addInitScript(() => {
+      window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+        // Segment / Bugsnag tracking-prevention noise is ignored.
+        if (/prevented|tracking|ad blocker|blocked by/i.test(reason)) return;
+        (window as unknown as { __reportRejection?: (r: string) => void }).__reportRejection?.(reason);
+      });
+    });
+
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+
+    // Build → graybox so a reference set exists.
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+    const renderBtn = page.getByRole('button', { name: /Render 360 Reference/i });
+    if (await renderBtn.isVisible().catch(() => false)) {
+      await renderBtn.click();
+      await expect(
+        page.getByRole('button', { name: /Download Graybox|Re-render after scene changes/i }).first(),
+      ).toBeVisible({ timeout: 90_000 });
+    }
+    await dismissOverlays(page);
+
+    // Reference → attach a styled canonical pano (enables projected appearance + occlusion).
+    await workspaceTab(page, 'Reference').click();
+    await dismissOverlays(page);
+    const useAttached = page.getByRole('button', { name: /Use Attached Reference/i });
+    if (await useAttached.isVisible().catch(() => false)) {
+      await useAttached.click();
+      await dismissOverlays(page);
+    }
+    const looksGood = page.getByRole('button', { name: /Looks good enough/i });
+    if (await looksGood.isVisible().catch(() => false)) {
+      await looksGood.click();
+    }
+    const approve = page.getByRole('button', { name: /Approve as Reference/i });
+    await expect(approve).toBeVisible({ timeout: 30_000 });
+    await approve.click({ force: true });
+    await dismissOverlays(page);
+
+    // Shots → enable Projected appearance so the occlusion engine builds GPU maps.
+    await workspaceTab(page, 'Shots').click();
+    await dismissOverlays(page);
+    await expect(page.locator('[data-shots-camera-shell]')).toBeVisible({ timeout: 20_000 });
+
+    const projectedToggle = page
+      .locator('[data-appearance-mode-toggle] button')
+      .filter({ hasText: /^Projected$/ });
+    await expect(projectedToggle).toBeEnabled({ timeout: 30_000 });
+    await projectedToggle.click();
+
+    // Wait specifically for occlusion to reach the GPU-backed "Ready" state.
+    const sceneViewport = page.locator('[data-testid="scene-viewport"]');
+    await expect(sceneViewport).toHaveAttribute('data-occlusion-status', 'ready', { timeout: 60_000 });
+
+    // Persist a projected shot so Export exercises the off-screen projected
+    // renderer and its occlusion render-target cleanup as well as the live view.
+    await page.locator('[data-shots-shutter]').click();
+    await expect(page.locator('[data-shots-library-thumb] img')).toBeVisible({ timeout: 30_000 });
+    await dismissOverlays(page);
+
+    // Navigate to Export. The renderer cleanup must dispose render targets
+    // before the renderer; an inverted order throws and blocks this transition.
+    await workspaceTab(page, 'Export').click();
+    await dismissOverlays(page);
+    await expect(page.locator('[data-export-package-panel]')).toBeVisible({ timeout: 30_000 });
+
+    // Package generation creates a second projected renderer. It must follow
+    // the same cleanup ordering or the download fails with a Three.js error.
+    const downloadPromise = page.waitForEvent('download', { timeout: 120_000 });
+    await page.getByRole('button', { name: /Export Selected Shots|Export \d+ Shots/i }).click();
+    const download = await downloadPromise;
+    expect(await download.failure()).toBeNull();
+    expect(download.suggestedFilename()).toMatch(/\.zip$/);
+
+    const failureDetail = [
+      ...pageErrors.map((message) => `pageerror: ${message}`),
+      ...unhandledRejections.map((message) => `unhandledrejection: ${message}`),
+    ];
+    expect(failureDetail, failureDetail.join('\n')).toHaveLength(0);
+  });
+
+  test('coverage optimizer completes without overflowing the Reference drawer', async ({ page }, testInfo) => {
+    test.setTimeout(240_000);
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+    const renderBtn = page.getByRole('button', { name: /Render 360 Reference/i });
+    if (await renderBtn.isVisible().catch(() => false)) {
+      await renderBtn.click();
+      await expect(
+        page.getByRole('button', { name: /Download Graybox|Re-render after scene changes/i }).first(),
+      ).toBeVisible({ timeout: 90_000 });
+    }
+    await dismissOverlays(page);
+
+    await workspaceTab(page, 'Reference').click();
+    await dismissOverlays(page);
+    const useAttached = page.getByRole('button', { name: /Use Attached Reference/i });
+    if (await useAttached.isVisible().catch(() => false)) {
+      await useAttached.click();
+      const startChecking = page.getByRole('button', { name: 'Start checking', exact: true });
+      await startChecking.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined);
+      if (await startChecking.isVisible().catch(() => false)) await startChecking.click();
+      await dismissOverlays(page);
+    }
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const drawer = page.getByRole('dialog', { name: 'Reference Settings' });
+    await expect(drawer).toBeVisible();
+    await page.locator('[data-coverage-optimizer] summary').click();
+
+    const floorRegionToggle = drawer.getByRole('switch', {
+      name: 'Restrict optimizer to an analysis region',
+    });
+    await floorRegionToggle.click();
+    await expect(drawer.locator('[data-coverage-floor-region]')).toBeVisible();
+    await expect(drawer.locator('[data-coverage-use-selection-bounds]')).toBeVisible();
+    await drawer.locator('[data-coverage-floor-min="y"]').fill('1');
+    await drawer.locator('[data-coverage-floor-max="y"]').fill('0');
+    await expect(drawer.locator('[data-coverage-floor-region-error]')).toBeVisible();
+    await expect(drawer.locator('[data-coverage-analyze]')).toBeDisabled();
+    await drawer.locator('[data-coverage-floor-min="y"]').fill('-0.25');
+    await drawer.locator('[data-coverage-floor-max="y"]').fill('3.5');
+    await expect(drawer.locator('[data-coverage-analyze]')).toBeEnabled();
+
+    const layout = await drawer.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      };
+    });
+    expect(layout.left).toBeGreaterThanOrEqual(0);
+    expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth);
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+
+    await page.locator('[data-coverage-analyze]').click();
+    await expect(floorRegionToggle).toBeDisabled();
+    await expect(drawer.locator('[data-coverage-floor-min="x"]')).toBeDisabled();
+    await expect(drawer.locator('[data-coverage-floor-max="z"]')).toBeDisabled();
+    const result = page.locator('[data-coverage-result]');
+    await expect(result).toBeVisible({ timeout: 90_000 });
+    await expect(floorRegionToggle).toBeEnabled();
+    await expect(result).toContainText('24,576 fine samples');
+    const originB = (await result.getAttribute('data-coverage-origin-b'))
+      ?.split(',').map((value) => Number(value));
+    expect(originB).toHaveLength(3);
+    expect(originB?.every(Number.isFinite)).toBe(true);
+    // The default set has an authored ground floor; props/rooftops must not
+    // become candidate platforms.
+    expect(originB?.[1]).toBeLessThan(2.5);
+    await expect(page.locator('[data-coverage-capture-plan]')).toContainText('Existing panorama origins are never rewritten');
+    await expect(page.locator('[data-coverage-apply-pair]')).toHaveCount(0);
+
+    await drawer.locator('[data-coverage-floor-min="x"]').fill('-4');
+    await expect(result).toHaveCount(0);
+    await expect(page.locator('[data-coverage-apply-capture]')).toHaveCount(0);
+
+    if (testInfo.project.name === 'desktop-chromium') {
+      await page.locator('[data-coverage-mode]').selectOption('joint-pair');
+      await page.locator('[data-coverage-analyze]').click();
+      await expect(result).toBeVisible({ timeout: 120_000 });
+      const originA = (await result.getAttribute('data-coverage-origin-a'))
+        ?.split(',').map((value) => Number(value));
+      const jointOriginB = (await result.getAttribute('data-coverage-origin-b'))
+        ?.split(',').map((value) => Number(value));
+      expect(originA?.every(Number.isFinite)).toBe(true);
+      expect(jointOriginB?.every(Number.isFinite)).toBe(true);
+      expect(Math.hypot(
+        (originA?.[0] ?? 0) - (jointOriginB?.[0] ?? 0),
+        (originA?.[1] ?? 0) - (jointOriginB?.[1] ?? 0),
+        (originA?.[2] ?? 0) - (jointOriginB?.[2] ?? 0),
+      )).toBeGreaterThan(1);
+      await expect(page.locator('[data-coverage-apply-capture-a]')).toBeVisible();
+    }
+    expect(pageErrors, pageErrors.join('\n')).toHaveLength(0);
+  });
+
+  test('second capture: suggest B, freeze pose through undo, keep grayboxes, reopen, and export', async ({ page }) => {
+    test.setTimeout(360_000);
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+
+    // --- Primary A: graybox + styled reference ---
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+    const renderBtn = page.getByRole('button', { name: /Render 360 Reference/i });
+    await expect(renderBtn).toBeVisible({ timeout: 20_000 });
+    await renderBtn.click();
+    await expect(
+      page.getByRole('button', { name: /Download Graybox|Re-render after scene changes/i }).first(),
+    ).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator('[data-graybox-count]')).toHaveAttribute('data-graybox-count', '1', { timeout: 10_000 });
+    await dismissOverlays(page);
+
+    await workspaceTab(page, 'Reference').click();
+    await dismissOverlays(page);
+    const useAttached = page.getByRole('button', { name: /Use Attached Reference/i });
+    await expect(useAttached).toBeVisible({ timeout: 20_000 });
+    await useAttached.click();
+    await dismissOverlays(page);
+    const looksGood = page.getByRole('button', { name: /Looks good enough/i });
+    if (await looksGood.isVisible().catch(() => false)) {
+      await looksGood.click();
+    }
+    await dismissOverlays(page);
+    const approve = page.getByRole('button', { name: /Approve as Reference/i });
+    await expect(approve).toBeVisible({ timeout: 30_000 });
+    await approve.click({ force: true });
+    await dismissOverlays(page);
+
+    // --- Suggest B via fill-gaps fork (advance modal or Reference panel) ---
+    const fillGapsInModal = page.locator('[data-second-capture-fork] [data-second-capture-fill-gaps]');
+    const openFillGaps = page.locator('[data-open-fill-gaps]');
+    if (await fillGapsInModal.isVisible().catch(() => false)) {
+      await fillGapsInModal.click();
+    } else if (await openFillGaps.isVisible().catch(() => false)) {
+      await openFillGaps.click();
+      await page.locator('[data-second-capture-fill-gaps]').click();
+    } else {
+      // Advance modal may still be opening; wait briefly then fall back to Fill gaps control.
+      await page.locator('[data-second-capture-fork]').waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined);
+      if (await fillGapsInModal.isVisible().catch(() => false)) {
+        await fillGapsInModal.click();
+      } else {
+        await page.getByRole('button', { name: 'Settings', exact: true }).click().catch(() => undefined);
+        await openFillGaps.click();
+        await page.locator('[data-second-capture-fill-gaps]').click();
+      }
+    }
+
+    await page.locator('[data-second-capture-suggest]').click();
+    const awaiting = page.locator('[data-second-capture-seed-status]');
+    await expect(awaiting).toBeVisible({ timeout: 180_000 });
+    await expect(awaiting).toHaveAttribute('data-second-capture-optimization', 'succeeded');
+    await expect(awaiting).toHaveAttribute('data-second-capture-projected', 'ready');
+    // Download may succeed or fail; never claim success when it failed.
+    const seedStatus = await awaiting.getAttribute('data-second-capture-seed-status');
+    expect(seedStatus === 'succeeded' || seedStatus === 'failed').toBe(true);
+    if (seedStatus === 'failed') {
+      await expect(page.locator('[data-second-capture-download-seed-again]')).toBeVisible();
+      await expect(awaiting).toContainText(/download failed/i);
+    } else {
+      await expect(awaiting).toContainText(/seed was downloaded/i);
+    }
+
+    const planOriginAttr = await awaiting.getAttribute('data-second-capture-plan-origin');
+    expect(planOriginAttr).toBeTruthy();
+    const planOrigin = planOriginAttr!.split(',').map(Number);
+    expect(planOrigin).toHaveLength(3);
+    expect(planOrigin.every(Number.isFinite)).toBe(true);
+
+    // Dismiss fork (plan must remain latched) and render graybox at B.
+    const dismissFork = page.locator('[data-second-capture-dismiss]');
+    if (await dismissFork.isVisible().catch(() => false)) {
+      await dismissFork.click();
+    }
+    await dismissOverlays(page);
+
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+    const reRender = page.getByRole('button', { name: /Re-render after scene changes|Render 360 Reference/i }).first();
+    await expect(reRender).toBeVisible({ timeout: 20_000 });
+    await reRender.click();
+    await expect(page.locator('[data-graybox-count]')).toHaveAttribute('data-graybox-count', '2', { timeout: 90_000 });
+
+    // Move/undo live origin away from frozen B.
+    const undo = page.locator('[data-build-undo]');
+    await expect(undo).toBeEnabled({ timeout: 10_000 });
+    await undo.click();
+    await dismissOverlays(page);
+    // Grayboxes A and B must both remain after undoing the live origin.
+    await expect(page.locator('[data-graybox-count]')).toHaveAttribute('data-graybox-count', '2');
+
+    // Import secondary while live origin is no longer at B.
+    await workspaceTab(page, 'Reference').click();
+    await dismissOverlays(page);
+    const attachedResponse = await page.request.get('/attached-canonical-reference.png');
+    expect(attachedResponse.ok()).toBe(true);
+    const attachedBytes = await attachedResponse.body();
+    const importInput = page.locator('input[type="file"][accept*="image"]').first();
+    await importInput.setInputFiles({
+      name: 'second-capture.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(attachedBytes),
+    });
+    await expect(page.locator('[data-reference-pano-origins]')).toHaveAttribute('data-styled-pano-count', '2', {
+      timeout: 30_000,
+    });
+    await expect(page.locator('[data-reference-pano-origins]')).toHaveAttribute('data-graybox-count', '2');
+
+    const secondaryOption = page.locator('[data-reference-pano-option]').nth(1);
+    await expect(secondaryOption).toBeVisible();
+    const secondaryOriginAttr = await secondaryOption.getAttribute('data-pano-origin');
+    expect(secondaryOriginAttr).toBeTruthy();
+    const secondaryOrigin = secondaryOriginAttr!.split(',').map(Number);
+    expect(secondaryOrigin).toHaveLength(3);
+    for (let i = 0; i < 3; i += 1) {
+      expect(Math.abs(secondaryOrigin[i]! - planOrigin[i]!)).toBeLessThan(0.05);
+    }
+
+    // --- Save and reopen ---
+    const downloadPromise = page.waitForEvent('download', { timeout: 60_000 });
+    await page.locator('[data-project-export-button]').click();
+    const projectDownload = await downloadPromise;
+    expect(await projectDownload.failure()).toBeNull();
+    const projectPath = await projectDownload.path();
+    expect(projectPath).toBeTruthy();
+
+    await page.locator('[data-project-import-input]').setInputFiles(projectPath!);
+    await dismissOverlays(page);
+    await workspaceTab(page, 'Reference').click();
+    await dismissOverlays(page);
+    await expect(page.locator('[data-reference-pano-origins]')).toHaveAttribute('data-styled-pano-count', '2', {
+      timeout: 30_000,
+    });
+    await expect(page.locator('[data-reference-pano-origins]')).toHaveAttribute('data-graybox-count', '2');
+
+    // Enable dual projection blend.
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const drawer = page.getByRole('dialog', { name: 'Reference Settings' });
+    await expect(drawer).toBeVisible();
+    const blendToggle = drawer.locator('[data-projected-blend-toggle] button, [data-projected-blend-toggle] [role="switch"]').first();
+    if (await blendToggle.isVisible().catch(() => false)) {
+      await blendToggle.click();
+    }
+    await page.keyboard.press('Escape');
+    await dismissOverlays(page);
+
+    // Capture projected shot and export.
+    await workspaceTab(page, 'Shots').click();
+    await dismissOverlays(page);
+    await expect(page.locator('[data-shots-camera-shell]')).toBeVisible({ timeout: 20_000 });
+    const projectedToggle = page
+      .locator('[data-appearance-mode-toggle] button')
+      .filter({ hasText: /^Projected$/ });
+    if (await projectedToggle.isEnabled().catch(() => false)) {
+      await projectedToggle.click();
+    }
+    await page.locator('[data-shots-shutter]').click();
+    await expect(page.locator('[data-shots-library-thumb] img')).toBeVisible({ timeout: 60_000 });
+    await dismissOverlays(page);
+
+    await workspaceTab(page, 'Export').click();
+    await dismissOverlays(page);
+    await expect(page.locator('[data-export-package-panel]')).toBeVisible({ timeout: 30_000 });
+    const zipDownloadPromise = page.waitForEvent('download', { timeout: 120_000 });
+    await page.getByRole('button', { name: /Export Selected Shots|Export \d+ Shots/i }).click();
+    const zipDownload = await zipDownloadPromise;
+    expect(await zipDownload.failure()).toBeNull();
+    expect(zipDownload.suggestedFilename()).toMatch(/\.zip$/);
+
+    expect(pageErrors, pageErrors.join('\n')).toHaveLength(0);
   });
 });

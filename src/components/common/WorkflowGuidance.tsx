@@ -15,6 +15,8 @@ import { Workspace } from '../../domain/types';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { AlignmentRetryContent, GrayboxReferencePromptBuilder } from './GrayboxReferenceGuide';
 import { Modal } from './Modal';
+import { SecondCaptureForkContent } from './SecondCaptureForkPanel';
+import { countStyledPanoramas } from '../../engine/multiOriginProjection';
 
 const WORKSPACE_LABELS: Record<Workspace, string> = {
   build: 'Build',
@@ -62,7 +64,7 @@ function AlignmentIntroBody() {
         Before you move on, check that your styled pano lines up with the 3D scene.
       </p>
       <p>
-        Use the pano viewer and the alignment controls in the drawer. Fade the styled pano to see the graybox underneath, then spin yaw until things match.
+        Use the pano viewer and the Alignment panel (top-right) for fade and yaw. Open Settings for advanced tools and additional panoramas.
       </p>
       <ol className="space-y-2">
         <li className="flex gap-3"><span className="font-semibold text-accent">1</span><span>Look around the viewer.</span></li>
@@ -224,6 +226,13 @@ export function WorkflowGuidance() {
     setActiveDialog('none');
   };
 
+  const showSecondCaptureFork = Boolean(
+    advancePrompt
+    && advancePrompt.completedStep === 'reference'
+    && advancePrompt.nextStep === 'shots'
+    && countStyledPanoramas(project) === 1,
+  );
+
   const downloadGrayboxForAi = async () => {
     if (!grayboxAsset || !grayboxPano) return;
     setIsDownloadingGraybox(true);
@@ -330,9 +339,13 @@ export function WorkflowGuidance() {
 
       <Modal
         open={activeDialog === 'advance' && Boolean(advancePrompt)}
-        title={advancePrompt?.title ?? 'Ready for the next step'}
+        title={showSecondCaptureFork
+          ? 'Reference ready'
+          : (advancePrompt?.title ?? 'Ready for the next step')}
         onClose={handleAdvanceDismiss}
-        footer={(
+        size={showSecondCaptureFork ? 'lg' : 'md'}
+        scrollBody={showSecondCaptureFork}
+        footer={showSecondCaptureFork ? undefined : (
           <>
             <button
               type="button"
@@ -352,7 +365,20 @@ export function WorkflowGuidance() {
           </>
         )}
       >
-        <p className="text-sm text-secondary">{advancePrompt?.body}</p>
+        {showSecondCaptureFork ? (
+          <SecondCaptureForkContent
+            open={activeDialog === 'advance' && showSecondCaptureFork}
+            compactIntro
+            onContinue={handleAdvanceNext}
+            onClose={handleAdvanceDismiss}
+            onAwaitingImport={() => {
+              // Frozen plan is latched inside SecondCaptureForkContent.
+            }}
+            onPlaceInBuild={handleAdvanceDismiss}
+          />
+        ) : (
+          <p className="text-sm text-secondary">{advancePrompt?.body}</p>
+        )}
       </Modal>
     </>
   );

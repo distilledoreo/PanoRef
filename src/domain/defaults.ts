@@ -48,11 +48,17 @@ export const DEFAULT_SHOT_WIDTH = 3840;
 export const DEFAULT_SHOT_HEIGHT = 2160;
 
 export const defaultProjectedStyleSettings: ProjectedStyleSettings = {
+  panoId: undefined,
+  secondaryPanoId: undefined,
+  blendMode: 'primary_only',
   opacity: 1,
   exposure: 1,
   lightingContribution: 0,
   fallbackMode: 'clay',
-  blendMode: 'primary_only',
+  occlusionEnabled: true,
+  occlusionBiasMeters: 0.04,
+  occlusionSoftness: 1,
+  occlusionDebugMode: 'off',
 };
 
 export const defaultProjectSettings = {
@@ -93,15 +99,18 @@ export function normalizeProjectedStyleSettings(
   const blendMode = settings?.blendMode && blendModes.has(settings.blendMode)
     ? settings.blendMode
     : defaultProjectedStyleSettings.blendMode;
+  const occlusionBiasMeters = Number(settings?.occlusionBiasMeters);
+  const occlusionSoftness = Number(settings?.occlusionSoftness);
+  const occlusionEnabled = typeof settings?.occlusionEnabled === 'boolean'
+    ? settings.occlusionEnabled
+    : true;
   const panoId = typeof settings?.panoId === 'string' && settings.panoId.length > 0
     ? settings.panoId
     : undefined;
   let secondaryPanoId = typeof settings?.secondaryPanoId === 'string' && settings.secondaryPanoId.length > 0
-    ? settings.secondaryPanoId
-    : undefined;
-  if (secondaryPanoId && panoId && secondaryPanoId === panoId) {
-    secondaryPanoId = undefined;
-  }
+      ? settings.secondaryPanoId
+      : undefined;
+  if (secondaryPanoId && panoId && secondaryPanoId === panoId) secondaryPanoId = undefined;
   return {
     panoId,
     secondaryPanoId,
@@ -112,6 +121,14 @@ export function normalizeProjectedStyleSettings(
       ? Math.min(1, Math.max(0, lightingContribution))
       : defaultProjectedStyleSettings.lightingContribution,
     fallbackMode: settings?.fallbackMode === 'neutral' ? 'neutral' : 'clay',
+    occlusionEnabled,
+    occlusionBiasMeters: Number.isFinite(occlusionBiasMeters)
+      ? Math.min(0.5, Math.max(0, occlusionBiasMeters))
+      : defaultProjectedStyleSettings.occlusionBiasMeters,
+    occlusionSoftness: Number.isFinite(occlusionSoftness)
+      ? Math.min(2, Math.max(0, occlusionSoftness))
+      : defaultProjectedStyleSettings.occlusionSoftness,
+    occlusionDebugMode: settings?.occlusionDebugMode === 'coverage' ? 'coverage' : 'off',
   };
 }
 
@@ -325,8 +342,9 @@ export function createPanoReference(params: {
     imageAssetId: params.assetId,
     type: params.type,
     projection: 'equirectangular',
-    origin: params.origin,
-    rotation: params.rotation ?? [0, 0, 0],
+    // Freeze pose copies so later scene.panoOrigin moves never rewrite this pano.
+    origin: [...params.origin] as Vec3,
+    rotation: [...(params.rotation ?? [0, 0, 0])] as Vec3,
     width: params.width,
     height: params.height,
     isCanonical: params.isCanonical ?? false,

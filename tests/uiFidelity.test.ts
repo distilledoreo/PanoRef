@@ -114,6 +114,30 @@ describe('ui revamp fidelity surfaces', () => {
     expect(help).toContain('double-tap W');
   });
 
+  it('keeps optimized origins as a capture plan without relocating existing panorama pixels', () => {
+    const reference = readFileSync(new URL('../src/components/workspaces/ReferenceWorkspace.tsx', import.meta.url), 'utf8');
+    const projectedPanel = readFileSync(new URL('../src/components/common/ProjectedStylePanel.tsx', import.meta.url), 'utf8');
+    const coveragePanel = readFileSync(new URL('../src/components/common/CoverageOptimizerPanel.tsx', import.meta.url), 'utf8');
+    expect(reference).not.toContain('onApplyPanoramaOrigins');
+    expect(projectedPanel).not.toContain('onApplyPanoramaOrigins');
+    expect(coveragePanel).not.toContain('data-coverage-apply-pair');
+    expect(coveragePanel).toContain('data-coverage-apply-capture-a');
+    expect(coveragePanel).toContain('data-coverage-apply-capture');
+    expect(coveragePanel).toContain('Existing panorama origins are never rewritten');
+    expect(coveragePanel).toContain('data-coverage-use-selection-bounds');
+    expect(coveragePanel).toContain('Restrict optimizer to an analysis region');
+    expect(coveragePanel).toContain('Metrics above are room-local');
+  });
+
+  it('guards both successful and failed coverage extraction against stale analysis identity', () => {
+    const coveragePanel = readFileSync(
+      new URL('../src/components/common/CoverageOptimizerPanel.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(coveragePanel).toMatch(/const scene = await extractCoverageScene[\s\S]*if \(analysisIdRef\.current !== analysisId\) return;/);
+    expect(coveragePanel).toMatch(/catch \(error\) \{\s+if \(analysisIdRef\.current !== analysisId\) return;/);
+  });
+
   it('pauses automatic shot frame preview renders while fly camera is active', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     expect(shots).not.toContain('flyCameraRevision');
@@ -139,6 +163,8 @@ describe('ui revamp fidelity surfaces', () => {
     const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
     const renderers = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
     expect(build).toContain('Download Graybox 360');
+    expect(build).toContain('Download Projected 360');
+    expect(build).toContain('data-build-download-projected-360');
     expect(build).toContain('Re-render after scene changes');
     expect(build).toContain('data-build-rerender-graybox');
     expect(build).toContain('data-build-graybox-cta');
@@ -163,7 +189,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(referenceGuide).toContain('Download the graybox image.');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT = 2048');
-    expect(store).toContain("existing.type !== 'graybox_render'");
+    expect(store).toContain('isCaptureOriginNearPano(captureOrigin, existing)');
     expect(store).toContain('isRenderingGraybox: false');
     expect(store).toContain('shotCameraFlying: false');
     expect(store).toMatch(/setProject:[\s\S]*isExportingPackage: false/);
@@ -186,12 +212,15 @@ describe('ui revamp fidelity surfaces', () => {
     expect(build).toContain("buildMode === 'pano_origin'");
     expect(build).toContain('|| buildMode === \'pano_origin\'');
     expect(build).toContain("editingChromeVisible && (");
-    expect(build).toContain('{selectedObjects.length > 0 && editingChromeVisible && (');
+    expect(build).toContain('{selectedObjects.length > 0 && editingChromeVisible && buildMode !== \'pano_origin\' && (');
     expect(build).toContain('Esc exits');
     expect(build).toContain('tap Free camera to edit');
     expect(build).toContain('handleMovePanoOrigin');
     expect(build).toContain('onRotatePanoOrigin');
     expect(build).toContain('shouldWarnOnOriginMove');
+    expect(build).toContain('data-build-origin-coaching');
+    expect(build).toContain('data-build-origin-controls');
+    expect(build).toContain('data-build-free-camera-control');
   });
 
   it('surfaces reference alignment yaw/opacity on viewer chrome', () => {
@@ -199,6 +228,13 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).toContain('data-reference-alignment-chrome');
     expect(reference).toContain('data-reference-yaw-slider');
     expect(reference).toContain('Graybox fade');
+    expect(reference).toContain('data-panoramas-card');
+    expect(reference).toContain('data-reference-settings-gear');
+    expect(reference).toContain('SecondCaptureForkPanel');
+    expect(reference).toContain('data-reference-pano-origins');
+    expect(reference).toContain('resolveCompareGraybox');
+    expect(reference).toContain('compareGraybox');
+    expect(reference).toContain('activePano?.origin ?? project.scene.panoOrigin');
   });
 
   it('exposes remove controls for pano references in reference settings', () => {
@@ -209,6 +245,46 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).toContain('Remove Uploaded Pano');
     expect(reference).toContain('removePanoReference');
     expect(store).toContain('removePanoReference:');
+    expect(store).toContain('importStyledPano:');
+    expect(store).toContain('pendingSecondCapturePlan');
+    expect(store).toContain('setPendingSecondCapturePlan');
+  });
+
+  it('keeps second-capture seed download status truthful', () => {
+    const fork = readFileSync(new URL('../src/components/common/SecondCaptureForkPanel.tsx', import.meta.url), 'utf8');
+    expect(fork).toContain('data-second-capture-seed-status');
+    expect(fork).toContain('Download seed again');
+    expect(fork).toContain('data-second-capture-download-seed-again');
+  });
+
+  it('keeps second-capture progress ETA markers in the fork panel', () => {
+    const fork = readFileSync(new URL('../src/components/common/SecondCaptureForkPanel.tsx', import.meta.url), 'utf8');
+    expect(fork).toContain('data-second-capture-progress');
+    expect(fork).toContain('data-second-capture-eta');
+    expect(fork).toContain('About ');
+    expect(fork).toContain('remaining');
+    expect(fork).toContain('prepareSuggestedSecondCapture');
+    expect(fork).toContain('export function SecondCaptureForkContent');
+  });
+
+  it('embeds second-capture fork in the reference advance modal', () => {
+    const guidance = readFileSync(new URL('../src/components/common/WorkflowGuidance.tsx', import.meta.url), 'utf8');
+    expect(guidance).toContain('showSecondCaptureFork');
+    expect(guidance).toContain('SecondCaptureForkContent');
+    expect(guidance).toContain("completedStep === 'reference'");
+  });
+
+  it('simplifies projected style with a happy-path blend toggle', () => {
+    const panel = readFileSync(new URL('../src/components/common/ProjectedStylePanel.tsx', import.meta.url), 'utf8');
+    expect(panel).toContain('data-projected-blend-toggle');
+    expect(panel).toContain('data-projected-style-advanced');
+    expect(panel).toContain('Blend both captures');
+  });
+
+  it('coaches Build users after the capture origin moves for a second pano', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    expect(build).toContain('data-build-second-capture-coach');
+    expect(build).toContain('resolveStyledImportMode');
   });
 
   it('keeps advanced shot tools in settings rather than the camera chrome', () => {
@@ -488,8 +564,9 @@ describe('ui revamp fidelity surfaces', () => {
   it('keeps Build floating controls below the mobile-safe header', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
 
-    // Capture-origin gizmo chrome adds one more safe-header floating panel.
-    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(7);
+    expect(build).toContain("'calc(var(--stage-header-safe) + 4rem)'");
+    expect(build).toContain('data-build-selection-tools');
+    expect(build).toContain('top-[calc(var(--stage-header-safe)+7.5rem)]');
     expect(build).not.toContain('top-20');
   });
 

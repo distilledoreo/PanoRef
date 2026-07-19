@@ -770,6 +770,7 @@ export function ShotsWorkspace() {
             shotFraming={shotFraming}
             appearance={appearance}
             minHeightClassName="min-h-0"
+            onOcclusionStatusChange={(status) => useContinuityStore.getState().setProjectedOcclusionStatus(status)}
           />
         </div>
 

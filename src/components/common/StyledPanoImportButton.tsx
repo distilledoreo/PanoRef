@@ -1,31 +1,52 @@
 import React, { useRef, useState } from 'react';
-import { ImagePlus } from 'lucide-react';
+import { ImagePlus, LoaderCircle } from 'lucide-react';
 import { STYLED_PANO } from '../../domain/copy';
 import { analyzeEquirectImage, EQUIRECT_ASPECT, isAspectRatio, preparePanoImport } from '../../engine/panoImage';
 import { readFileAsDataUrl } from '../../engine/projectIO';
+import {
+  resolveStyledImportMode,
+  styledImportActionHint,
+  styledImportActionLabel,
+} from '../../engine/multiOriginProjection';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { IconButton } from './Field';
 
 export function StyledPanoImportButton({
-  label = STYLED_PANO.importAction,
+  label,
   className,
   primary = false,
   highlighted = false,
+  modeAware = false,
+  onImported,
 }: {
   label?: string;
   className?: string;
   primary?: boolean;
   highlighted?: boolean;
+  /** When true, label/hint follow replace vs add-secondary based on capture origin. */
+  modeAware?: boolean;
+  onImported?: (mode: 'first' | 'replace' | 'add_secondary') => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const importCanonicalPano = useContinuityStore((state) => state.importCanonicalPano);
+  const project = useContinuityStore((state) => state.project);
+  const pendingSecondCapturePlan = useContinuityStore(
+    (state) => state.pendingSecondCapturePlan,
+  );
+  const importStyledPano = useContinuityStore((state) => state.importStyledPano);
   const [error, setError] = useState<string | undefined>();
   const [warning, setWarning] = useState<string | undefined>();
+  const [busy, setBusy] = useState(false);
+
+  const mode = resolveStyledImportMode(project, { pendingSecondCapturePlan });
+  const resolvedLabel = label
+    ?? (modeAware ? styledImportActionLabel(mode) : STYLED_PANO.importAction);
+  const hint = modeAware ? styledImportActionHint(mode) : undefined;
 
   const importFile = async (file?: File) => {
-    if (!file) return;
+    if (!file || busy) return;
     setError(undefined);
     setWarning(undefined);
+    setBusy(true);
     try {
       const dataUrl = await readFileAsDataUrl(file);
       const dimensions = await getImageDimensions(dataUrl);
@@ -40,7 +61,7 @@ export function StyledPanoImportButton({
         );
       }
       const prepared = await preparePanoImport(dataUrl, dimensions.width, dimensions.height);
-      importCanonicalPano({
+      const importedMode = importStyledPano({
         name: file.name,
         dataUrl: prepared.dataUrl,
         width: prepared.width,
@@ -49,9 +70,11 @@ export function StyledPanoImportButton({
           ? `Imported from ${dimensions.width}×${dimensions.height} letterboxed 16:9; extracted ${prepared.width}×${prepared.height} equirectangular region.`
           : undefined,
       });
+      onImported?.(importedMode);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not import panorama image.');
     } finally {
+      setBusy(false);
       if (fileRef.current) fileRef.current.value = '';
     }
   };
@@ -69,11 +92,17 @@ export function StyledPanoImportButton({
         <IconButton
           onClick={() => fileRef.current?.click()}
           highlighted={highlighted}
+          disabled={busy}
           className={`w-full ${primary && !highlighted ? 'border-[var(--accent)] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]' : ''} ${className ?? ''}`}
+          data-styled-pano-import
+          data-import-mode={mode}
         >
-          <ImagePlus className="h-4 w-4" />
-          {label}
+          {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+          {busy ? 'Importing…' : resolvedLabel}
         </IconButton>
+        {hint && !error && !busy && (
+          <p className="text-[11px] leading-snug text-muted">{hint}</p>
+        )}
         {error && (
           <p role="alert" className="text-xs text-red-500">{error}</p>
         )}

@@ -6,20 +6,18 @@
 import * as THREE from 'three';
 import { createProjectedStyleMaterial } from '../../src/engine/projectedStyleMaterials';
 import { defaultProjectedStyleSettings } from '../../src/domain/defaults';
+import type { ProjectedStyleSettings, Vec3, Euler } from '../../src/domain/types';
+
+export interface ProjectedCompileCase {
+  label: string;
+  ok: boolean;
+  detail?: string;
+}
 
 export interface ProjectedCompileResult {
   ok: boolean;
   errors: string[];
-  lightingCases: Array<{ lightingContribution: number; ok: boolean; detail?: string }>;
-  dualCases: Array<{ mode: string; ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number }>;
-}
-
-function makeSolidDataTexture(r: number, g: number, b: number, a = 255): THREE.DataTexture {
-  const data = new Uint8Array([r, g, b, a]);
-  const texture = new THREE.DataTexture(data, 1, 1);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.needsUpdate = true;
-  return texture;
+  cases: ProjectedCompileCase[];
 }
 
 function makeDataTexture(): THREE.DataTexture {
@@ -35,120 +33,61 @@ function makeDataTexture(): THREE.DataTexture {
   return texture;
 }
 
-function renderAndReadPixel(
-  renderer: THREE.WebGLRenderer,
-  material: THREE.MeshStandardMaterial,
-  boxPosition: [number, number, number],
-  cameraPosition: [number, number, number],
-): { r: number; g: number; b: number; ok: boolean; error?: string } {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
-  mesh.position.set(...boxPosition);
+function makeOcclusionCube(renderer: THREE.WebGLRenderer): THREE.CubeTexture {
+  const size = 4;
+  const target = new THREE.WebGLCubeRenderTarget(size, {
+    type: THREE.UnsignedByteType,
+    generateMipmaps: false,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+  target.texture.colorSpace = THREE.NoColorSpace;
   const scene = new THREE.Scene();
-  scene.add(mesh);
-
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-  camera.position.set(...cameraPosition);
-  camera.lookAt(...boxPosition);
-
-  renderer.clear();
-  renderer.render(scene, camera);
-  const gl = renderer.getContext();
-  const err = gl.getError();
-  if (err !== gl.NO_ERROR) {
-    return { r: 0, g: 0, b: 0, ok: false, error: `gl.getError()=${err}` };
-  }
-
-  const pixel = new Uint8Array(4);
-  // Read center pixel
-  const width = renderer.domElement.width;
-  const height = renderer.domElement.height;
-  gl.readPixels(
-    Math.floor(width / 2),
-    Math.floor(height / 2),
-    1, 1,
-    gl.RGBA,
-    gl.UNSIGNED_BYTE,
-    pixel,
-  );
-  return {
-    r: pixel[0],
-    g: pixel[1],
-    b: pixel[2],
-    ok: true,
-  };
+  scene.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0x808080 })));
+  const cubeCamera = new THREE.CubeCamera(0.05, 100, target);
+  cubeCamera.update(renderer, scene);
+  return target.texture as unknown as THREE.CubeTexture;
 }
 
-function tryDualBlend(
-  renderer: THREE.WebGLRenderer,
-  mode: string,
-): { ok: boolean; detail?: string; pixelR?: number; pixelG?: number; pixelB?: number } {
-  // Primary: solid red texture. Secondary: solid blue texture.
-  const primaryTex = makeSolidDataTexture(255, 0, 0);
-  const secondaryTex = makeSolidDataTexture(0, 0, 255);
-
-  const hasSecondary = mode !== 'primary_only';
-  const primaryOrigin: [number, number, number] = [0, 1.6, 0];
-  const secondaryOrigin: [number, number, number] = [10, 1.6, 0];
-
-  const material = createProjectedStyleMaterial({
-    texture: primaryTex,
-    origin: primaryOrigin,
-    rotation: [0, 0, 0],
-    settings: {
-      ...defaultProjectedStyleSettings,
-      lightingContribution: 0,
-      blendMode: mode as 'primary_only' | 'secondary_only' | 'primary_dominant' | 'secondary_dominant',
-    },
-    fallbackColor: 0x888888,
-    disposable: true,
-    secondaryTexture: hasSecondary ? secondaryTex : undefined,
-    secondaryOrigin: hasSecondary ? secondaryOrigin : undefined,
-    secondaryRotation: [0, 0, 0],
-  });
-
-  // Place box near the dominant origin so channel readback is unambiguous:
-  //   primary_only / primary_dominant → near primary → red dominates
-  //   secondary_only / secondary_dominant → near secondary → blue dominates
-  const nearPrimary = mode === 'primary_only' || mode === 'primary_dominant';
-  const boxPos: [number, number, number] = nearPrimary
-    ? [0.5, 1.6, 0.5]
-    : [10, 1.6, 0.5];
-  const camPos: [number, number, number] = nearPrimary
-    ? [-2, 2.6, 5]
-    : [7, 2.6, 5];
-
-  const result = renderAndReadPixel(renderer, material, boxPos, camPos);
-
-  primaryTex.dispose();
-  secondaryTex.dispose();
-  material.dispose();
-
-  if (!result.ok) return result;
-
-  return {
-    ok: true,
-    pixelR: result.r,
-    pixelG: result.g,
-    pixelB: result.b,
-  };
+interface VariantSpec {
+  label: string;
+  settings: ProjectedStyleSettings;
+  occlusion?: boolean;
+  secondary?: boolean;
+  occlusionSecondary?: boolean;
+  debug?: boolean;
 }
 
-function tryCompile(
+function tryVariant(
   renderer: THREE.WebGLRenderer,
-  lightingContribution: number,
-): { ok: boolean; detail?: string } {
+  spec: VariantSpec,
+): ProjectedCompileCase {
   const texture = makeDataTexture();
-  const material = createProjectedStyleMaterial({
+  const occlusionTexture = spec.occlusion || spec.occlusionSecondary ? makeOcclusionCube(renderer) : undefined;
+  const secondaryTexture = spec.secondary ? makeDataTexture() : undefined;
+  const secondaryOcclusionTexture = spec.occlusionSecondary ? makeOcclusionCube(renderer) : undefined;
+
+  const params = {
     texture,
-    origin: [0, 1.6, 0],
-    rotation: [0, 0, 0],
-    settings: {
-      ...defaultProjectedStyleSettings,
-      lightingContribution,
-    },
+    origin: [0, 1.6, 0] as Vec3,
+    rotation: [0, 0, 0] as Euler,
+    settings: spec.settings,
     fallbackColor: 0x888888,
     disposable: true,
-  });
+    occlusionTexture,
+    occlusionNearMeters: 0.05,
+    occlusionFarMeters: 100,
+    occlusionFaceSize: 512,
+    secondaryTexture,
+    secondaryOrigin: spec.secondary ? ([5, 1.6, 0] as Vec3) : undefined,
+    secondaryRotation: [0, 0, 0] as Euler,
+    secondaryOcclusionTexture,
+    secondaryOcclusionNearMeters: 0.05,
+    secondaryOcclusionFarMeters: 100,
+    secondaryOcclusionFaceSize: 512,
+  };
+
+  const material = createProjectedStyleMaterial(params);
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
   const scene = new THREE.Scene();
   scene.add(mesh);
@@ -163,15 +102,10 @@ function tryCompile(
     renderer.render(scene, camera);
     const gl = renderer.getContext();
     const err = gl.getError();
-    if (err !== gl.NO_ERROR) {
-      return { ok: false, detail: `gl.getError()=${err}` };
-    }
-    return { ok: true };
+    if (err !== gl.NO_ERROR) return { label: spec.label, ok: false, detail: `gl.getError()=${err}` };
+    return { label: spec.label, ok: true };
   } catch (error) {
-    return {
-      ok: false,
-      detail: error instanceof Error ? error.message : String(error),
-    };
+    return { label: spec.label, ok: false, detail: error instanceof Error ? error.message : String(error) };
   } finally {
     material.dispose();
     texture.dispose();
@@ -205,24 +139,24 @@ export function runProjectedStyleCompileGate(): ProjectedCompileResult {
     return {
       ok: false,
       errors: [`WebGLRenderer init failed: ${error instanceof Error ? error.message : String(error)}`],
-      lightingCases: [],
-      dualCases: [],
+      cases: [],
     };
   }
 
   renderer.setSize(64, 64, false);
 
-  const lightingCases = [0, 0.5].map((lightingContribution) => {
-    const result = tryCompile(renderer, lightingContribution);
-    return { lightingContribution, ...result };
-  });
+  const variants: VariantSpec[] = [
+    { label: 'single-no-occlusion-lit0', settings: { ...defaultProjectedStyleSettings, lightingContribution: 0 } },
+    { label: 'single-no-occlusion-lit1', settings: { ...defaultProjectedStyleSettings, lightingContribution: 0.5 } },
+    { label: 'single-occlusion', settings: { ...defaultProjectedStyleSettings }, occlusion: true },
+    { label: 'dual-no-occlusion', settings: { ...defaultProjectedStyleSettings }, secondary: true },
+    { label: 'dual-occlusion-both', settings: { ...defaultProjectedStyleSettings }, secondary: true, occlusion: true, occlusionSecondary: true },
+    { label: 'dual-primary-occlusion-only', settings: { ...defaultProjectedStyleSettings }, secondary: true, occlusion: true },
+    { label: 'dual-secondary-occlusion-only', settings: { ...defaultProjectedStyleSettings }, secondary: true, occlusionSecondary: true },
+    { label: 'coverage-debug', settings: { ...defaultProjectedStyleSettings, occlusionDebugMode: 'coverage' }, occlusion: true, secondary: true, occlusionSecondary: true },
+  ];
 
-  // Dual projector tests with pixel readback
-  const dualModes = ['primary_only', 'secondary_only', 'primary_dominant', 'secondary_dominant'];
-  const dualCases = dualModes.map((mode) => {
-    const result = tryDualBlend(renderer, mode);
-    return { mode, ...result };
-  });
+  const cases = variants.map((spec) => tryVariant(renderer, spec));
 
   renderer.dispose();
   console.error = originalError;
@@ -230,20 +164,15 @@ export function runProjectedStyleCompileGate(): ProjectedCompileResult {
   const shaderFail = glErrors.some((line) =>
     /shader|fragment|vertex|compile|link|THREE\.WebGLProgram/i.test(line),
   );
-  const allCasesOk = lightingCases.every((c) => c.ok) && dualCases.every((c) => c.ok);
+  const allCasesOk = cases.every((c) => c.ok);
   const errors = [
     ...glErrors.filter((line) => /shader|fragment|vertex|compile|link|THREE\.WebGLProgram/i.test(line)),
-    ...lightingCases.filter((c) => !c.ok).map((c) => `lighting=${c.lightingContribution}: ${c.detail}`),
-    ...dualCases.filter((c) => !c.ok).map((c) => `dual mode=${c.mode}: ${c.detail}`),
+    ...cases.filter((c) => !c.ok).map((c) => `${c.label}: ${c.detail}`),
   ];
 
-  return {
-    ok: allCasesOk && !shaderFail,
-    errors,
-    lightingCases,
-    dualCases,
-  };
+  return { ok: allCasesOk && !shaderFail, errors, cases };
 }
+
 
 // Auto-run when loaded as a browser harness.
 declare global {
@@ -260,7 +189,6 @@ try {
   window.__PROJECTED_COMPILE__ = {
     ok: false,
     errors: [error instanceof Error ? error.message : String(error)],
-    lightingCases: [],
-    dualCases: [],
+    cases: [],
   };
 }

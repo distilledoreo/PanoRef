@@ -9,14 +9,21 @@ import {
   canUseDualProjectorBlend,
   computeProjectorBlendWeights,
   countStyledPanoramas,
+  isCaptureOriginNearPano,
   originMoveWarningMessage,
   projectorConfidence,
   resolveProjectedProjectorAssets,
   resolveProjectorPose,
   resolveProjectors,
+  resolveStyledImportMode,
   shouldWarnOnOriginMove,
   normalizeProjectorBlendMode,
 } from '../src/engine/multiOriginProjection';
+import {
+  findGrayboxNearOrigin,
+  listGrayboxPanos,
+  resolveCompareGraybox,
+} from '../src/domain/selectors';
 
 function withTwoStyledPanos() {
   const project = createDefaultProject();
@@ -87,7 +94,177 @@ describe('multi-origin projection helpers', () => {
     expect(shouldWarnOnOriginMove(project)).toBe(true);
     expect(countStyledPanoramas(project)).toBe(2);
     expect(originMoveWarningMessage(2)).toMatch(/reference panoramas/i);
-    expect(originMoveWarningMessage(2)).toMatch(/projection/i);
+    expect(originMoveWarningMessage(2)).toMatch(/second vantage/i);
+  });
+
+  it('resolves styled import mode from capture vs primary origin', () => {
+    const { project, a } = withTwoStyledPanos();
+    project.panoRefs = [a];
+    project.scene.panoOrigin = [...a.origin];
+    expect(resolveStyledImportMode(project)).toBe('replace');
+
+    project.scene.panoOrigin = [8, 1.6, 0];
+    expect(resolveStyledImportMode(project)).toBe('add_secondary');
+
+    project.scene.panoOrigin = [...a.origin];
+    expect(resolveStyledImportMode(project, {
+      pendingSecondCapturePlan: {
+        primaryPanoId: a.id,
+        origin: [8, 1.6, 0],
+        rotation: [0, 0, 0],
+        createdAt: new Date().toISOString(),
+      },
+    })).toBe('add_secondary');
+
+    project.panoRefs = [];
+    expect(resolveStyledImportMode(project)).toBe('first');
+  });
+
+  it('freezes pano origin copies so scene moves do not rewrite styled poses', () => {
+    const project = createDefaultProject();
+    const sharedOrigin: [number, number, number] = [1, 2, 3];
+    project.scene.panoOrigin = sharedOrigin;
+    const asset = createPanoAsset({
+      name: 's.png',
+      uri: 'data:image/png;base64,SSSS',
+      width: 4,
+      height: 2,
+    });
+    const pano = createPanoReference({
+      name: 'Styled',
+      assetId: asset.id,
+      type: 'ai_global_reference',
+      origin: project.scene.panoOrigin,
+      width: 4,
+      height: 2,
+      isCanonical: true,
+    });
+    expect(pano.origin).not.toBe(project.scene.panoOrigin);
+    expect(pano.origin).toEqual([1, 2, 3]);
+    project.scene.panoOrigin[0] = 99;
+    expect(pano.origin[0]).toBe(1);
+  });
+
+  it('matches graybox compare eligibility to each pano origin without requiring scene origin moves', () => {
+    const project = createDefaultProject();
+    const primary = createPanoReference({
+      name: 'Primary',
+      assetId: 'a1',
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: true,
+    });
+    const secondary = createPanoReference({
+      name: 'Secondary',
+      assetId: 'a2',
+      type: 'ai_global_reference',
+      origin: [4, 1.6, 2],
+      width: 4,
+      height: 2,
+      isCanonical: false,
+    });
+    const grayboxAtPrimary = createPanoReference({
+      name: 'Graybox',
+      assetId: 'g1',
+      type: 'graybox_render',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: false,
+    });
+
+    expect(isCaptureOriginNearPano(grayboxAtPrimary.origin, primary)).toBe(true);
+    expect(isCaptureOriginNearPano(grayboxAtPrimary.origin, secondary)).toBe(false);
+    // Reference preview can switch panos without relocating Build's live capture origin.
+    expect(isCaptureOriginNearPano(project.scene.panoOrigin, primary)).toBe(true);
+    project.scene.panoOrigin = [9, 1.6, 9];
+    expect(isCaptureOriginNearPano(grayboxAtPrimary.origin, primary)).toBe(true);
+  });
+
+  it('resolves compare graybox via sourcePanoId then nearest matching origin', () => {
+    const project = createDefaultProject();
+    const grayA = createPanoReference({
+      name: 'Gray A',
+      assetId: 'g1',
+      type: 'graybox_render',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+    });
+    const grayB = createPanoReference({
+      name: 'Gray B',
+      assetId: 'g2',
+      type: 'graybox_render',
+      origin: [5, 1.6, 0],
+      width: 4,
+      height: 2,
+    });
+    const primary = createPanoReference({
+      name: 'Primary',
+      assetId: 'a1',
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: true,
+      sourcePanoId: grayA.id,
+    });
+    const secondary = createPanoReference({
+      name: 'Secondary',
+      assetId: 'a2',
+      type: 'ai_global_reference',
+      origin: [5, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: false,
+    });
+    project.panoRefs = [grayA, grayB, primary, secondary];
+
+    expect(resolveCompareGraybox(project, primary)?.id).toBe(grayA.id);
+    expect(resolveCompareGraybox(project, secondary)?.id).toBe(grayB.id);
+    expect(findGrayboxNearOrigin(project, [5.05, 1.6, 0])?.id).toBe(grayB.id);
+    expect(listGrayboxPanos(project)).toHaveLength(2);
+  });
+
+  it('does not auto-pick graybox as dual secondary', () => {
+    const project = createDefaultProject();
+    const styledAsset = createPanoAsset({
+      name: 's.png',
+      uri: 'data:image/png;base64,SSSS',
+      width: 4,
+      height: 2,
+    });
+    const grayAsset = createPanoAsset({
+      name: 'g.png',
+      uri: 'data:image/png;base64,GGGG',
+      width: 4,
+      height: 2,
+    });
+    project.assets.assets[styledAsset.id] = styledAsset;
+    project.assets.assets[grayAsset.id] = grayAsset;
+    const styled = createPanoReference({
+      name: 'Styled',
+      assetId: styledAsset.id,
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: true,
+    });
+    const gray = createPanoReference({
+      name: 'Gray',
+      assetId: grayAsset.id,
+      type: 'graybox_render',
+      origin: [4, 1.6, 0],
+      width: 4,
+      height: 2,
+    });
+    project.panoRefs = [styled, gray];
+    const resolved = resolveProjectors(project, { blendMode: 'primary_dominant' });
+    expect(resolved.primary?.id).toBe(styled.id);
+    expect(resolved.secondary).toBeUndefined();
   });
 
   it('resolves projector pose from the pano itself, not the scene origin', () => {

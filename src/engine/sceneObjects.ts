@@ -185,13 +185,27 @@ export interface ProjectedSceneOptions {
   texture: THREE.Texture;
   origin: Vec3;
   rotation: Euler;
+  panoramaWidth?: number;
+  panoramaHeight?: number;
   settings: ProjectedStyleSettings;
   /** Dispose projected materials with the scene (export / one-shot). */
   disposableMaterials?: boolean;
-  /** Optional secondary projector for multi-origin blend. */
+
+  occlusionTexture?: THREE.CubeTexture;
+  occlusionNearMeters?: number;
+  occlusionFarMeters?: number;
+  occlusionFaceSize?: number;
+
   secondaryTexture?: THREE.Texture;
   secondaryOrigin?: Vec3;
   secondaryRotation?: Euler;
+  secondaryPanoramaWidth?: number;
+  secondaryPanoramaHeight?: number;
+
+  secondaryOcclusionTexture?: THREE.CubeTexture;
+  secondaryOcclusionNearMeters?: number;
+  secondaryOcclusionFarMeters?: number;
+  secondaryOcclusionFaceSize?: number;
 }
 
 export function buildScene(
@@ -203,6 +217,8 @@ export function buildScene(
     showHelpers?: boolean;
     showSceneGuides?: boolean;
     showPanoOrigin?: boolean;
+    /** Build viewport grid; default true. Disable for clean projected 360 exports. */
+    showGrid?: boolean;
     hiddenObjectTypes?: SceneObjectType[];
     previewObject?: SceneObject;
     theme?: SceneVisualTheme;
@@ -253,14 +269,16 @@ export function buildScene(
   rimLight.position.set(-2, 2, 6);
   scene.add(rimLight);
 
-  const grid = new THREE.GridHelper(
-    14,
-    14,
-    theme === 'dark' ? 0x2f3a44 : 0x9aa7a2,
-    theme === 'dark' ? 0x1b252d : 0xd7dedb,
-  );
-  grid.position.y = 0.002;
-  scene.add(grid);
+  if (options.showGrid !== false) {
+    const grid = new THREE.GridHelper(
+      14,
+      14,
+      theme === 'dark' ? 0x2f3a44 : 0x9aa7a2,
+      theme === 'dark' ? 0x1b252d : 0xd7dedb,
+    );
+    grid.position.y = 0.002;
+    scene.add(grid);
+  }
 
   const useProjected = options.appearance === 'projected' && Boolean(options.projected?.texture);
 
@@ -352,12 +370,24 @@ function applyProjectedStyleToObject(
     texture: projected.texture,
     origin: projected.origin,
     rotation: projected.rotation,
+    panoramaWidth: projected.panoramaWidth,
+    panoramaHeight: projected.panoramaHeight,
     settings: projected.settings,
     fallbackColor: projected.settings.fallbackMode === 'neutral' ? 0xb0b6b2 : fallbackColor,
     disposable: projected.disposableMaterials ?? true,
+    occlusionTexture: projected.occlusionTexture,
+    occlusionNearMeters: projected.occlusionNearMeters,
+    occlusionFarMeters: projected.occlusionFarMeters,
+    occlusionFaceSize: projected.occlusionFaceSize,
     secondaryTexture: projected.secondaryTexture,
     secondaryOrigin: projected.secondaryOrigin,
     secondaryRotation: projected.secondaryRotation,
+    secondaryPanoramaWidth: projected.secondaryPanoramaWidth,
+    secondaryPanoramaHeight: projected.secondaryPanoramaHeight,
+    secondaryOcclusionTexture: projected.secondaryOcclusionTexture,
+    secondaryOcclusionNearMeters: projected.secondaryOcclusionNearMeters,
+    secondaryOcclusionFarMeters: projected.secondaryOcclusionFarMeters,
+    secondaryOcclusionFaceSize: projected.secondaryOcclusionFaceSize,
   });
   // Keep a tiny emissive edge so selection remains readable under projection.
   if (root.userData?.sceneObjectId && projected.disposableMaterials === false) {
