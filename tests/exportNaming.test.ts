@@ -76,6 +76,27 @@ describe('export naming', () => {
     ]);
   });
 
+  it('suffixes folders that only differ by production ID casing', () => {
+    const project = createDefaultProject();
+    const first = {
+      ...project.shots[0],
+      id: 'shot-a',
+      productionShotId: '42A',
+      name: 'Courtyard entrance',
+    };
+    const second = {
+      ...project.shots[0],
+      id: 'shot-b',
+      productionShotId: '42a',
+      name: 'Courtyard entrance',
+    };
+
+    expect(assignShotPackageRootFolders([first, second]).map((item) => item.rootFolder)).toEqual([
+      '42A_courtyard_entrance',
+      '42a_courtyard_entrance_2',
+    ]);
+  });
+
   it('treats blank production IDs as absent', () => {
     const project = createDefaultProject();
     const shot = {

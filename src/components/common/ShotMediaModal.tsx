@@ -358,17 +358,19 @@ function FieldRow({
 }) {
   if (editing) {
     return (
-      <label className="block text-xs text-white/65">
+      <form
+        className="block text-xs text-white/65"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave();
+        }}
+      >
         <span className="mb-1 block font-medium">{label}</span>
         <input
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={(event) => {
             event.stopPropagation();
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              onSave();
-            }
             if (event.key === 'Escape') {
               event.preventDefault();
               onCancel();
@@ -378,7 +380,22 @@ function FieldRow({
           className="w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]"
           autoFocus
         />
-      </label>
+        <div className="mt-2 flex gap-2">
+          <button
+            type="submit"
+            className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-semibold text-white/80"
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
     );
   }
 

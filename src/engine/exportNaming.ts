@@ -58,8 +58,9 @@ export function assignShotPackageRootFolders(shots: Shot[]): ShotPackageFolderAs
   const used = new Map<string, number>();
   return shots.map((shot) => {
     const baseName = getShotPackageBaseName(shot);
-    const seen = used.get(baseName) ?? 0;
-    used.set(baseName, seen + 1);
+    const collisionKey = baseName.toLocaleLowerCase();
+    const seen = used.get(collisionKey) ?? 0;
+    used.set(collisionKey, seen + 1);
     const rootFolder = seen === 0 ? baseName : `${baseName}_${seen + 1}`;
     return { shotId: shot.id, rootFolder, baseName };
   });
