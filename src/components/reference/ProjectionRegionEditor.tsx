@@ -25,6 +25,7 @@ import { diagnoseProjectionRegionPolygon } from "../../engine/projectionRegionPo
 import { projectionRegionDiagnosticsForAlignment } from "../../engine/projectionRegionDiagnostics";
 import { degreesToRadians } from "../../engine/sync";
 import { PanoViewer, type PanoViewerRegion } from "../viewers/PanoViewer";
+import { recenteredPanoViewForUvs } from "../../engine/panoViewerPicking";
 import { SceneViewport } from "../viewers/SceneViewport";
 import {
   cancelPendingRegion,
@@ -126,7 +127,8 @@ export function ProjectionRegionEditor({
       ),
     ),
   );
-  const [view, setView] = useState(DEFAULT_VIEW);
+  const [targetView, setTargetView] = useState(DEFAULT_VIEW);
+  const [sourceView, setSourceView] = useState(DEFAULT_VIEW);
   const [mobilePane, setMobilePane] = useState<"graybox" | "styled" | "review">(
     "review",
   );
@@ -178,6 +180,8 @@ export function ProjectionRegionEditor({
       setMobilePane("review");
       setPreview(false);
       setRegionTool("navigate");
+      setTargetView(DEFAULT_VIEW);
+      setSourceView(DEFAULT_VIEW);
     }
   }, [open, initialSourcePanoId]);
   const previewDraftProject = useMemo(
@@ -249,6 +253,15 @@ export function ProjectionRegionEditor({
     const next = redrawRegionId
       ? replaceTargetPolygon(draft, redrawRegionId, positions)
       : completeTargetPolygon(draft, positions);
+    const nextRegion = next.pendingRegion ?? next.regions.find((region) => region.id === next.activeRegionId);
+    if (nextRegion) {
+      setSourceView(
+        recenteredPanoViewForUvs(
+          nextRegion.vertices.map((vertex) => vertex.sourceUv),
+          source.rotation,
+        ),
+      );
+    }
     setDraft(next);
     setRedrawRegionId(undefined);
     setTargetDraftDirty(false);
@@ -321,6 +334,8 @@ export function ProjectionRegionEditor({
                 createProjectionRegionDraft(id, targets[0]?.id, alignment),
               );
               setTargetDraftDirty(false);
+              setTargetView(DEFAULT_VIEW);
+              setSourceView(DEFAULT_VIEW);
             }}
             className="ml-1 rounded border border-subtle bg-surface-base p-2"
           >
@@ -348,6 +363,8 @@ export function ProjectionRegionEditor({
                 createProjectionRegionDraft(sourceId, event.target.value),
               );
               setTargetDraftDirty(false);
+              setTargetView(DEFAULT_VIEW);
+              setSourceView(DEFAULT_VIEW);
             }}
             className="ml-1 rounded border border-subtle bg-surface-base p-2"
           >
@@ -538,9 +555,9 @@ export function ProjectionRegionEditor({
                 <PanoViewer
                   imageUrl={imageUrl(project, target)}
                   panoRotation={target?.rotation}
-                  view={view}
+                  view={targetView}
                   onViewChange={(change) =>
-                    setView((current) => ({ ...current, ...change }))
+                    setTargetView((current) => ({ ...current, ...change }))
                   }
                   interactionMode={
                     tool === "polygon" || tool === "rectangle"
@@ -692,9 +709,9 @@ export function ProjectionRegionEditor({
                 <PanoViewer
                   imageUrl={imageUrl(project, source)}
                   panoRotation={source.rotation}
-                  view={view}
+                  view={sourceView}
                   onViewChange={(change) =>
-                    setView((current) => ({ ...current, ...change }))
+                    setSourceView((current) => ({ ...current, ...change }))
                   }
                    interactionMode={active ? sourceInteractionMode : "navigate"}
                   regions={viewerRegions(draft, "source", numbered)}

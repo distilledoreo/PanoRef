@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isPanoViewerClick,
   panoUvToScreenPoint,
+  recenteredPanoViewForUvs,
   screenPointToPanoUv,
   shouldPickPanoViewerPointerUp,
 } from '../src/engine/panoViewerPicking';
@@ -117,6 +118,16 @@ describe('PanoViewer picking math', () => {
     expect(Number.isFinite(point.x)).toBe(true);
     expect(Number.isFinite(point.y)).toBe(true);
   });
+
+  it('recenters a paired region into a differently rotated panorama', () => {
+    const view = recenteredPanoViewForUvs(
+      [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6]],
+      [0, 180, 0],
+    );
+    expect(view.yawDegrees).toBeCloseTo(180, 6);
+    expect(panoUvToScreenPoint([0.4, 0.4], viewport, view, [0, 180, 0]).visible).toBe(true);
+    expect(panoUvToScreenPoint([0.6, 0.6], viewport, view, [0, 180, 0]).visible).toBe(true);
+  });
 });
 
 describe('PanoViewer pointer gesture classification', () => {
@@ -127,6 +138,7 @@ describe('PanoViewer pointer gesture classification', () => {
     expect(choosePanoGestureOwner('edit-handles', undefined, false, false)).toBe('none');
     expect(choosePanoGestureOwner('edit-handles', undefined, false, true)).toBe('view');
     expect(choosePanoGestureOwner('draw-region', undefined, false, false)).toBe('region-mask');
+    expect(choosePanoGestureOwner('draw-region', 'handle', false, false)).toBe('region-mask');
   });
 
   it('keeps an active horizontal drag continuous across the panorama seam', () => {

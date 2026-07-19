@@ -74,6 +74,7 @@ export function choosePanoGestureOwner(
   insideActiveRegion: boolean,
   spaceHeld: boolean,
 ): PanoGestureOwner {
+  if (interaction === 'handle' && mode === 'draw-region') return 'region-mask';
   if (interaction === 'handle' && (mode === 'edit-handles' || mode === 'edit-region')) return 'region-handle';
   if (interaction === 'handle') return 'none';
   if (mode === 'draw-region') return 'region-mask';
@@ -530,8 +531,17 @@ export function PanoViewer({
             const firstPoint = current[0] ? panoUvToScreenPoint(current[0].uv, { width: rect.width, height: rect.height }, viewRef.current, activeRotationRef.current) : undefined;
             const closesFirst = current.length >= 3 && firstPoint?.visible && Math.hypot(firstPoint.x - (event.clientX - rect.left), firstPoint.y - (event.clientY - rect.top)) <= 12;
             const now = performance.now(); const doubleClick = current.length >= 3 && now - lastDraftClickRef.current < 350;
+            const clickedRegionHandle = event.composedPath().some(
+              (node) => typeof HTMLElement !== 'undefined'
+                && node instanceof HTMLElement
+                && node.dataset.regionInteraction === 'handle',
+            );
             if (closesFirst || doubleClick) completeDraftRef.current?.(current);
-            else { const next = [...current, { id: `draft-${current.length + 1}`, uv }]; replaceDraftVerticesRef.current?.(next); lastDraftClickRef.current = now; }
+            else if (!clickedRegionHandle) {
+              const next = [...current, { id: `draft-${current.length + 1}`, uv }];
+              replaceDraftVerticesRef.current?.(next);
+              lastDraftClickRef.current = now;
+            }
           } else onPickUvRef.current?.(uv);
         }
       }

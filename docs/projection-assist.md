@@ -7,7 +7,7 @@ Projection Assist corrects a styled panorama where coherent visual regions do no
 1. Import a styled panorama and a graybox panorama captured from the same position.
 2. Open **Reference → Precision → Projected Style → Projection Assist** and choose **Add region** for the applicable primary or secondary panorama.
 3. In **Graybox**, choose **Polygon** and draw around the region where it should fit. Click the first handle, double-click, or press Enter to close it. **Rectangle** provides a four-handle quick start.
-4. PanoRef automatically creates the identical outline in **Styled**, preserving every handle ID, its order, and its paired edge. The styled outline starts at the graybox coordinates; never redraw it independently.
+4. PanoRef automatically creates the identical outline in **Styled**, centers the styled viewer on it, and preserves every handle ID, its order, and its paired edge. The styled outline starts at the graybox coordinates; never redraw it independently.
 5. Move, scale, or rotate the styled outline, then drag individual handles around the matching styled content. Shift-click selects multiple handles. Double-click a handle to insert a paired handle on its outgoing edge; Delete removes the selected paired handle. An outline cannot fall below three handles.
 6. In **Review**, save the region, adjust **Edge softness**, rename or disable it, and move it up or down. Later regions appear above earlier overlapping regions.
 7. Add separate regions for separate coherent surfaces. For example, correct a canopy, rear wall, floor, chair, and curtains independently instead of asking one global correction to reconcile all five.

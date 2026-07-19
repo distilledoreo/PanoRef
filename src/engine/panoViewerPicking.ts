@@ -147,6 +147,32 @@ export function panoUvToScreenPoint(
   };
 }
 
+/** Center a panorama viewer on a paired region so the newly-created outline is visible. */
+export function recenteredPanoViewForUvs(uvs: readonly Vec2[], panoRotation: Euler): PanoViewState {
+  if (!uvs.length) return { yawDegrees: 0, pitchDegrees: 0, fovDegrees: 65 };
+  const unwrapped: Vec2[] = [[finiteOr(uvs[0][0], 0), clamp(finiteOr(uvs[0][1], 0.5), 0, 1)]];
+  for (let index = 1; index < uvs.length; index += 1) {
+    let u = finiteOr(uvs[index][0], unwrapped[index - 1][0]);
+    while (u - unwrapped[index - 1][0] > 0.5) u -= 1;
+    while (u - unwrapped[index - 1][0] < -0.5) u += 1;
+    unwrapped.push([u, clamp(finiteOr(uvs[index][1], 0.5), 0, 1)]);
+  }
+  const minU = Math.min(...unwrapped.map(([u]) => u));
+  const maxU = Math.max(...unwrapped.map(([u]) => u));
+  const minV = Math.min(...unwrapped.map(([, v]) => v));
+  const maxV = Math.max(...unwrapped.map(([, v]) => v));
+  const centerU = (minU + maxU) / 2;
+  const centerV = (minV + maxV) / 2;
+  const horizontalSpanDegrees = (maxU - minU) * 360;
+  const verticalSpanDegrees = (maxV - minV) * 180;
+  const panoYaw = finiteOr(panoRotation[1], 0);
+  return {
+    yawDegrees: (centerU - 0.5) * 360 + panoYaw,
+    pitchDegrees: clamp((centerV - 0.5) * 180, -70, 70),
+    fovDegrees: clamp(Math.max(65, horizontalSpanDegrees * 1.35, verticalSpanDegrees * 1.35), 65, 110),
+  };
+}
+
 /** True when a pointer gesture stayed within the viewer's click threshold. */
 export function isPanoViewerClick(
   start: ScreenPoint,
