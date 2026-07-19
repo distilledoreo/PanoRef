@@ -145,6 +145,7 @@ async function appendShotPackageToZip(
           resolutionPreset: '1080p',
           frameRate: 30,
           appearance: 'clay',
+          includeDataUrl: false,
         });
         zip.file(`${rootFolder}/inputs/viewport_clay_motion.mp4`, video.blob);
       } catch (error) {
@@ -169,6 +170,7 @@ async function appendShotPackageToZip(
         frameRate: 30,
         appearance: 'projected',
         occlusionFilter: 'fast',
+        includeDataUrl: false,
       });
       zip.file(`${rootFolder}/inputs/viewport_projected_motion.mp4`, video.blob);
     } catch (error) {

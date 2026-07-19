@@ -83,12 +83,15 @@ describe('reliable video export foundations', () => {
     expect(project.shots[0].exportSettings.height).toBe(2160);
   });
 
-  it('computes fixed-step frame counts and sample times', () => {
+  it('computes fixed-step frame counts and inclusive end-pose sample times', () => {
     expect(computeCameraMoveFrameCount(3, 30)).toBe(90);
     expect(computeCameraMoveFrameCount(1, 30)).toBe(30);
     expect(cameraMoveFrameTimeSeconds(0, 30, 3)).toBe(0);
-    expect(cameraMoveFrameTimeSeconds(89, 30, 3)).toBeCloseTo(89 / 30, 5);
-    expect(cameraMoveFrameTimeSeconds(90, 30, 3)).toBe(3);
+    expect(cameraMoveFrameTimeSeconds(89, 30, 3)).toBe(3);
+    expect(cameraMoveFrameTimeSeconds(45, 30, 3)).toBeCloseTo(45 / 89 * 3, 5);
+    expect(cameraMoveFrameTimeSeconds(0, 30, 1)).toBe(0);
+    expect(cameraMoveFrameTimeSeconds(29, 30, 1)).toBe(1);
+    expect(cameraMoveFrameTimeSeconds(0, 30, 0)).toBe(0);
   });
 
   it('detects uneven and duplicate timestamps', () => {
@@ -104,7 +107,7 @@ describe('reliable video export foundations', () => {
     expect(dupes.duplicateTimestamps).toBe(true);
   });
 
-  it('wires deterministic encode path and Quick Preview fallback in the exporter', () => {
+  it('wires deterministic encode path without silent Render→Quick Preview downgrade', () => {
     const source = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
     expect(source).toContain("mode?: 'render' | 'quickPreview'");
     expect(source).toContain('encodeCanvasFramesToMp4');
@@ -112,8 +115,18 @@ describe('reliable video export foundations', () => {
     expect(source).toContain('createFinalRenderSceneOptions');
     expect(source).toContain('computeCameraMoveClippingRange');
     expect(source).toContain("occlusionFilter ?? 'fast'");
+    expect(source).toContain('Render MP4 requires WebCodecs H.264');
+    expect(source).not.toMatch(/mode\s*=\s*'quickPreview'/);
+    expect(source).toContain('includeDataUrl');
   });
 
+  it('uses one shared VBR encoder config for support checks and CanvasSource', () => {
+    const source = readFileSync(new URL('../src/engine/videoEncode.ts', import.meta.url), 'utf8');
+    expect(source).toContain('buildDeterministicAvcEncodingConfig');
+    expect(source).toContain("bitrateMode: 'variable'");
+    expect(source).toContain('buildDeterministicVideoEncoderSupportConfig');
+    expect(source).not.toContain("bitrateMode: 'constant'");
+  });
   it('exposes a fast projected occlusion filter mode in the shader', () => {
     const math = readFileSync(new URL('../src/engine/projectedStyleMath.ts', import.meta.url), 'utf8');
     const materials = readFileSync(new URL('../src/engine/projectedStyleMaterials.ts', import.meta.url), 'utf8');

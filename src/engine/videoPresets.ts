@@ -64,19 +64,24 @@ export function videoPresetForSize(width: number, height: number): VideoResoluti
 export function computeCameraMoveFrameCount(durationSeconds: number, frameRate: number): number {
   const fps = Math.max(1, frameRate);
   const duration = Math.max(0, durationSeconds);
-  // Inclusive of the end keyframe: duration * fps frames spanning [0, duration).
-  // Final authored pose is sampled at the last frame time (frameCount-1)/fps ≈ duration.
+  // CFR frame count for a clip of `duration` seconds. MP4 presentation timestamps
+  // remain frameIndex / fps; camera sampling stretches across [0, duration] inclusive.
   return Math.max(1, Math.round(duration * fps));
 }
 
+/**
+ * Camera timeline sample for a deterministic export frame.
+ * MP4 timestamps stay at frameIndex / fps; camera time spans [0, duration] so the
+ * last encoded frame hits the authored end keyframe exactly.
+ */
 export function cameraMoveFrameTimeSeconds(
   frameIndex: number,
   frameRate: number,
   durationSeconds: number,
 ): number {
   const fps = Math.max(1, frameRate);
-  const frameCount = computeCameraMoveFrameCount(durationSeconds, fps);
-  if (frameCount <= 1) return durationSeconds;
-  const t = frameIndex / fps;
-  return Math.min(durationSeconds, t);
+  const totalFrames = computeCameraMoveFrameCount(durationSeconds, fps);
+  if (totalFrames <= 1) return durationSeconds;
+  const clampedIndex = Math.min(Math.max(0, frameIndex), totalFrames - 1);
+  return (clampedIndex / (totalFrames - 1)) * durationSeconds;
 }

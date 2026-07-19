@@ -4,6 +4,7 @@ import {
   Mp4OutputFormat,
   Output,
   canEncodeVideo,
+  type VideoEncodingConfig,
 } from 'mediabunny';
 import type { VideoResolutionPreset } from './videoPresets';
 
@@ -27,15 +28,56 @@ export interface DeterministicEncodeResult {
   codecString: string;
 }
 
+/**
+ * Shared AVC encode options for capability checks and CanvasSource.
+ * Variable bitrate fits offline camera-move renders better than CBR.
+ */
+export function buildDeterministicAvcEncodingConfig(
+  preset: VideoResolutionPreset,
+): VideoEncodingConfig {
+  return {
+    codec: 'avc',
+    bitrate: preset.bitrate,
+    fullCodecString: preset.avcCodecString,
+    hardwareAcceleration: 'no-preference',
+    latencyMode: 'quality',
+    bitrateMode: 'variable',
+    keyFrameInterval: 2,
+  };
+}
+
+/** VideoEncoder.isConfigSupported payload mirroring {@link buildDeterministicAvcEncodingConfig}. */
+export function buildDeterministicVideoEncoderSupportConfig(
+  preset: VideoResolutionPreset,
+): VideoEncoderConfig {
+  const encoding = buildDeterministicAvcEncodingConfig(preset);
+  return {
+    codec: preset.avcCodecString,
+    width: preset.width,
+    height: preset.height,
+    framerate: preset.frameRate,
+    bitrate: typeof encoding.bitrate === 'number' ? encoding.bitrate : preset.bitrate,
+    hardwareAcceleration: encoding.hardwareAcceleration ?? 'no-preference',
+    bitrateMode: encoding.bitrateMode ?? 'variable',
+    latencyMode: encoding.latencyMode ?? 'quality',
+    avc: { format: 'avc' },
+  };
+}
+
 export async function canUseDeterministicMp4Export(
   preset: VideoResolutionPreset,
 ): Promise<boolean> {
   if (typeof VideoEncoder === 'undefined') return false;
+  const encoding = buildDeterministicAvcEncodingConfig(preset);
   try {
     const mediabunnyOk = await canEncodeVideo('avc', {
       width: preset.width,
       height: preset.height,
-      bitrate: preset.bitrate,
+      bitrate: encoding.bitrate,
+      bitrateMode: encoding.bitrateMode,
+      fullCodecString: encoding.fullCodecString,
+      hardwareAcceleration: encoding.hardwareAcceleration,
+      latencyMode: encoding.latencyMode,
     });
     if (!mediabunnyOk) return false;
   } catch {
@@ -43,15 +85,9 @@ export async function canUseDeterministicMp4Export(
   }
 
   try {
-    const support = await VideoEncoder.isConfigSupported({
-      codec: preset.avcCodecString,
-      width: preset.width,
-      height: preset.height,
-      framerate: preset.frameRate,
-      bitrate: preset.bitrate,
-      hardwareAcceleration: 'prefer-hardware',
-      avc: { format: 'avc' },
-    });
+    const support = await VideoEncoder.isConfigSupported(
+      buildDeterministicVideoEncoderSupportConfig(preset),
+    );
     return Boolean(support.supported);
   } catch {
     return false;
@@ -87,15 +123,8 @@ export async function encodeCanvasFramesToMp4(
   });
 
   const frameDuration = 1 / preset.frameRate;
-  const videoSource = new CanvasSource(canvas, {
-    codec: 'avc',
-    bitrate: preset.bitrate,
-    fullCodecString: preset.avcCodecString,
-    hardwareAcceleration: 'prefer-hardware',
-    latencyMode: 'quality',
-    bitrateMode: 'constant',
-    keyFrameInterval: 2,
-  });
+  const encodingConfig = buildDeterministicAvcEncodingConfig(preset);
+  const videoSource = new CanvasSource(canvas, encodingConfig);
 
   output.addVideoTrack(videoSource, { frameRate: preset.frameRate });
   await output.start();

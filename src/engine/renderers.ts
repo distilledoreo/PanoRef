@@ -58,7 +58,8 @@ export interface ImageRenderResult {
 
 export interface VideoRenderResult {
   blob: Blob;
-  dataUrl: string;
+  /** Present only when `includeDataUrl` was requested (e.g. clay shot-library persistence). */
+  dataUrl?: string;
   width: number;
   height: number;
   durationSeconds: number;
@@ -106,8 +107,9 @@ export interface CameraMoveVideoOptions {
    */
   appearance?: 'clay' | 'projected';
   /**
-   * `render` = fixed-step WebCodecs + Mediabunny MP4 (default when supported).
-   * `quickPreview` = real-time MediaRecorder fallback.
+   * `render` = fixed-step WebCodecs + Mediabunny MP4 (default).
+   * `quickPreview` = real-time MediaRecorder only when explicitly requested.
+   * Explicit `render` never silently falls back to Quick Preview.
    */
   mode?: 'render' | 'quickPreview';
   /** Video resolution preset. Stills keep shot.exportSettings; video defaults to 1080p. */
@@ -119,6 +121,11 @@ export interface CameraMoveVideoOptions {
    * Defaults to `fast` (one cubemap sample) for Render MP4.
    */
   occlusionFilter?: 'soft' | 'fast';
+  /**
+   * When true, also produce a base64 data URL (needed for shot-library persistence).
+   * Default false — downloads and ZIP packaging should use `blob` only.
+   */
+  includeDataUrl?: boolean;
 }
 
 const MP4_MIME_CANDIDATES = [
@@ -308,53 +315,44 @@ export async function renderShotCameraMoveMp4(
   const width = options.width ?? preset.width;
   const height = options.height ?? preset.height;
   const durationSeconds = getCameraMoveDurationSeconds(keyframes);
+  const encodePreset = { ...preset, width, height, frameRate };
 
-  // Prefer deterministic Render MP4; fall back to Quick Preview when WebCodecs is unavailable.
-  let mode: 'render' | 'quickPreview' = requestedMode;
-  if (mode === 'render') {
-    const canRender = await canUseDeterministicMp4Export({
-      ...preset,
-      width,
-      height,
-      frameRate,
-    });
+  if (requestedMode === 'render') {
+    const canRender = await canUseDeterministicMp4Export(encodePreset);
     if (!canRender) {
-      if (!getSupportedCameraMoveMp4MimeType()) {
-        throw new Error(
-          'Reliable MP4 export requires WebCodecs H.264 (Chrome/Edge). MediaRecorder fallback is also unavailable.',
-        );
-      }
-      mode = 'quickPreview';
+      throw new Error(
+        `Render MP4 requires WebCodecs H.264 for ${encodePreset.label} (${encodePreset.avcCodecString}). `
+        + 'This browser or preset is unsupported. Choose Quick Preview explicitly, or try Chrome/Edge with a supported resolution.',
+      );
     }
-  }
-
-  if (mode === 'quickPreview') {
-    const mimeType = options.mimeType ?? getSupportedCameraMoveMp4MimeType();
-    if (!mimeType) {
-      throw new Error('MP4 camera move export is not supported in this browser.');
-    }
-    return renderShotCameraMoveMp4QuickPreview(project, shot, {
+    return renderShotCameraMoveMp4Deterministic(project, shot, {
       ...options,
-      mimeType,
       frameRate,
       width,
       height,
       appearance,
       durationSeconds,
       keyframes,
+      preset: encodePreset,
+      occlusionFilter: options.occlusionFilter ?? 'fast',
+      includeDataUrl: options.includeDataUrl === true,
     });
   }
 
-  return renderShotCameraMoveMp4Deterministic(project, shot, {
+  const mimeType = options.mimeType ?? getSupportedCameraMoveMp4MimeType();
+  if (!mimeType) {
+    throw new Error('Quick Preview MP4 export is not supported in this browser.');
+  }
+  return renderShotCameraMoveMp4QuickPreview(project, shot, {
     ...options,
+    mimeType,
     frameRate,
     width,
     height,
     appearance,
     durationSeconds,
     keyframes,
-    preset: { ...preset, width, height, frameRate },
-    occlusionFilter: options.occlusionFilter ?? 'fast',
+    includeDataUrl: options.includeDataUrl === true,
   });
 }
 
@@ -372,6 +370,7 @@ interface CameraMoveRenderContext {
   videoBitsPerSecond?: number;
   preset?: ReturnType<typeof resolveVideoPreset> & { width: number; height: number; frameRate: number };
   occlusionFilter?: 'soft' | 'fast';
+  includeDataUrl?: boolean;
 }
 
 async function renderShotCameraMoveMp4Deterministic(
@@ -390,6 +389,7 @@ async function renderShotCameraMoveMp4Deterministic(
     onProgress,
     preset,
     occlusionFilter = 'fast',
+    includeDataUrl = false,
   } = ctx;
 
   if (!preset) {
@@ -490,7 +490,7 @@ async function renderShotCameraMoveMp4Deterministic(
 
     const result: VideoRenderResult = {
       blob: encoded.blob,
-      dataUrl: await blobToDataUrl(encoded.blob),
+      dataUrl: includeDataUrl ? await blobToDataUrl(encoded.blob) : undefined,
       width: encoded.width,
       height: encoded.height,
       durationSeconds,
@@ -537,6 +537,7 @@ async function renderShotCameraMoveMp4QuickPreview(
     timeoutMs: optionTimeoutMs,
     videoBitsPerSecond,
     occlusionFilter = 'soft',
+    includeDataUrl = false,
   } = ctx;
 
   if (!mimeType) {
@@ -694,7 +695,7 @@ async function renderShotCameraMoveMp4QuickPreview(
 
   return {
     blob,
-    dataUrl: await blobToDataUrl(blob),
+    dataUrl: includeDataUrl ? await blobToDataUrl(blob) : undefined,
     width,
     height,
     durationSeconds,

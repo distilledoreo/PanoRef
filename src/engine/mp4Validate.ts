@@ -248,6 +248,7 @@ async function decodeAllVideoFrames(
   const sink = new CanvasSink(videoTrack, {
     width: await videoTrack.getDisplayWidth(),
     height: await videoTrack.getDisplayHeight(),
+    fit: 'fill',
   });
   let count = 0;
   for await (const _frame of sink.canvases()) {
