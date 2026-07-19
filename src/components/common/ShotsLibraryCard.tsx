@@ -4,6 +4,7 @@ import { getShotPrimaryLabel, hasCustomShotTitle } from '../../domain/shotIdenti
 import { resolveShotMedia, resolveShotMediaPoster } from '../../domain/shotMedia';
 import { LocationProject, ProjectAsset, Shot } from '../../domain/types';
 import { downloadDataUrl } from '../../engine/projectIO';
+import { AnchoredMenuPopover } from './AnchoredMenuPopover';
 import { ShotCameraRollThumbnail } from './ShotCameraRollThumbnail';
 
 export function ShotsLibraryCard({
@@ -12,40 +13,35 @@ export function ShotsLibraryCard({
   selected,
   landed,
   canDelete,
+  sheetOpen,
   onOpenMedia,
   onOpenShot,
   onRename,
-  onDelete,
+  onRequestDelete,
 }: {
   project: LocationProject;
   shot: Shot;
   selected: boolean;
   landed: boolean;
   canDelete: boolean;
+  sheetOpen: boolean;
   onOpenMedia: (shotId: string) => void;
   onOpenShot: (shotId: string) => void;
   onRename: (shotId: string, updates: { productionShotId?: string; name: string }) => void;
-  onDelete: (shotId: string) => void;
+  onRequestDelete: (shot: Shot) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftProductionId, setDraftProductionId] = useState(shot.productionShotId ?? '');
   const [draftTitle, setDraftTitle] = useState(shot.name);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const poster = resolveShotMediaPoster(project, shot);
   const primaryLabel = getShotPrimaryLabel(shot);
   const customTitle = hasCustomShotTitle(shot);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [menuOpen]);
+    if (!sheetOpen) setMenuOpen(false);
+  }, [sheetOpen]);
 
   useEffect(() => {
     if (!renaming) {
@@ -74,6 +70,12 @@ export function ShotsLibraryCard({
     if (!item) return;
     downloadAsset(item.asset);
     setMenuOpen(false);
+  };
+
+  const requestDelete = () => {
+    setMenuOpen(false);
+    if (!canDelete) return;
+    onRequestDelete(shot);
   };
 
   return (
@@ -171,46 +173,46 @@ export function ShotsLibraryCard({
       </div>
 
       <div className="absolute right-1 top-1 flex items-center gap-0.5">
-        <div className="relative" ref={menuRef}>
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setMenuOpen((open) => !open);
-            }}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-black/80"
-            aria-label={`More actions for ${primaryLabel}`}
-            aria-expanded={menuOpen}
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
-          {menuOpen && (
-            <div
-              className="absolute right-0 top-full z-10 mt-1 min-w-[9rem] rounded-lg border border-white/10 bg-zinc-900 py-1 shadow-soft"
-              role="menu"
-            >
-              <MenuButton label="Rename" onClick={() => { setRenaming(true); setMenuOpen(false); }} />
-              <MenuButton label="Open shot" onClick={() => { onOpenShot(shot.id); setMenuOpen(false); }} />
-              <MenuButton
-                label="Download"
-                onClick={downloadPrimaryAsset}
-                disabled={!poster}
-              />
-              <MenuButton
-                label="Delete"
-                onClick={() => { onDelete(shot.id); setMenuOpen(false); }}
-                disabled={!canDelete}
-                destructive
-              />
-            </div>
-          )}
-        </div>
+        <button
+          ref={menuButtonRef}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setMenuOpen((open) => !open);
+          }}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-black/80"
+          aria-label={`More actions for ${primaryLabel}`}
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </button>
+        <AnchoredMenuPopover
+          open={menuOpen}
+          anchorRef={menuButtonRef}
+          onClose={() => setMenuOpen(false)}
+          className="min-w-[9rem] rounded-lg border border-white/10 bg-zinc-900 py-1 shadow-soft"
+          aria-label={`Actions for ${primaryLabel}`}
+        >
+          <MenuButton label="Rename" onClick={() => { setRenaming(true); setMenuOpen(false); }} />
+          <MenuButton label="Open shot" onClick={() => { onOpenShot(shot.id); setMenuOpen(false); }} />
+          <MenuButton
+            label="Download"
+            onClick={downloadPrimaryAsset}
+            disabled={!poster}
+          />
+          <MenuButton
+            label="Delete"
+            onClick={requestDelete}
+            disabled={!canDelete}
+            destructive
+          />
+        </AnchoredMenuPopover>
         <button
           type="button"
           onClick={(event) => {
             event.stopPropagation();
-            if (!canDelete) return;
-            onDelete(shot.id);
+            requestDelete();
           }}
           disabled={!canDelete}
           className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"

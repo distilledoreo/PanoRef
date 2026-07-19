@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { CameraData, ShotStatus } from '../../domain/types';
+import { CameraData, Shot, ShotStatus } from '../../domain/types';
 import {
   DEFAULT_CAMERA_LENS_MM,
   DEFAULT_CAMERA_HEIGHT_METERS,
@@ -52,6 +52,7 @@ import { getCameraMoveReferenceFrames } from '../../engine/cameraKeyframes';
 import { isShotFramingAccepted } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
 import { useContinuityStore } from '../../state/useContinuityStore';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 import { Field, IconButton, Panel, Select, TextArea, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { ShotCameraRollThumbnail } from '../common/ShotCameraRollThumbnail';
@@ -64,6 +65,8 @@ import { canUseProjectedAppearance } from '../../engine/projectedStyle';
 import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { FullBleedLayout } from './WorkspaceShell';
 import {
+  getShotPrimaryLabel,
+  hasCustomShotTitle,
   normalizeProductionShotId,
   normalizeShotTitle,
 } from '../../domain/shotIdentity';
@@ -154,6 +157,7 @@ export function ShotsWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [shotPendingDelete, setShotPendingDelete] = useState<Shot | null>(null);
   const [mediaModalShotId, setMediaModalShotId] = useState<string | null>(null);
   const [captureMode, setCaptureMode] = useState<CaptureMode>('still');
   const [appearance, setAppearance] = useState<'clay' | 'projected'>('clay');
@@ -269,6 +273,16 @@ export function ShotsWorkspace() {
     selectShot(shotId);
     setLibraryOpen(false);
   }, [selectShot]);
+
+  const handleRequestDeleteShot = useCallback((shot: Shot) => {
+    setShotPendingDelete(shot);
+  }, []);
+
+  const handleConfirmDeleteShot = useCallback(() => {
+    if (!shotPendingDelete) return;
+    removeShot(shotPendingDelete.id);
+    setShotPendingDelete(null);
+  }, [removeShot, shotPendingDelete]);
 
   const handleOpenShotFromMedia = useCallback((shotId: string) => {
     selectShot(shotId);
@@ -995,10 +1009,11 @@ export function ShotsWorkspace() {
                       selected={selected}
                       landed={landed}
                       canDelete={canDelete}
+                      sheetOpen={libraryOpen}
                       onOpenMedia={setMediaModalShotId}
                       onOpenShot={handleOpenShotFromLibrary}
                       onRename={handleLibraryRename}
-                      onDelete={removeShot}
+                      onRequestDelete={handleRequestDeleteShot}
                     />
                   );
                 })}
@@ -1017,6 +1032,21 @@ export function ShotsWorkspace() {
             </div>
           </div>
         )}
+
+        <ConfirmDialog
+          open={shotPendingDelete != null}
+          title={shotPendingDelete ? `Delete ${getShotPrimaryLabel(shotPendingDelete)}?` : 'Delete shot?'}
+          confirmLabel="Delete shot"
+          destructive
+          onCancel={() => setShotPendingDelete(null)}
+          onConfirm={handleConfirmDeleteShot}
+        >
+          {shotPendingDelete && (
+            hasCustomShotTitle(shotPendingDelete)
+              ? `"${shotPendingDelete.name.trim()}" and its saved captures will be removed from this project. This cannot be undone.`
+              : 'Its saved captures will be removed from this project. This cannot be undone.'
+          )}
+        </ConfirmDialog>
 
         <ShotMediaModal
           open={mediaModalShotId != null}

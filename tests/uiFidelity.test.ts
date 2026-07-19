@@ -67,6 +67,8 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('data-shots-library-thumb');
     const libraryCard = readFileSync(new URL('../src/components/common/ShotsLibraryCard.tsx', import.meta.url), 'utf8');
     expect(libraryCard).toContain('data-shots-library-delete');
+    expect(libraryCard).toContain('AnchoredMenuPopover');
+    expect(libraryCard).toContain('onRequestDelete');
     expect(shots).toContain('data-shots-camera-move-status');
     expect(shots).toContain('MP4 export is not supported in this browser. Try Chrome or Edge.');
     expect(shots).toContain('data-shots-settings-trigger');
