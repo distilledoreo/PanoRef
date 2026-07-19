@@ -232,6 +232,8 @@ export interface ShotAssetRefs {
 export interface Shot {
   id: string;
   shotNumber: string;
+  /** Optional production identifier such as 42A, SC_120, or B017. */
+  productionShotId?: string;
   name: string;
   description: string;
   camera: CameraData;

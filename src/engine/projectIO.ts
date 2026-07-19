@@ -1,4 +1,5 @@
 import { Euler, LocationProject, PanoReference, SceneObject, Shot, Vec3 } from '../domain/types';
+import { normalizeProductionShotId } from '../domain/shotIdentity';
 import {
   DEFAULT_CAMERA_HEIGHT_METERS,
   normalizeProjectSettings,
@@ -126,6 +127,7 @@ function normalizeShot(shot: Shot): Shot {
   const { includeContinuityControlView: _ignored, includeSkinnedFrame: _ignoredSkinned, ...exportSettings } = legacyExportSettings;
   return {
     ...shot,
+    productionShotId: normalizeProductionShotId(shot.productionShotId),
     cameraKeyframes: shot.cameraKeyframes ?? [],
     exportSettings: {
       ...exportSettings,
