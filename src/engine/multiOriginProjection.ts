@@ -83,12 +83,15 @@ export function isCaptureOriginNearPano(
 /**
  * Decide whether the next styled import replaces the reference or adds a blend partner.
  * Same capture origin as the primary styled pano → replace; moved → add secondary.
+ * A latched pending-secondary intent always adds (survives undo / modal close races).
  */
 export function resolveStyledImportMode(
   project: Pick<LocationProject, 'panoRefs' | 'settings' | 'scene'>,
+  options?: { pendingSecondaryStyledImport?: boolean },
 ): StyledImportMode {
   const primary = primaryStyledPano(project);
   if (!primary) return 'first';
+  if (options?.pendingSecondaryStyledImport) return 'add_secondary';
   if (isCaptureOriginNearPano(project.scene.panoOrigin, primary)) return 'replace';
   return 'add_secondary';
 }

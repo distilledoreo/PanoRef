@@ -38,6 +38,9 @@ export function SecondCaptureForkContent({
 }) {
   const project = useContinuityStore((state) => state.project);
   const setPanoOrigin = useContinuityStore((state) => state.setPanoOrigin);
+  const setPendingSecondaryStyledImport = useContinuityStore(
+    (state) => state.setPendingSecondaryStyledImport,
+  );
   const setWorkspace = useContinuityStore((state) => state.setWorkspace);
   const setBuildMode = useContinuityStore((state) => state.setBuildMode);
   const theme = useThemeStore((state) => state.theme);
@@ -100,8 +103,11 @@ export function SecondCaptureForkContent({
     taskRef.current = task;
 
     void task.promise.then(async (result) => {
-      if (taskRef.current !== task) return;
+      // Latch origin + pending even if the panel closed between resolve and this microtask
+      // (open=false clears taskRef, which used to skip setPanoOrigin and cause replace-on-import).
       setPanoOrigin(result.originB);
+      setPendingSecondaryStyledImport(true);
+      if (taskRef.current !== task) return;
       try {
         await downloadPanoImage(
           result.projected.dataUrl,
@@ -138,6 +144,7 @@ export function SecondCaptureForkContent({
   };
 
   const goPlaceInBuild = () => {
+    setPendingSecondaryStyledImport(true);
     setBuildMode('pano_origin');
     setWorkspace('build');
     onPlaceInBuild?.();
@@ -158,7 +165,10 @@ export function SecondCaptureForkContent({
           </div>
           <button
             type="button"
-            onClick={onContinue}
+            onClick={() => {
+              setPendingSecondaryStyledImport(false);
+              onContinue();
+            }}
             className="w-full rounded-lg bg-[var(--accent)] px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent-hover)]"
             data-second-capture-continue
           >

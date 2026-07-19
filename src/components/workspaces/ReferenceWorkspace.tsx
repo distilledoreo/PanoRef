@@ -37,11 +37,11 @@ export function ReferenceWorkspace() {
   const [precisionOpen, setPrecisionOpen] = useState(false);
   const [focusedLandmarkId, setFocusedLandmarkId] = useState<string | undefined>();
   const [fillGapsOpen, setFillGapsOpen] = useState(false);
-  const [awaitingSecondCapture, setAwaitingSecondCapture] = useState(false);
   const {
     project,
     activePanoId,
     panoView,
+    pendingSecondaryStyledImport,
     setActivePano,
     setPanoView,
     updatePanoReference,
@@ -54,6 +54,7 @@ export function ReferenceWorkspace() {
     requestAlignmentIntro,
     requestAlignmentRetryModal,
     setWorkspace,
+    setPendingSecondaryStyledImport,
   } = useContinuityStore();
   const activePano = project.panoRefs.find((pano) => pano.id === activePanoId) ?? project.panoRefs.find((pano) => pano.isCanonical);
   const activeAsset = activePano ? project.assets.assets[activePano.imageAssetId] : undefined;
@@ -62,7 +63,7 @@ export function ReferenceWorkspace() {
   const canCalibrate = Boolean(activePano && activePano.type !== 'graybox_render' && grayboxPano);
   const alignmentAccepted = isReferenceAlignmentAccepted(project);
   const styledCount = countStyledPanoramas(project);
-  const importMode = resolveStyledImportMode(project);
+  const importMode = resolveStyledImportMode(project, { pendingSecondaryStyledImport });
   const styledPanos = project.panoRefs.filter(isEligibleProjectedStylePano);
   const primaryAction = useMemo(
     () => resolveWorkspacePrimaryAction({ project, workspace: 'reference', shotCameraFlying: false }),
@@ -91,7 +92,7 @@ export function ReferenceWorkspace() {
         ? `Imported from ${params.width}×${params.height} letterboxed 16:9; extracted ${prepared.width}×${prepared.height} equirectangular region.`
         : undefined,
     });
-    if (mode === 'add_secondary') setAwaitingSecondCapture(false);
+    if (mode === 'add_secondary') setPendingSecondaryStyledImport(false);
   };
 
   const loadAttachedReference = async () => {
@@ -254,7 +255,7 @@ export function ReferenceWorkspace() {
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Panoramas</div>
                       <p className="mt-0.5 text-[11px] text-secondary">
-                        {awaitingSecondCapture || importMode === 'add_secondary'
+                        {importMode === 'add_secondary'
                           ? styledImportActionHint('add_secondary')
                           : `${styledCount} styled capture${styledCount === 1 ? '' : 's'}`}
                       </p>
@@ -286,7 +287,7 @@ export function ReferenceWorkspace() {
                   <StyledPanoImportButton
                     modeAware
                     onImported={(mode) => {
-                      if (mode === 'add_secondary') setAwaitingSecondCapture(false);
+                      if (mode === 'add_secondary') setPendingSecondaryStyledImport(false);
                     }}
                   />
                   {styledCount === 1 && (
@@ -323,7 +324,7 @@ export function ReferenceWorkspace() {
                 setWorkspace('shots');
               }}
               onAwaitingImport={() => {
-                setAwaitingSecondCapture(true);
+                setPendingSecondaryStyledImport(true);
               }}
             />
 

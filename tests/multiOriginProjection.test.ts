@@ -100,8 +100,36 @@ describe('multi-origin projection helpers', () => {
     project.scene.panoOrigin = [8, 1.6, 0];
     expect(resolveStyledImportMode(project)).toBe('add_secondary');
 
+    project.scene.panoOrigin = [...a.origin];
+    expect(resolveStyledImportMode(project, { pendingSecondaryStyledImport: true })).toBe('add_secondary');
+
     project.panoRefs = [];
     expect(resolveStyledImportMode(project)).toBe('first');
+  });
+
+  it('freezes pano origin copies so scene moves do not rewrite styled poses', () => {
+    const project = createDefaultProject();
+    const sharedOrigin: [number, number, number] = [1, 2, 3];
+    project.scene.panoOrigin = sharedOrigin;
+    const asset = createPanoAsset({
+      name: 's.png',
+      uri: 'data:image/png;base64,SSSS',
+      width: 4,
+      height: 2,
+    });
+    const pano = createPanoReference({
+      name: 'Styled',
+      assetId: asset.id,
+      type: 'ai_global_reference',
+      origin: project.scene.panoOrigin,
+      width: 4,
+      height: 2,
+      isCanonical: true,
+    });
+    expect(pano.origin).not.toBe(project.scene.panoOrigin);
+    expect(pano.origin).toEqual([1, 2, 3]);
+    project.scene.panoOrigin[0] = 99;
+    expect(pano.origin[0]).toBe(1);
   });
 
   it('does not auto-pick graybox as dual secondary', () => {

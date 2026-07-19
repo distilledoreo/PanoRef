@@ -164,6 +164,7 @@ export function BuildWorkspace() {
     redoBuild,
     buildHistoryPast,
     buildHistoryFuture,
+    pendingSecondaryStyledImport,
   } = useContinuityStore();
   const canUndo = buildHistoryPast.length > 0;
   const canRedo = buildHistoryFuture.length > 0;
@@ -905,7 +906,7 @@ export function BuildWorkspace() {
             </div>
           )}
           {canUseProjectedAppearance(project)
-            && resolveStyledImportMode(project) === 'add_secondary'
+            && resolveStyledImportMode(project, { pendingSecondaryStyledImport }) === 'add_secondary'
             && (
               <div
                 data-build-second-capture-coach

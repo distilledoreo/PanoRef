@@ -29,12 +29,15 @@ export function StyledPanoImportButton({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const project = useContinuityStore((state) => state.project);
+  const pendingSecondaryStyledImport = useContinuityStore(
+    (state) => state.pendingSecondaryStyledImport,
+  );
   const importStyledPano = useContinuityStore((state) => state.importStyledPano);
   const [error, setError] = useState<string | undefined>();
   const [warning, setWarning] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 
-  const mode = resolveStyledImportMode(project);
+  const mode = resolveStyledImportMode(project, { pendingSecondaryStyledImport });
   const resolvedLabel = label
     ?? (modeAware ? styledImportActionLabel(mode) : STYLED_PANO.importAction);
   const hint = modeAware ? styledImportActionHint(mode) : undefined;

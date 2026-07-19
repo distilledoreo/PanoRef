@@ -239,6 +239,8 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).toContain('removePanoReference');
     expect(store).toContain('removePanoReference:');
     expect(store).toContain('importStyledPano:');
+    expect(store).toContain('pendingSecondaryStyledImport');
+    expect(store).toContain('setPendingSecondaryStyledImport');
   });
 
   it('keeps second-capture progress ETA markers in the fork panel', () => {

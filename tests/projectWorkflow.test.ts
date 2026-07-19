@@ -757,6 +757,64 @@ describe('project workflow logic', () => {
     expect(state.project.settings.projectedStyle.secondaryPanoId).toBeTruthy();
     expect(state.project.settings.projectedStyle.blendMode).toBe('primary_dominant');
     expect(state.project.settings.projectedStyle.panoId).toBe(primary.id);
+    expect(state.activePanoId).toBe(primary.id);
+  });
+
+  it('adds a secondary styled pano when pending even if capture origin was undone', () => {
+    const project = createDefaultProject();
+    const primaryAsset = createPanoAsset({
+      name: 'primary.png',
+      uri: 'data:image/png;base64,PRIM',
+      width: 4096,
+      height: 2048,
+    });
+    const primary = createPanoReference({
+      name: 'Primary',
+      assetId: primaryAsset.id,
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4096,
+      height: 2048,
+      isCanonical: true,
+    });
+    project.assets.assets[primaryAsset.id] = primaryAsset;
+    project.panoRefs = [primary];
+    project.scene.panoOrigin = [0, 1.6, 0];
+    project.workflow.referenceAlignmentAcceptedForPanoId = primary.id;
+    project.shots[0] = { ...project.shots[0], linkedPanoId: primary.id };
+    project.settings.projectedStyle = {
+      ...project.settings.projectedStyle,
+      panoId: primary.id,
+      blendMode: 'primary_only',
+      secondaryPanoId: undefined,
+    };
+
+    useContinuityStore.setState({
+      project,
+      activePanoId: primary.id,
+      pendingSecondaryStyledImport: true,
+    });
+
+    expect(resolveStyledImportMode(useContinuityStore.getState().project, {
+      pendingSecondaryStyledImport: true,
+    })).toBe('add_secondary');
+
+    const addMode = useContinuityStore.getState().importStyledPano({
+      name: 'second.png',
+      dataUrl: 'data:image/png;base64,SEC',
+      width: 4096,
+      height: 2048,
+    });
+    expect(addMode).toBe('add_secondary');
+    const state = useContinuityStore.getState();
+    expect(state.project.panoRefs.find((pano) => pano.id === primary.id)?.isCanonical).toBe(true);
+    expect(state.project.settings.projectedStyle.secondaryPanoId).toBeTruthy();
+    expect(state.pendingSecondaryStyledImport).toBe(false);
+    expect(state.activePanoId).toBe(primary.id);
+    const secondary = state.project.panoRefs.find(
+      (pano) => pano.id === state.project.settings.projectedStyle.secondaryPanoId,
+    );
+    expect(secondary?.origin).toEqual([0, 1.6, 0]);
   });
 
   it('clears projectedStyle ids when removing a pano reference', () => {

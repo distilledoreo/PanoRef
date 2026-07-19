@@ -342,8 +342,9 @@ export function createPanoReference(params: {
     imageAssetId: params.assetId,
     type: params.type,
     projection: 'equirectangular',
-    origin: params.origin,
-    rotation: params.rotation ?? [0, 0, 0],
+    // Freeze pose copies so later scene.panoOrigin moves never rewrite this pano.
+    origin: [...params.origin] as Vec3,
+    rotation: [...(params.rotation ?? [0, 0, 0])] as Vec3,
     width: params.width,
     height: params.height,
     isCanonical: params.isCanonical ?? false,
