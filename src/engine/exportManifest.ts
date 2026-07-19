@@ -1,4 +1,5 @@
 import { LocationProject, PanoReference, Shot } from '../domain/types';
+import { getShotPackageBaseName } from './exportNaming';
 import { getCameraMoveReferenceFrames, hasRenderableCameraMove } from './cameraKeyframes';
 import { CAMERA_MOVE_CUBEMAP_FACES } from './cameraMoveCubemap';
 import { canUseProjectedAppearance } from './projectedStyle';
@@ -35,8 +36,8 @@ export function selectExportPathPreview(paths: readonly string[], limit: number)
 export function createShotPackageManifest(
   project: LocationProject,
   shot: Shot,
+  rootFolder = getShotPackageBaseName(shot),
 ): ShotPackageManifest {
-  const rootFolder = `shot_${shot.shotNumber}`;
   const canonical = project.panoRefs.find((pano) => pano.isCanonical);
   const graybox = project.panoRefs.find((pano) => pano.type === 'graybox_render');
   const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);

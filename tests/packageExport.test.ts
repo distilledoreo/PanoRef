@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
 import { createDefaultProject, createPanoAsset, createPanoReference } from '../src/domain/defaults';
+import { getShotPackageBaseName } from '../src/engine/exportNaming';
 import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
 import {
   buildMultiShotPackage,
@@ -215,6 +216,22 @@ describe('package export', () => {
     shot.cameraKeyframes = [];
     expect(resolveClayCameraMovePackageSource(shot, { uri: 'data:video/mp4;base64,AAA' })).toBe('copy');
     expect(resolveClayCameraMovePackageSource(shot, null)).toBe('skip');
+  });
+
+  it('uses production-aware package folder names', async () => {
+    const project = withGrayboxAndShot();
+    const shot = {
+      ...project.shots[0],
+      productionShotId: '42A',
+      name: 'Courtyard entrance',
+    };
+    project.shots[0] = shot;
+
+    const result = await buildShotPackage(project, shot);
+    expect(result.fileName).toBe(`${getShotPackageBaseName(shot)}_package.zip`);
+
+    const paths = await zipPaths(result.blob);
+    expect(paths.some((path) => path.startsWith('42a_courtyard_entrance/metadata/shot.json'))).toBe(true);
   });
 
   it('builds a single-shot package zip', async () => {

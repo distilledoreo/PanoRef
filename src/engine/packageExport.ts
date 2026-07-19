@@ -6,6 +6,7 @@ import {
   DEFAULT_CAMERA_MOVE_CUBEMAP_FACE_SIZE,
 } from './cameraMoveCubemap';
 import { buildShotMetadata, createShotPackageManifest } from './exportManifest';
+import { assignShotPackageRootFolders, getShotExportProgressLabel, getShotPackageBaseName } from './exportNaming';
 import { generateImagePrompt, generateVideoPrompt } from './prompts';
 import { preparePanoExportDataUrl } from './panoImage';
 import { stitchCubemapFacesCrossAsync } from './cubemapStitch';
@@ -124,7 +125,7 @@ function createProgressTracker(args: {
       currentShot: partial.shotIndex + 1,
       totalShots: args.shots.length,
       shotId: partial.shot?.id,
-      shotName: partial.shot ? `Shot ${partial.shot.shotNumber}` : undefined,
+      shotName: partial.shot ? getShotExportProgressLabel(partial.shot) : undefined,
       message: partial.message,
       indeterminate: partial.indeterminate,
     });
@@ -222,12 +223,13 @@ export async function buildShotPackage(
   });
 
   const zip = new JSZip();
+  const rootFolder = getShotPackageBaseName(shot);
   const manifestPaths = await appendShotPackageToZip(zip, project, shot, {
     shotIndex: 0,
     tracker,
     signal: options.signal,
+    rootFolder,
   });
-  const rootFolder = createShotPackageManifest(project, shot).rootFolder;
   const blob = await compressZip(zip, {
     tracker,
     shotIndex: 0,
@@ -285,6 +287,9 @@ export async function buildMultiShotPackage(
 
   const zip = new JSZip();
   const manifestPaths: string[] = [];
+  const folderByShotId = new Map(
+    assignShotPackageRootFolders(shots).map((assignment) => [assignment.shotId, assignment.rootFolder]),
+  );
   for (let shotIndex = 0; shotIndex < shots.length; shotIndex += 1) {
     const shot = shots[shotIndex];
     throwIfAborted(options.signal);
@@ -292,6 +297,7 @@ export async function buildMultiShotPackage(
       shotIndex,
       tracker,
       signal: options.signal,
+      rootFolder: folderByShotId.get(shot.id),
     });
     manifestPaths.push(...paths);
   }
@@ -375,9 +381,10 @@ async function appendShotPackageToZip(
     shotIndex: number;
     tracker: ProgressTracker;
     signal?: AbortSignal;
+    rootFolder?: string;
   },
 ): Promise<string[]> {
-  const { shotIndex, tracker, signal } = args;
+  const { shotIndex, tracker, signal, rootFolder } = args;
   const emit = (
     phase: PackageExportPhase,
     message: string,
@@ -399,10 +406,10 @@ async function appendShotPackageToZip(
   };
 
   throwIfAborted(signal);
-  emit('preparing', `Preparing Shot ${shot.shotNumber}…`, { indeterminate: true });
+  emit('preparing', `Preparing ${getShotExportProgressLabel(shot)}…`, { indeterminate: true });
 
-  const manifestPreview = createShotPackageManifest(project, shot);
-  const rootFolder = manifestPreview.rootFolder;
+  const manifestPreview = createShotPackageManifest(project, shot, rootFolder);
+  const resolvedRootFolder = manifestPreview.rootFolder;
   const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);
   const canonicalPano = project.panoRefs.find((pano) => pano.isCanonical);
   const grayboxPano = project.panoRefs.find((pano) => pano.type === 'graybox_render');
@@ -418,7 +425,7 @@ async function appendShotPackageToZip(
     throwIfAborted(signal);
     emit('rendering', 'Rendering clay viewport…', { indeterminate: true });
     const viewport = await renderShotFrame(project, shot);
-    addDataUrl(zip, `${rootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
+    addDataUrl(zip, `${resolvedRootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
     finishUnit('rendering', 'Clay viewport ready');
   }
 
@@ -429,7 +436,7 @@ async function appendShotPackageToZip(
     emit('rendering', 'Rendering projected viewport…', { indeterminate: true });
     try {
       const projected = await renderShotProjectedFrame(project, shot);
-      addDataUrl(zip, `${rootFolder}/inputs/viewport_projected.png`, projected.dataUrl);
+      addDataUrl(zip, `${resolvedRootFolder}/inputs/viewport_projected.png`, projected.dataUrl);
       finishUnit('rendering', 'Projected viewport ready');
     } catch (error) {
       throw new ShotPackageError(
@@ -445,7 +452,7 @@ async function appendShotPackageToZip(
     const aiResultAsset = project.assets.assets[aiResultAssetId];
     if (aiResultAsset) {
       emit('packaging', 'Adding AI result frame…');
-      addDataUrl(zip, `${rootFolder}/outputs/ai_result_frame.png`, aiResultAsset.uri);
+      addDataUrl(zip, `${resolvedRootFolder}/outputs/ai_result_frame.png`, aiResultAsset.uri);
       finishUnit('packaging', 'AI result frame added');
     }
   }
@@ -473,7 +480,7 @@ async function appendShotPackageToZip(
           },
         });
         zip.file(
-          `${rootFolder}/inputs/viewport_clay_motion.mp4`,
+          `${resolvedRootFolder}/inputs/viewport_clay_motion.mp4`,
           await video.blob.arrayBuffer(),
         );
         finishUnit('encoding', 'Clay camera-move video ready');
@@ -489,7 +496,7 @@ async function appendShotPackageToZip(
       // Legacy fallback only when rerendering is impossible (no renderable keyframes).
       throwIfAborted(signal);
       emit('packaging', 'Adding clay camera-move video…');
-      addBinaryToZip(zip, `${rootFolder}/inputs/viewport_clay_motion.mp4`, cameraMoveVideoAsset.uri);
+      addBinaryToZip(zip, `${resolvedRootFolder}/inputs/viewport_clay_motion.mp4`, cameraMoveVideoAsset.uri);
       finishUnit('packaging', 'Clay camera-move video added');
     }
   }
@@ -518,7 +525,7 @@ async function appendShotPackageToZip(
         },
       });
       zip.file(
-        `${rootFolder}/inputs/viewport_projected_motion.mp4`,
+        `${resolvedRootFolder}/inputs/viewport_projected_motion.mp4`,
         await video.blob.arrayBuffer(),
       );
       finishUnit('encoding', 'Projected camera-move video ready');
@@ -553,7 +560,7 @@ async function appendShotPackageToZip(
         shot.exportSettings.width,
         shot.exportSettings.height,
       );
-      addDataUrl(zip, `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, clay.dataUrl);
+      addDataUrl(zip, `${resolvedRootFolder}/inputs/camera_move/clay_${frame.id}.png`, clay.dataUrl);
       finishUnit(
         'rendering',
         `Clay reference frame ${index + 1} of ${cameraMoveReferenceFrames.length} ready`,
@@ -583,7 +590,7 @@ async function appendShotPackageToZip(
           shot.exportSettings.width,
           shot.exportSettings.height,
         );
-        addDataUrl(zip, `${rootFolder}/inputs/camera_move/projected_${frame.id}.png`, projected.dataUrl);
+        addDataUrl(zip, `${resolvedRootFolder}/inputs/camera_move/projected_${frame.id}.png`, projected.dataUrl);
         finishUnit(
           'rendering',
           `Projected reference frame ${index + 1} of ${projectedMoveFrames.length} ready`,
@@ -614,7 +621,7 @@ async function appendShotPackageToZip(
     for (let faceIndex = 0; faceIndex < CAMERA_MOVE_CUBEMAP_FACES.length; faceIndex += 1) {
       throwIfAborted(signal);
       const face = CAMERA_MOVE_CUBEMAP_FACES[faceIndex];
-      addDataUrl(zip, `${rootFolder}/inputs/cubemap/${face}.png`, cubemap.faces[face].dataUrl);
+      addDataUrl(zip, `${resolvedRootFolder}/inputs/cubemap/${face}.png`, cubemap.faces[face].dataUrl);
       finishUnit(
         'rendering',
         `Cubemap face ${faceIndex + 1} of ${CAMERA_MOVE_CUBEMAP_FACES.length}`,
@@ -622,7 +629,7 @@ async function appendShotPackageToZip(
     }
     emit('packaging', 'Stitching cubemap…', { indeterminate: true });
     const stitchedCubemap = await stitchCubemapFacesCrossAsync(cubemap.faces, cubemap.faceSize);
-    addDataUrl(zip, `${rootFolder}/inputs/cubemap/cubemap_stitched.png`, stitchedCubemap.dataUrl);
+    addDataUrl(zip, `${resolvedRootFolder}/inputs/cubemap/cubemap_stitched.png`, stitchedCubemap.dataUrl);
     finishUnit('packaging', 'Cubemap stitch ready');
   }
 
@@ -631,7 +638,7 @@ async function appendShotPackageToZip(
       throwIfAborted(signal);
       emit('rendering', 'Rendering pano crop…', { indeterminate: true });
       const crop = await renderPanoPerspectiveCrop(linkedPanoAsset.uri, shot.panoCrop, linkedPano.rotation);
-      addDataUrl(zip, `${rootFolder}/inputs/pano_crop.png`, crop.dataUrl);
+      addDataUrl(zip, `${resolvedRootFolder}/inputs/pano_crop.png`, crop.dataUrl);
       finishUnit('rendering', 'Pano crop ready');
     }
   }
@@ -649,7 +656,7 @@ async function appendShotPackageToZip(
         targetHeight: project.settings.defaultShotHeight,
       },
     );
-    addDataUrl(zip, `${rootFolder}/inputs/global_reference.png`, exportUrl);
+    addDataUrl(zip, `${resolvedRootFolder}/inputs/global_reference.png`, exportUrl);
     finishUnit('packaging', 'Styled reference panorama added');
   }
 
@@ -666,7 +673,7 @@ async function appendShotPackageToZip(
         targetHeight: project.settings.defaultShotHeight,
       },
     );
-    addDataUrl(zip, `${rootFolder}/inputs/global_graybox.png`, exportUrl);
+    addDataUrl(zip, `${resolvedRootFolder}/inputs/global_graybox.png`, exportUrl);
     finishUnit('packaging', 'Graybox panorama added');
   }
 
@@ -674,33 +681,33 @@ async function appendShotPackageToZip(
     throwIfAborted(signal);
     emit('packaging', 'Writing metadata…');
     const metadata = buildShotMetadata(project, shot, linkedPano);
-    zip.file(`${rootFolder}/metadata/shot.json`, JSON.stringify(shot, null, 2));
-    zip.file(`${rootFolder}/metadata/camera.json`, JSON.stringify(shot.camera, null, 2));
+    zip.file(`${resolvedRootFolder}/metadata/shot.json`, JSON.stringify(shot, null, 2));
+    zip.file(`${resolvedRootFolder}/metadata/camera.json`, JSON.stringify(shot.camera, null, 2));
     if (shot.cameraKeyframes.length > 0) {
-      zip.file(`${rootFolder}/metadata/camera_keyframes.json`, JSON.stringify(shot.cameraKeyframes, null, 2));
+      zip.file(`${resolvedRootFolder}/metadata/camera_keyframes.json`, JSON.stringify(shot.cameraKeyframes, null, 2));
     }
     if (cameraMoveReferenceFrames.length > 0) {
-      zip.file(`${rootFolder}/metadata/camera_move_reference_frames.json`, JSON.stringify(cameraMoveReferenceFrames, null, 2));
+      zip.file(`${resolvedRootFolder}/metadata/camera_move_reference_frames.json`, JSON.stringify(cameraMoveReferenceFrames, null, 2));
     }
-    zip.file(`${rootFolder}/metadata/landmarks.json`, JSON.stringify(metadata.landmarks, null, 2));
-    zip.file(`${rootFolder}/metadata/location.json`, JSON.stringify(metadata.project, null, 2));
+    zip.file(`${resolvedRootFolder}/metadata/landmarks.json`, JSON.stringify(metadata.landmarks, null, 2));
+    zip.file(`${resolvedRootFolder}/metadata/location.json`, JSON.stringify(metadata.project, null, 2));
     finishUnit('packaging', 'Metadata written');
   }
 
   if (shot.exportSettings.includePrompt) {
     throwIfAborted(signal);
     emit('packaging', 'Writing prompts…');
-    zip.file(`${rootFolder}/prompts/image_gen_prompt.txt`, generateImagePrompt(project, shot));
-    zip.file(`${rootFolder}/prompts/video_gen_prompt.txt`, generateVideoPrompt(shot));
-    zip.file(`${rootFolder}/prompts/negative_prompt.txt`, shot.promptOverrides.negativePrompt || '');
+    zip.file(`${resolvedRootFolder}/prompts/image_gen_prompt.txt`, generateImagePrompt(project, shot));
+    zip.file(`${resolvedRootFolder}/prompts/video_gen_prompt.txt`, generateVideoPrompt(shot));
+    zip.file(`${resolvedRootFolder}/prompts/negative_prompt.txt`, shot.promptOverrides.negativePrompt || '');
     finishUnit('packaging', 'Prompts written');
   }
 
   throwIfAborted(signal);
   emit('packaging', 'Writing manifest…');
   const manifest = createShotPackageManifest(project, shot);
-  zip.file(`${rootFolder}/manifest.json`, JSON.stringify(manifest, null, 2));
-  finishUnit('packaging', `Shot ${shot.shotNumber} packaged`);
+  zip.file(`${resolvedRootFolder}/manifest.json`, JSON.stringify(manifest, null, 2));
+  finishUnit('packaging', `${getShotExportProgressLabel(shot)} packaged`);
   return manifest.files.map((file) => file.path);
 }
 
