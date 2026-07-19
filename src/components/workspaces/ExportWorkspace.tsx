@@ -9,7 +9,7 @@ import {
   isPackageExportCancelled,
   PackageExportProgress,
 } from '../../engine/packageExport';
-import { getProjectWarnings, getShotWarnings } from '../../engine/warnings';
+import { getProjectWarnings, getShotWarnings, shouldShowMissingLandmarkPromptNote } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
@@ -400,7 +400,7 @@ export function ExportWorkspace() {
                     {shotWarnings.length > 0 ? (
                       <WarningDetailsButton
                         warnings={shotWarnings}
-                        title={`Shot ${shot.shotNumber} issues`}
+                        title={`Shot ${shot.shotNumber}`}
                       />
                     ) : (
                       <span className="shrink-0 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
@@ -500,17 +500,27 @@ export function ExportWorkspace() {
               ['includeMetadata', 'Metadata JSON'],
               ['includePrompt', 'Prompts'],
             ] as const).map(([key, label]) => (
-              <label key={key} className="flex items-center gap-2 rounded-lg border border-subtle px-3 py-2 text-sm text-secondary">
-                <input
-                  type="checkbox"
-                  checked={Boolean(selectedShot.exportSettings[key])}
-                  onChange={(event) => updateShot(selectedShot.id, {
-                    exportSettings: { ...selectedShot.exportSettings, [key]: event.target.checked },
-                  })}
-                  className="accent-[var(--accent)]"
-                />
-                {label}
-              </label>
+              <div key={key} className="space-y-1">
+                <label className="flex items-center gap-2 rounded-lg border border-subtle px-3 py-2 text-sm text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedShot.exportSettings[key])}
+                    onChange={(event) => updateShot(selectedShot.id, {
+                      exportSettings: { ...selectedShot.exportSettings, [key]: event.target.checked },
+                    })}
+                    className="accent-[var(--accent)]"
+                  />
+                  {label}
+                </label>
+                {key === 'includePrompt' && shouldShowMissingLandmarkPromptNote(selectedShot) && (
+                  <p
+                    data-export-prompt-landmark-note
+                    className="px-1 text-[11px] leading-snug text-muted"
+                  >
+                    No continuity landmarks are pinned for this shot.
+                  </p>
+                )}
+              </div>
             ))}
             <IconButton onClick={() => void exportShot()} disabled={isExportingPackage} className="w-full">
               <FileJson className="h-4 w-4" />

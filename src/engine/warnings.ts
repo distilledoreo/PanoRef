@@ -1,7 +1,9 @@
 import { STYLED_PANO } from '../domain/copy';
 import { LocationProject, Shot, WarningItem } from '../domain/types';
-import { hasRenderableCameraMove } from './cameraKeyframes';
+import { canUseProjectedAppearance } from './projectedStyle';
 import { getPanoMatchQuality } from './sync';
+
+export type ShotReadinessLevel = 'ready' | 'notes' | 'attention';
 
 export function getProjectWarnings(project: LocationProject): WarningItem[] {
   const warnings: WarningItem[] = [];
@@ -35,92 +37,104 @@ export function getProjectWarnings(project: LocationProject): WarningItem[] {
   return warnings;
 }
 
-/** Compact severity summary for export / shot issue buttons (e.g. "1 error · 2 warnings"). */
-export function formatWarningSummary(warnings: WarningItem[]): string {
-  if (warnings.length === 0) return 'Ready';
-
-  const errors = warnings.filter((warning) => warning.severity === 'danger').length;
-  const warningCount = warnings.filter((warning) => warning.severity === 'warning').length;
-  const infos = warnings.filter((warning) => warning.severity === 'info').length;
-  const parts: string[] = [];
-
-  if (errors > 0) {
-    parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
+/** Ready / Ready with notes / Needs attention — from check severities. */
+export function getShotReadinessLevel(warnings: WarningItem[]): ShotReadinessLevel {
+  if (warnings.some((item) => item.severity === 'warning' || item.severity === 'danger')) {
+    return 'attention';
   }
-  if (warningCount > 0) {
-    parts.push(`${warningCount} warning${warningCount === 1 ? '' : 's'}`);
+  if (warnings.some((item) => item.severity === 'info')) {
+    return 'notes';
   }
-  if (infos > 0) {
-    parts.push(`${infos} info item${infos === 1 ? '' : 's'}`);
-  }
-
-  return parts.join(' · ');
+  return 'ready';
 }
 
+/**
+ * Compact readiness label for export / shot status controls.
+ * Uses notes/checks language; reserves stronger wording only when a blocking
+ * (`danger`) condition is present.
+ */
+export function formatWarningSummary(warnings: WarningItem[]): string {
+  const level = getShotReadinessLevel(warnings);
+  if (level === 'ready') return 'Ready';
+  if (level === 'notes') return 'Ready with notes';
+
+  const blocking = warnings.filter((item) => item.severity === 'danger').length;
+  if (blocking > 0) {
+    return blocking === 1 ? '1 blocking check' : `${blocking} blocking checks`;
+  }
+  return 'Needs attention';
+}
+
+/** Quiet prompt-authoring hint — not an export readiness failure. */
+export function shouldShowMissingLandmarkPromptNote(shot: Shot): boolean {
+  return shot.exportSettings.includePrompt && shot.landmarkIds.length === 0;
+}
+
+/**
+ * Export-oriented shot checks.
+ * `info` = optional context (Ready with notes).
+ * `warning` / `danger` = requested deliverable incomplete, mismatched, or likely to fail.
+ */
 export function getShotWarnings(project: LocationProject, shot: Shot): WarningItem[] {
   const warnings: WarningItem[] = [];
   const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);
-  const criticalLandmarks = project.landmarks.filter((landmark) => landmark.promptCritical);
-  const selectedCritical = criticalLandmarks.filter((landmark) => shot.landmarkIds.includes(landmark.id));
+  const canonicalPano = project.panoRefs.find((pano) => pano.isCanonical);
+  const settings = shot.exportSettings;
+  const canProject = canUseProjectedAppearance(project);
 
-  if (!linkedPano) {
+  const wantsProjected = Boolean(
+    settings.includeProjectedViewport
+    || settings.includeProjectedCameraMoveVideo
+    || settings.includeProjectedCameraMoveReferenceFrames,
+  );
+  const wantsPanoCrop = Boolean(settings.includePanoCrop);
+  const wantsFullPano = Boolean(settings.includeFullPano);
+
+  if (wantsProjected && !canProject) {
     warnings.push({
-      id: `${shot.id}-missing-pano`,
-      severity: 'danger',
-      message: 'This shot is not linked to a panorama reference.',
+      id: `${shot.id}-missing-projector`,
+      severity: 'warning',
+      message: 'Projected exports are enabled, but no usable styled panorama projector is available. Those outputs will be omitted from the package.',
     });
-  } else {
+  }
+
+  if (wantsPanoCrop && !linkedPano) {
+    warnings.push({
+      id: `${shot.id}-missing-pano-for-crop`,
+      severity: 'warning',
+      message: 'Panorama crop is enabled, but this shot is not linked to a panorama.',
+    });
+  }
+
+  if (wantsFullPano && !linkedPano && !canonicalPano) {
+    warnings.push({
+      id: `${shot.id}-missing-full-pano-for-cubemap`,
+      severity: 'warning',
+      message: 'Full pano / cubemap export is enabled, but no canonical or linked panorama is available.',
+    });
+  }
+
+  // Origin distance is contextual only for crop (and similar pano-viewpoint exports).
+  // Projected textures on 3D geometry routinely leave the capture origin — that is not a fault.
+  if (wantsPanoCrop && linkedPano) {
     const match = getPanoMatchQuality(shot.camera, linkedPano, project.settings);
     if (match.quality !== 'good') {
       warnings.push({
-        id: `${shot.id}-pano-match`,
-        severity: match.quality === 'moderate' ? 'warning' : 'danger',
-        message: `Shot camera is ${match.distanceMeters.toFixed(1)}m from the linked pano origin.`,
+        id: `${shot.id}-pano-origin-distance`,
+        severity: 'info',
+        message: `Reference origin distance: ${match.distanceMeters.toFixed(1)} m. The panorama crop may have different perspective from the shot camera.`,
       });
     }
   }
 
-  if (criticalLandmarks.length > 0 && selectedCritical.length === 0) {
-    warnings.push({
-      id: `${shot.id}-missing-landmarks`,
-      severity: 'warning',
-      message: 'No prompt-critical landmarks are selected for this shot.',
-    });
-  }
-
-  const exportAspect = shot.exportSettings.width / shot.exportSettings.height;
+  const exportAspect = settings.width / settings.height;
   if (Math.abs(exportAspect - shot.camera.aspectRatio) > 0.02) {
     warnings.push({
       id: `${shot.id}-aspect-mismatch`,
       severity: 'warning',
-      message: 'Shot export aspect ratio differs from the camera preview aspect ratio.',
-    });
-  }
-
-  if (
-    shot.exportSettings.includeCameraMoveVideo
-    && hasRenderableCameraMove(shot.cameraKeyframes)
-    && !shot.assets.cameraMoveVideoAssetId
-  ) {
-    warnings.push({
-      id: `${shot.id}-missing-camera-move-video`,
-      severity: 'info',
-      message: 'Camera move keyframes exist — export MP4 from Shots, or the package will generate viewport_clay_motion.mp4 on download.',
-    });
-  }
-
-  if (
-    shot.exportSettings.includeFullPano
-    && !linkedPano
-    && !project.panoRefs.some((pano) => pano.isCanonical)
-  ) {
-    warnings.push({
-      id: `${shot.id}-missing-full-pano-for-cubemap`,
-      severity: 'info',
-      message: 'Full pano / cubemap export is enabled, but no canonical or linked pano is available.',
+      message: 'Export aspect ratio differs from the intended camera frame. Deliverables may not match the framing you composed.',
     });
   }
 
   return warnings;
 }
-

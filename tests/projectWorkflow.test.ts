@@ -4,7 +4,7 @@ import { createShotPackageManifest, selectExportPathPreview } from '../src/engin
 import { generateImagePrompt } from '../src/engine/prompts';
 import { ShotPackageError, buildShotPackage } from '../src/engine/packageExport';
 import { serializeProject, parseProject } from '../src/engine/projectIO';
-import { formatWarningSummary, getProjectWarnings, getShotWarnings } from '../src/engine/warnings';
+import { formatWarningSummary, getProjectWarnings, getShotWarnings, shouldShowMissingLandmarkPromptNote } from '../src/engine/warnings';
 import { getLatestGrayboxPano, getPanoAsset } from '../src/domain/selectors';
 import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
 import { useContinuityStore } from '../src/state/useContinuityStore';
@@ -190,7 +190,7 @@ describe('project workflow logic', () => {
     const warnings = getProjectWarnings(project).map((warning) => warning.id);
     expect(warnings).toContain('missing-graybox-pano');
     expect(warnings).toContain('missing-canonical-pano');
-    expect(formatWarningSummary(getProjectWarnings(project))).toBe('2 warnings');
+    expect(formatWarningSummary(getProjectWarnings(project))).toBe('Needs attention');
   });
 
   it('builds shot prompts with selected prompt-critical landmarks', () => {
@@ -563,21 +563,84 @@ describe('project workflow logic', () => {
     expect(getPanoAsset(project, latest)?.name).toBe('global_graybox.png');
   });
 
-  it('warns when a shot has no selected critical landmarks', () => {
+  it('does not treat missing landmarks or capture-origin distance as export failures', () => {
     const project = createDefaultProject();
     const shot = createShot({
       index: 1,
       camera: {
-        position: [0, 1.6, 0],
-        target: [0, 1.6, 5],
+        position: [0, 1.6, 20],
+        target: [0, 1.6, 25],
         fovDegrees: 55,
         aspectRatio: 16 / 9,
         near: 0.1,
         far: 100,
       },
     });
+    shot.exportSettings = {
+      ...shot.exportSettings,
+      includePanoCrop: false,
+      includeFullPano: false,
+      includeProjectedViewport: false,
+      includeProjectedCameraMoveVideo: false,
+      includeProjectedCameraMoveReferenceFrames: false,
+      includePrompt: true,
+    };
     project.shots.push(shot);
-    expect(getShotWarnings(project, shot).some((warning) => warning.id.endsWith('missing-landmarks'))).toBe(true);
+
+    const warnings = getShotWarnings(project, shot);
+    expect(warnings.some((warning) => warning.id.endsWith('missing-landmarks'))).toBe(false);
+    expect(warnings.some((warning) => warning.id.includes('pano-match') || warning.id.includes('pano-origin'))).toBe(false);
+    expect(formatWarningSummary(warnings)).toBe('Ready');
+    expect(shouldShowMissingLandmarkPromptNote(shot)).toBe(true);
+  });
+
+  it('notes pano origin distance only when panorama crop export is enabled', () => {
+    const project = createDefaultProject();
+    const asset = createPanoAsset({
+      name: 'styled.png',
+      uri: 'data:image/png;base64,styled',
+      width: 4,
+      height: 2,
+    });
+    const pano = createPanoReference({
+      name: 'Styled',
+      assetId: asset.id,
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: true,
+    });
+    project.assets.assets[asset.id] = asset;
+    project.panoRefs.push(pano);
+
+    const shot = createShot({
+      index: 1,
+      camera: {
+        position: [0, 1.6, 12],
+        target: [0, 1.6, 17],
+        fovDegrees: 55,
+        aspectRatio: 16 / 9,
+        near: 0.1,
+        far: 100,
+      },
+    });
+    shot.linkedPanoId = pano.id;
+    shot.exportSettings = {
+      ...shot.exportSettings,
+      includePanoCrop: true,
+      includeFullPano: false,
+      includeProjectedViewport: false,
+      includeProjectedCameraMoveVideo: false,
+      includeProjectedCameraMoveReferenceFrames: false,
+    };
+    project.shots.push(shot);
+
+    const warnings = getShotWarnings(project, shot);
+    const distanceNote = warnings.find((warning) => warning.id.endsWith('pano-origin-distance'));
+    expect(distanceNote?.severity).toBe('info');
+    expect(distanceNote?.message).toContain('Reference origin distance');
+    expect(formatWarningSummary(warnings)).toBe('Ready with notes');
   });
 
   it('resets session fly and busy flags when opening a project', () => {

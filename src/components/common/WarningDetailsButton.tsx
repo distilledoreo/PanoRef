@@ -1,8 +1,12 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Info } from 'lucide-react';
 import { WarningItem } from '../../domain/types';
-import { formatWarningSummary } from '../../engine/warnings';
+import {
+  formatWarningSummary,
+  getShotReadinessLevel,
+  ShotReadinessLevel,
+} from '../../engine/warnings';
 import { PrecisionDrawer } from './PrecisionDrawer';
 import { WarningList } from './WarningList';
 
@@ -24,24 +28,27 @@ function useIsMobileDrawer() {
   return isMobile;
 }
 
-function panelTone(warnings: WarningItem[]): string {
-  if (warnings.some((warning) => warning.severity === 'danger')) {
-    return 'border-red-400/50 bg-red-500/10 text-red-800 dark:text-red-200';
-  }
-  if (warnings.some((warning) => warning.severity === 'warning')) {
+function panelTone(level: ShotReadinessLevel): string {
+  if (level === 'attention') {
     return 'border-amber-400/50 bg-amber-500/10 text-amber-900 dark:text-amber-200';
   }
   return 'border-subtle bg-surface-muted text-secondary';
 }
 
+function detailsTitle(level: ShotReadinessLevel): string {
+  if (level === 'attention') return 'Needs attention';
+  if (level === 'notes') return 'Notes';
+  return 'Checks';
+}
+
 /**
- * Single labeled control that opens warning details.
+ * Single labeled control that opens readiness details.
  * Desktop: fixed portal panel beside the button (flips above/below).
  * Mobile: PrecisionDrawer so the panel is never clipped by overflow parents.
  */
 export function WarningDetailsButton({
   warnings,
-  title = 'Issues',
+  title,
   className,
 }: {
   warnings: WarningItem[];
@@ -55,7 +62,10 @@ export function WarningDetailsButton({
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const isMobile = useIsMobileDrawer();
+  const level = getShotReadinessLevel(warnings);
   const summary = formatWarningSummary(warnings);
+  const resolvedTitle = title ?? detailsTitle(level);
+  const Icon = level === 'attention' ? AlertTriangle : Info;
 
   useLayoutEffect(() => {
     if (!open || isMobile || !buttonRef.current) return;
@@ -115,14 +125,14 @@ export function WarningDetailsButton({
     };
   }, [open, isMobile]);
 
-  if (warnings.length === 0) return null;
+  if (warnings.length === 0 || level === 'ready') return null;
 
   return (
     <>
       <button
         ref={buttonRef}
         type="button"
-        data-warning-details-trigger
+        data-warning-details-trigger={level}
         aria-expanded={open}
         aria-haspopup="dialog"
         title={summary}
@@ -131,14 +141,14 @@ export function WarningDetailsButton({
           event.stopPropagation();
           setOpen((value) => !value);
         }}
-        className={`inline-flex max-w-[11rem] shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-left text-[10px] font-semibold leading-tight transition hover:brightness-95 ${panelTone(warnings)} ${className ?? ''}`}
+        className={`inline-flex max-w-[11rem] shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-left text-[10px] font-semibold leading-tight transition hover:brightness-95 ${panelTone(level)} ${className ?? ''}`}
       >
-        <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+        <Icon className="h-3 w-3 shrink-0" aria-hidden />
         <span className="min-w-0 truncate">{summary}</span>
       </button>
 
       {isMobile ? (
-        <PrecisionDrawer open={open} title={title} onClose={() => setOpen(false)}>
+        <PrecisionDrawer open={open} title={resolvedTitle} onClose={() => setOpen(false)}>
           <WarningList warnings={warnings} />
         </PrecisionDrawer>
       ) : open && createPortal(
@@ -151,7 +161,7 @@ export function WarningDetailsButton({
           className="fixed z-[60] max-h-[min(50vh,20rem)] overflow-y-auto rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-3 shadow-soft"
           style={{ top: coords.top, left: coords.left, width: coords.width }}
         >
-          <h3 id={titleId} className="mb-2 text-xs font-semibold text-primary">{title}</h3>
+          <h3 id={titleId} className="mb-2 text-xs font-semibold text-primary">{resolvedTitle}</h3>
           <WarningList warnings={warnings} />
         </div>,
         document.body,
