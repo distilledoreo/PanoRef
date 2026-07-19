@@ -573,6 +573,10 @@ test.describe('workflow path smoke', () => {
     await expect(page.locator('[data-coverage-capture-plan]')).toContainText('Existing panorama origins are never rewritten');
     await expect(page.locator('[data-coverage-apply-pair]')).toHaveCount(0);
 
+    await drawer.locator('[data-coverage-floor-min="x"]').fill('-4');
+    await expect(result).toHaveCount(0);
+    await expect(page.locator('[data-coverage-apply-capture]')).toHaveCount(0);
+
     if (testInfo.project.name === 'desktop-chromium') {
       await page.locator('[data-coverage-mode]').selectOption('joint-pair');
       await page.locator('[data-coverage-analyze]').click();

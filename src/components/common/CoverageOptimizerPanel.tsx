@@ -18,6 +18,13 @@ function originLabel(origin: Vec3): string {
   return origin.map((value) => value.toFixed(2)).join(', ');
 }
 
+function defaultFloorRegion(origin: Vec3, cameraHeight: number): CoverageBounds {
+  return {
+    min: [origin[0] - 5, origin[1] - cameraHeight - 0.25, origin[2] - 5],
+    max: [origin[0] + 5, origin[1] - cameraHeight + 0.25, origin[2] + 5],
+  };
+}
+
 export function CoverageOptimizerPanel({
   project,
   primaryPano,
@@ -34,20 +41,51 @@ export function CoverageOptimizerPanel({
   const cameraHeight = project.settings.defaultCameraHeightMeters ?? 1.6;
   const captureOrigin = primaryPano?.origin ?? project.scene.panoOrigin;
   const [restrictFloorRegion, setRestrictFloorRegion] = useState(false);
-  const [floorRegion, setFloorRegion] = useState<CoverageBounds>(() => ({
-    min: [captureOrigin[0] - 5, captureOrigin[1] - cameraHeight - 0.25, captureOrigin[2] - 5],
-    max: [captureOrigin[0] + 5, captureOrigin[1] - cameraHeight + 0.25, captureOrigin[2] + 5],
-  }));
+  const [floorRegion, setFloorRegion] = useState<CoverageBounds>(() => (
+    defaultFloorRegion(captureOrigin, cameraHeight)
+  ));
   const floorRegionIsValid = floorRegion.min.every(Number.isFinite)
     && floorRegion.max.every(Number.isFinite)
     && floorRegion.min.every((value, axis) => value <= floorRegion.max[axis]);
   const taskRef = useRef<CoverageOptimizationTask>();
   const analysisIdRef = useRef(0);
+  const floorRegionTouchedRef = useRef(false);
+  const captureInputKey = [
+    primaryPano?.id ?? 'scene-origin',
+    ...captureOrigin,
+    primaryPano?.width ?? 8_192,
+    primaryPano?.height ?? 4_096,
+    cameraHeight,
+  ].join(':');
+  const previousCaptureInputKeyRef = useRef(captureInputKey);
+
+  const invalidateAnalysis = () => {
+    analysisIdRef.current += 1;
+    taskRef.current?.cancel();
+    taskRef.current = undefined;
+    setStatus('idle');
+    setResult(undefined);
+    setStatusMessage('');
+  };
 
   useEffect(() => () => {
     analysisIdRef.current += 1;
     taskRef.current?.cancel();
   }, []);
+
+  useEffect(() => {
+    if (previousCaptureInputKeyRef.current === captureInputKey) return;
+    previousCaptureInputKeyRef.current = captureInputKey;
+    analysisIdRef.current += 1;
+    taskRef.current?.cancel();
+    taskRef.current = undefined;
+    setStatus('idle');
+    setResult(undefined);
+    setStatusMessage('');
+    if (!floorRegionTouchedRef.current) {
+      setFloorRegion(defaultFloorRegion(captureOrigin, cameraHeight));
+    }
+  }, [cameraHeight, captureInputKey, captureOrigin]);
 
   const analyze = async () => {
     taskRef.current?.cancel();
@@ -115,12 +153,8 @@ export function CoverageOptimizerPanel({
           <Select
             value={mode}
             onChange={(event) => {
-              taskRef.current?.cancel();
-              taskRef.current = undefined;
               setMode(event.target.value === 'joint-pair' ? 'joint-pair' : 'fixed-first');
-              setStatus('idle');
-              setResult(undefined);
-              setStatusMessage('');
+              invalidateAnalysis();
             }}
             disabled={status === 'running'}
             data-coverage-mode
@@ -139,8 +173,7 @@ export function CoverageOptimizerPanel({
             disabled={status === 'running'}
             onChange={(value) => {
               setRestrictFloorRegion(value);
-              setStatus('idle');
-              setResult(undefined);
+              invalidateAnalysis();
             }}
             label="Restrict optimizer to an allowed floor region"
           />
@@ -152,29 +185,37 @@ export function CoverageOptimizerPanel({
               <div key={axis} className="contents">
                 <Field label={`${axis} minimum`}>
                   <TextInput
-                  type="number"
-                  step="0.1"
-                  disabled={status === 'running'}
+                    type="number"
+                    step="0.1"
+                    disabled={status === 'running'}
                     value={floorRegion.min[axisIndex]}
-                    onChange={(event) => setFloorRegion((current) => {
-                      const min = [...current.min] as Vec3;
-                      min[axisIndex] = Number(event.target.value);
-                      return { ...current, min };
-                    })}
+                    onChange={(event) => {
+                      floorRegionTouchedRef.current = true;
+                      setFloorRegion((current) => {
+                        const min = [...current.min] as Vec3;
+                        min[axisIndex] = Number(event.target.value);
+                        return { ...current, min };
+                      });
+                      invalidateAnalysis();
+                    }}
                     data-coverage-floor-min={axis.toLowerCase()}
                   />
                 </Field>
                 <Field label={`${axis} maximum`}>
                   <TextInput
-                  type="number"
-                  step="0.1"
-                  disabled={status === 'running'}
+                    type="number"
+                    step="0.1"
+                    disabled={status === 'running'}
                     value={floorRegion.max[axisIndex]}
-                    onChange={(event) => setFloorRegion((current) => {
-                      const max = [...current.max] as Vec3;
-                      max[axisIndex] = Number(event.target.value);
-                      return { ...current, max };
-                    })}
+                    onChange={(event) => {
+                      floorRegionTouchedRef.current = true;
+                      setFloorRegion((current) => {
+                        const max = [...current.max] as Vec3;
+                        max[axisIndex] = Number(event.target.value);
+                        return { ...current, max };
+                      });
+                      invalidateAnalysis();
+                    }}
                     data-coverage-floor-max={axis.toLowerCase()}
                   />
                 </Field>
