@@ -209,11 +209,13 @@ export function ProjectedStylePanel({
         <div className="rounded-lg border border-subtle bg-surface-base px-3 py-2 text-xs">
           <div className="flex items-center justify-between">
             <span className="font-semibold text-primary">Occlusion status</span>
-            <span className={
-              occlusionStatus === 'ready' ? 'text-green-700 dark:text-green-300'
-                : occlusionStatus === 'failed' ? 'text-amber-700 dark:text-amber-300'
-                  : 'text-secondary'
-            }>{occlusionStatusLabel}</span>
+            <span
+              data-occlusion-status={occlusionStatus}
+              className={
+                occlusionStatus === 'ready' ? 'text-green-700 dark:text-green-300'
+                  : occlusionStatus === 'failed' ? 'text-amber-700 dark:text-amber-300'
+                    : 'text-secondary'
+              }>{occlusionStatusLabel}</span>
           </div>
 
           <div className="mt-2">

@@ -379,4 +379,88 @@ test.describe('workflow path smoke', () => {
     expect(thumbnailSources[1]).toMatch(/^data:image\//);
     expect(thumbnailSources[0]).not.toBe(thumbnailSources[1]);
   });
+
+  test('projected occlusion unmounts cleanly into Export without a crash', async ({ page }) => {
+    test.setTimeout(180_000);
+
+    // Any uncaught error, window error, or rejected promise fails the test.
+    const pageErrors: string[] = [];
+    const unhandledRejections: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error' && /Uncaught|Cannot read propert|is not a function/.test(message.text())) {
+        pageErrors.push(message.text());
+      }
+    });
+    await page.exposeFunction('__reportRejection', (reason: string) => {
+      unhandledRejections.push(reason);
+    });
+    await page.addInitScript(() => {
+      window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+        // Segment / Bugsnag tracking-prevention noise is ignored.
+        if (/prevented|tracking|ad blocker|blocked by/i.test(reason)) return;
+        (window as unknown as { __reportRejection?: (r: string) => void }).__reportRejection?.(reason);
+      });
+    });
+
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+
+    // Build → graybox so a reference set exists.
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+    const renderBtn = page.getByRole('button', { name: /Render 360 Reference/i });
+    if (await renderBtn.isVisible().catch(() => false)) {
+      await renderBtn.click();
+      await expect(
+        page.getByRole('button', { name: /Download Graybox|Re-render after scene changes/i }).first(),
+      ).toBeVisible({ timeout: 90_000 });
+    }
+    await dismissOverlays(page);
+
+    // Reference → attach a styled canonical pano (enables projected appearance + occlusion).
+    await workspaceTab(page, 'Reference').click();
+    await dismissOverlays(page);
+    const useAttached = page.getByRole('button', { name: /Use Attached Reference/i });
+    if (await useAttached.isVisible().catch(() => false)) {
+      await useAttached.click();
+      await dismissOverlays(page);
+    }
+    const looksGood = page.getByRole('button', { name: /Looks good enough/i });
+    if (await looksGood.isVisible().catch(() => false)) {
+      await looksGood.click();
+    }
+    const approve = page.getByRole('button', { name: /Approve as Reference/i });
+    await expect(approve).toBeVisible({ timeout: 30_000 });
+    await approve.click({ force: true });
+    await dismissOverlays(page);
+
+    // Shots → enable Projected appearance so the occlusion engine builds GPU maps.
+    await workspaceTab(page, 'Shots').click();
+    await dismissOverlays(page);
+    await expect(page.locator('[data-shots-camera-shell]')).toBeVisible({ timeout: 20_000 });
+
+    const projectedToggle = page
+      .locator('[data-appearance-mode-toggle] button')
+      .filter({ hasText: /^Projected$/ });
+    await expect(projectedToggle).toBeEnabled({ timeout: 30_000 });
+    await projectedToggle.click();
+
+    // Wait specifically for occlusion to reach the GPU-backed "Ready" state.
+    const sceneViewport = page.locator('[data-testid="scene-viewport"]');
+    await expect(sceneViewport).toHaveAttribute('data-occlusion-status', 'ready', { timeout: 60_000 });
+
+    // Navigate to Export. The renderer cleanup must dispose render targets
+    // before the renderer; an inverted order throws and blocks this transition.
+    await workspaceTab(page, 'Export').click();
+    await dismissOverlays(page);
+    await expect(page.locator('[data-export-package-panel]')).toBeVisible({ timeout: 30_000 });
+
+    const failureDetail = [
+      ...pageErrors.map((message) => `pageerror: ${message}`),
+      ...unhandledRejections.map((message) => `unhandledrejection: ${message}`),
+    ];
+    expect(failureDetail, failureDetail.join('\n')).toHaveLength(0);
+  });
 });

@@ -262,6 +262,32 @@ export function SceneViewport({
   const occlusionGenerationTokenRef = useRef(0);
   const occlusionKeyRef = useRef<string | undefined>();
   const occlusionDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+  // Bumped whenever the renderer is recreated so occlusion regenerates for it.
+  const rendererRevisionRef = useRef(0);
+
+  // Idempotent cleanup for all renderer-owned occlusion maps. Clears the refs
+  // before disposal so it is safe to call from multiple cleanup paths.
+  const disposeOcclusionMaps = useCallback(() => {
+    const primary = primaryOcclusionRef.current;
+    const secondary = secondaryOcclusionRef.current;
+
+    primaryOcclusionRef.current = undefined;
+    secondaryOcclusionRef.current = undefined;
+    occlusionKeyRef.current = undefined;
+
+    occlusionGenerationTokenRef.current += 1;
+
+    if (occlusionDebounceRef.current) {
+      clearTimeout(occlusionDebounceRef.current);
+      occlusionDebounceRef.current = undefined;
+    }
+
+    if (secondary && secondary !== primary) {
+      secondary.dispose();
+    }
+
+    primary?.dispose();
+  }, []);
   type ProjectionOcclusionStatus = 'disabled' | 'generating' | 'ready' | 'failed';
   const [occlusionStatus, setOcclusionStatus] = useState<ProjectionOcclusionStatus>('disabled');
   const gizmoRef = useRef<THREE.Group | null>(null);
@@ -459,6 +485,7 @@ export function SceneViewport({
     renderer.domElement.className = 'absolute inset-0 block h-full w-full touch-none';
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+    rendererRevisionRef.current += 1;
 
     const camera = new THREE.PerspectiveCamera(framingFovRef.current, 1, 0.1, renderDistanceRef.current);
     cameraRef.current = camera;
@@ -1225,8 +1252,10 @@ export function SceneViewport({
       if (sceneRef.current) disposeScene(sceneRef.current);
       renderer.dispose();
       renderer.domElement.remove();
+      // BUG-REVERT: dispose occlusion maps after the renderer (reproduces crash).
+      disposeOcclusionMaps();
     };
-  }, [clearTransformGizmo, emitFramingCamera, syncTransformGizmo, theme]);
+  }, [clearTransformGizmo, disposeOcclusionMaps, emitFramingCamera, syncTransformGizmo, theme]);
 
   useEffect(() => {
     const modeChanged = freeCameraModeRef.current !== freeCameraActive;
@@ -1573,6 +1602,7 @@ export function SceneViewport({
   }, [
     occlusionWanted,
     project,
+    rendererRevisionRef.current,
     projectedPano?.id,
     projectedPano?.origin[0],
     projectedPano?.origin[1],
@@ -1583,18 +1613,11 @@ export function SceneViewport({
     secondaryPano?.origin[2],
   ]);
 
-  // Dispose all occlusion maps on unmount.
+  // Dispose occlusion maps on unmount (also covered by the renderer cleanup,
+  // but kept for components that unmount without tearing down the renderer).
   useEffect(() => () => {
-    primaryOcclusionRef.current?.dispose();
-    if (secondaryOcclusionRef.current
-      && secondaryOcclusionRef.current !== primaryOcclusionRef.current) {
-      secondaryOcclusionRef.current.dispose();
-    }
-    primaryOcclusionRef.current = undefined;
-    secondaryOcclusionRef.current = undefined;
-    occlusionKeyRef.current = undefined;
-    if (occlusionDebounceRef.current) clearTimeout(occlusionDebounceRef.current);
-  }, []);
+    disposeOcclusionMaps();
+  }, [disposeOcclusionMaps]);
 
   // Report occlusion status changes to the host (for the projected-style panel).
   const onOcclusionStatusChangeRef = useRef(onOcclusionStatusChange);
@@ -1716,6 +1739,7 @@ export function SceneViewport({
     <div
       className={`relative h-full ${minHeightClassName} overflow-hidden bg-surface-base ${cursorClass}`}
       data-testid="scene-viewport"
+      data-occlusion-status={occlusionStatus}
       ref={containerRef}
     >
       {shotFraming && (
