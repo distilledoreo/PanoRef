@@ -63,22 +63,24 @@ import {
 } from '../../engine/viewport';
 import { downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl } from '../../engine/projectIO';
+import { canUseProjectedAppearance } from '../../engine/projectedStyle';
+import { renderProjectedEquirectangularPano } from '../../engine/renderers';
 import {
   CHECKERBOARD_TILE_METERS,
   defaultSecondaryColor,
   defaultSolidColorForObject,
   resolveSurfaceStyle,
 } from '../../engine/sceneObjects';
-import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
+import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
+import { useThemeStore } from '../../state/useThemeStore';
+import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { ContextualPanel } from '../common/ContextualPanel';
 import { Field, Select, TextInput } from '../common/Field';
+import { ModelImportDialog } from '../common/ModelImportDialog';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
-import { ModelImportDialog } from '../common/ModelImportDialog';
 import { Vec3Input } from '../common/Vec3Input';
-import { canUseProjectedAppearance } from '../../engine/projectedStyle';
-import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { FullBleedLayout } from './WorkspaceShell';
 
@@ -110,7 +112,10 @@ export function BuildWorkspace() {
   const [showSceneGuides, setShowSceneGuides] = useState(false);
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>('translate');
   const [grayboxRenderError, setGrayboxRenderError] = useState<string | undefined>();
+  const [isRenderingProjected, setIsRenderingProjected] = useState(false);
+  const [projectedRenderError, setProjectedRenderError] = useState<string | undefined>();
   const [clipboardStatus, setClipboardStatus] = useState<string | undefined>();
+  const theme = useThemeStore((state) => state.theme);
   const [systemClipboardSyncedAt, setSystemClipboardSyncedAt] = useState<string | undefined>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [modelImportOpen, setModelImportOpen] = useState(false);
@@ -177,14 +182,48 @@ export function BuildWorkspace() {
   const [acknowledgedScopeKey, setAcknowledgedScopeKey] = useState<string>();
 
   const handleRenderGraybox = useCallback(() => {
-    if (isRenderingGraybox) return;
+    if (isRenderingGraybox || isRenderingProjected) return;
     setGrayboxRenderError(undefined);
     void renderGrayboxPano().catch((error: unknown) => {
       setGrayboxRenderError(
         error instanceof Error ? error.message : 'Could not render graybox 360.',
       );
     });
-  }, [isRenderingGraybox, renderGrayboxPano]);
+  }, [isRenderingGraybox, isRenderingProjected, renderGrayboxPano]);
+
+  const handleDownloadProjected360 = useCallback(() => {
+    if (isRenderingGraybox || isRenderingProjected) return;
+    if (!canUseProjectedAppearance(project)) return;
+    setProjectedRenderError(undefined);
+    setIsRenderingProjected(true);
+    void (async () => {
+      try {
+        // Yield so the CTA can paint "Rendering..." before WebGL work blocks the main thread.
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => resolve());
+        });
+        const render = await renderProjectedEquirectangularPano(project, undefined, undefined, theme);
+        await downloadPanoImage(
+          render.dataUrl,
+          render.width,
+          render.height,
+          'projected_360.png',
+          {
+            letterboxEnabled: false,
+            targetWidth: project.settings.defaultShotWidth,
+            targetHeight: project.settings.defaultShotHeight,
+          },
+          downloadDataUrl,
+        );
+      } catch (error: unknown) {
+        setProjectedRenderError(
+          error instanceof Error ? error.message : 'Could not render projected 360.',
+        );
+      } finally {
+        setIsRenderingProjected(false);
+      }
+    })();
+  }, [isRenderingGraybox, isRenderingProjected, project, theme]);
 
   /**
    * Ask for user consent before editing the capture origin when styled panoramas exist.
@@ -829,13 +868,13 @@ export function BuildWorkspace() {
                   },
                   downloadDataUrl,
                 )}
-                disabled={isRenderingGraybox}
+                disabled={isRenderingGraybox || isRenderingProjected}
               />
               <button
                 type="button"
                 data-build-rerender-graybox
                 onClick={handleRenderGraybox}
-                disabled={isRenderingGraybox}
+                disabled={isRenderingGraybox || isRenderingProjected}
                 className="inline-flex items-center gap-2 rounded-[18px] border border-subtle bg-surface-overlay px-4 py-2 text-xs font-medium text-secondary shadow-card backdrop-blur-sm transition hover:border-[var(--accent)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <Globe className="h-3.5 w-3.5" />
@@ -848,9 +887,21 @@ export function BuildWorkspace() {
               label={isRenderingGraybox ? 'Rendering...' : 'Render 360 Reference'}
               hint="Creates the latest graybox 360 for the Reference step."
               onClick={handleRenderGraybox}
-              disabled={isRenderingGraybox}
+              disabled={isRenderingGraybox || isRenderingProjected}
               highlighted={primaryAction?.id === 'render-graybox'}
             />
+          )}
+          {canUseProjectedAppearance(project) && (
+            <div data-build-download-projected-360>
+              <PrimaryCTA
+                icon={<FileDown className="h-5 w-5" />}
+                label={isRenderingProjected ? 'Rendering projected 360…' : 'Download Projected 360'}
+                hint="Equirect from the current capture origin with projected textures — seed for second-pano inpainting."
+                onClick={handleDownloadProjected360}
+                disabled={isRenderingGraybox || isRenderingProjected}
+                appearance="glow-outline"
+              />
+            </div>
           )}
           {grayboxRenderError && (
             <p
@@ -858,6 +909,15 @@ export function BuildWorkspace() {
               className="max-w-xs rounded-xl border border-red-400/60 bg-surface-overlay px-3 py-2 text-xs text-primary shadow-card backdrop-blur"
             >
               {grayboxRenderError}
+            </p>
+          )}
+          {projectedRenderError && (
+            <p
+              role="alert"
+              data-build-projected-360-error
+              className="max-w-xs rounded-xl border border-red-400/60 bg-surface-overlay px-3 py-2 text-xs text-primary shadow-card backdrop-blur"
+            >
+              {projectedRenderError}
             </p>
           )}
         </div>

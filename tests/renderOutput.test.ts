@@ -35,7 +35,36 @@ describe('rendered shot output', () => {
     const source = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
 
     expect(source).toMatch(/renderGrayboxEquirectangularPano[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
+    expect(source).toMatch(/renderProjectedEquirectangularPano[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
     expect(source).toMatch(/renderViewportClay[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
+  });
+
+  it('exports projected equirect from the capture origin without writing a graybox pano ref', () => {
+    const source = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    const coverage = readFileSync(new URL('../src/components/common/CoverageOptimizerPanel.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('export async function renderProjectedEquirectangularPano');
+    expect(source).toContain("appearance: 'projected'");
+    expect(source).toContain('showGrid: false');
+    expect(source).toContain('loadProjectedSceneResources');
+    expect(source).toContain('captureEquirectangularFromOrigin');
+    expect(source).toMatch(/Projected 360 export requires an importable styled panorama/);
+
+    expect(build).toContain('Download Projected 360');
+    expect(build).toContain('data-build-download-projected-360');
+    expect(build).toContain('renderProjectedEquirectangularPano');
+    expect(build).toContain('projected_360.png');
+    expect(build).toContain('handleDownloadProjected360');
+    // Download-only path: must not register the PNG as a graybox_render project asset.
+    expect(build).toMatch(
+      /handleDownloadProjected360[\s\S]*?renderProjectedEquirectangularPano[\s\S]*?downloadPanoImage/,
+    );
+    expect(build).not.toMatch(
+      /handleDownloadProjected360[\s\S]*?type:\s*'graybox_render'/,
+    );
+
+    expect(coverage).toContain('Download Projected 360');
   });
 
   it('defaults graybox 360 renders to 4K equirectangular resolution', () => {

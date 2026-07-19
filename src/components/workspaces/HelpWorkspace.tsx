@@ -54,7 +54,7 @@ const searchableSections: Record<string, string> = {
   welcome: 'overview continuity stage panorama graybox camera handoff documentation',
   'quick-start': 'new project build reference shots export first package steps',
   workflow: 'build reference shots export checkpoints stages',
-  build: 'objects primitives multi-select transform gizmo cut copy paste panorama render distance orbit free camera WASD',
+  build: 'objects primitives multi-select transform gizmo cut copy paste panorama render distance orbit free camera WASD projected 360 inpainting',
   reference: '360 panorama alignment yaw origin landmarks approve',
   shots: 'camera still video capture keyframes framing gallery thumbnails',
   export: 'zip package shots metadata prompts cubemap download',
@@ -218,6 +218,7 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
               ['Visibility distance', 'Open the adjacent Visibility distance control in Build to adjust both how far the viewport draws and where the fog/shroud obscures the set. It changes the Build viewport only, not shot or export cameras.'],
               ['Scene guides', 'The eye control reveals helpers and camera frustums without including them in renders.'],
               ['Render 360', 'Create a native 4K (4096×2048) graybox panorama for alignment and export.'],
+              ['Download Projected 360', 'After a styled panorama is imported: render a 4K equirect from the current capture origin with Projected Style baked onto geometry. Move the origin (e.g. coverage optimizer B), download, inpaint weak regions, then import as a second panorama.'],
             ]} />
           </DocSection>
 

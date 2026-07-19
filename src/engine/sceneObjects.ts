@@ -217,6 +217,8 @@ export function buildScene(
     showHelpers?: boolean;
     showSceneGuides?: boolean;
     showPanoOrigin?: boolean;
+    /** Build viewport grid; default true. Disable for clean projected 360 exports. */
+    showGrid?: boolean;
     hiddenObjectTypes?: SceneObjectType[];
     previewObject?: SceneObject;
     theme?: SceneVisualTheme;
@@ -267,14 +269,16 @@ export function buildScene(
   rimLight.position.set(-2, 2, 6);
   scene.add(rimLight);
 
-  const grid = new THREE.GridHelper(
-    14,
-    14,
-    theme === 'dark' ? 0x2f3a44 : 0x9aa7a2,
-    theme === 'dark' ? 0x1b252d : 0xd7dedb,
-  );
-  grid.position.y = 0.002;
-  scene.add(grid);
+  if (options.showGrid !== false) {
+    const grid = new THREE.GridHelper(
+      14,
+      14,
+      theme === 'dark' ? 0x2f3a44 : 0x9aa7a2,
+      theme === 'dark' ? 0x1b252d : 0xd7dedb,
+    );
+    grid.position.y = 0.002;
+    scene.add(grid);
+  }
 
   const useProjected = options.appearance === 'projected' && Boolean(options.projected?.texture);
 

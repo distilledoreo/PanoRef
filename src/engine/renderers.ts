@@ -114,20 +114,17 @@ export function grayboxCubeSampleDirection(
   ];
 }
 
-export async function renderGrayboxEquirectangularPano(
+/**
+ * Capture the scene from `project.scene.panoOrigin` into a 2:1 equirect PNG,
+ * baking capture-origin yaw the same way graybox references stamp `panoRotation`.
+ */
+function captureEquirectangularFromOrigin(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
   project: LocationProject,
-  width = DEFAULT_GRAYBOX_PANO_WIDTH,
-  height = DEFAULT_GRAYBOX_PANO_HEIGHT,
-  theme: SceneVisualTheme = 'light',
-): Promise<ImageRenderResult> {
-  await ensureHumanMannequinModel();
-  const renderer = createRenderer(width, height);
-  const scene = buildScene(project, {
-    showHelpers: false,
-    hiddenObjectTypes: ['sun_marker'],
-    theme,
-    fog: false,
-  });
+  width: number,
+  height: number,
+): string {
   const cubeFaceSize = Math.min(2048, Math.max(512, Math.round(width / 2)));
   const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(cubeFaceSize, {
     type: THREE.UnsignedByteType,
@@ -192,12 +189,29 @@ export async function renderGrayboxEquirectangularPano(
   renderer.render(panoScene, panoCamera);
   const dataUrl = renderer.domElement.toDataURL('image/png');
 
-  disposeScene(scene);
   cubeRenderTarget.dispose();
   material.dispose();
   plane.geometry.dispose();
-  disposeRenderer(renderer);
+  return dataUrl;
+}
 
+export async function renderGrayboxEquirectangularPano(
+  project: LocationProject,
+  width = DEFAULT_GRAYBOX_PANO_WIDTH,
+  height = DEFAULT_GRAYBOX_PANO_HEIGHT,
+  theme: SceneVisualTheme = 'light',
+): Promise<ImageRenderResult> {
+  await ensureHumanMannequinModel();
+  const renderer = createRenderer(width, height);
+  const scene = buildScene(project, {
+    showHelpers: false,
+    hiddenObjectTypes: ['sun_marker'],
+    theme,
+    fog: false,
+  });
+  const dataUrl = captureEquirectangularFromOrigin(renderer, scene, project, width, height);
+  disposeScene(scene);
+  disposeRenderer(renderer);
   return { dataUrl, width, height };
 }
 
@@ -560,6 +574,43 @@ function secondaryPcclusionSameOrigin(
 ): boolean {
   if (!a || !b) return false;
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+/**
+ * Render a 4K equirect from the current capture origin with Projected Style applied.
+ * Use after moving the origin (e.g. coverage optimizer B) to seed second-pano inpainting.
+ * Does not write a project pano ref — download/import is the caller's job.
+ */
+export async function renderProjectedEquirectangularPano(
+  project: LocationProject,
+  width = DEFAULT_GRAYBOX_PANO_WIDTH,
+  height = DEFAULT_GRAYBOX_PANO_HEIGHT,
+  theme: SceneVisualTheme = 'light',
+): Promise<ImageRenderResult> {
+  await ensureHumanMannequinModel();
+  const renderer = createRenderer(width, height);
+  const resources = await loadProjectedSceneResources(renderer, project);
+  if (!resources) {
+    disposeRenderer(renderer);
+    throw new Error(
+      'Projected 360 export requires an importable styled panorama with a valid image asset.',
+    );
+  }
+
+  const scene = buildScene(project, {
+    showHelpers: false,
+    showGrid: false,
+    hiddenObjectTypes: ['sun_marker'],
+    theme,
+    fog: false,
+    appearance: 'projected',
+    projected: resources.options,
+  });
+  const dataUrl = captureEquirectangularFromOrigin(renderer, scene, project, width, height);
+  disposeScene(scene);
+  resources.dispose();
+  disposeRenderer(renderer);
+  return { dataUrl, width, height };
 }
 
 /**

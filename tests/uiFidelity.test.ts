@@ -160,6 +160,8 @@ describe('ui revamp fidelity surfaces', () => {
     const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
     const renderers = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
     expect(build).toContain('Download Graybox 360');
+    expect(build).toContain('Download Projected 360');
+    expect(build).toContain('data-build-download-projected-360');
     expect(build).toContain('Re-render after scene changes');
     expect(build).toContain('data-build-rerender-graybox');
     expect(build).toContain('data-build-graybox-cta');
