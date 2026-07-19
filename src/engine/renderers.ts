@@ -287,8 +287,8 @@ export async function renderShotCameraMoveMp4(
   const captureStream = renderer.domElement.captureStream?.bind(renderer.domElement);
   if (!captureStream) {
     disposeScene(scene);
-    disposeRenderer(renderer);
     projectedResources?.dispose();
+    disposeRenderer(renderer);
     throw new Error('Canvas video capture is not supported in this browser.');
   }
 
@@ -384,8 +384,8 @@ export async function renderShotCameraMoveMp4(
   } finally {
     stream.getTracks().forEach((track) => track.stop());
     disposeScene(scene);
-    disposeRenderer(renderer);
     projectedResources?.dispose();
+    disposeRenderer(renderer);
   }
 
   const blob = new Blob(chunks, { type: mimeType });
@@ -633,8 +633,8 @@ export async function renderViewportProjected(
   const dataUrl = renderer.domElement.toDataURL('image/png');
 
   disposeScene(scene);
-  disposeRenderer(renderer);
   resources.dispose();
+  disposeRenderer(renderer);
 
   return { dataUrl, width, height };
 }

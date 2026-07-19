@@ -41,10 +41,14 @@ try {
   const client = await createCdpClient(pageSocketUrl);
   await client.send('Page.enable');
   await client.send('Runtime.enable');
-  await client.send('Page.setDownloadBehavior', {
+  await client.send('Browser.setDownloadBehavior', {
     behavior: 'allow',
     downloadPath: downloadDir,
-  }).catch(() => undefined);
+    eventsEnabled: true,
+  }).catch(() => client.send('Page.setDownloadBehavior', {
+    behavior: 'allow',
+    downloadPath: downloadDir,
+  }));
   await client.send('Page.navigate', { url: appUrl });
   await waitFor(client, 'document.title === "Continuity Stage"', 'app shell');
 
@@ -92,31 +96,28 @@ try {
     'shots workspace',
   );
 
-  // Projected-style occlusion: open settings and confirm the occlusion
-  // engine reaches a terminal state (Ready or Unavailable/legacy fallback).
-  await clickOptionalButton(client, 'Camera settings', 4000);
+  // Projected-style occlusion: switch the visible viewport appearance and
+  // confirm the engine reaches a terminal state. These controls now live in
+  // the Shots chrome instead of the Camera settings drawer.
+  await clickButton(client, 'Projected', 10000, { exact: true });
   await waitFor(
     client,
-    `document.querySelector('[data-projected-style-panel]') !== null`,
-    'projected-style panel',
-    8000,
-  );
-  await clickOptionalButton(client, 'Geometry occlusion', 2000);
-  await waitFor(
-    client,
-    `document.body.textContent.includes('Occlusion status')
-      && (
-        document.body.textContent.includes('Ready')
-        || document.body.textContent.includes('Unavailable')
-      )`,
+    `['ready', 'unavailable'].includes(
+      document.querySelector('[data-testid="scene-viewport"]')?.dataset.occlusionStatus
+    )`,
     'occlusion engine terminal state',
-    20000,
+    60000,
   );
 
   // Capture a still if shutter is available.
   if (await isButtonEnabled(client, 'Capture')) {
     await clickButton(client, 'Capture');
-    await delay(500);
+    await waitFor(
+      client,
+      `document.querySelector('[data-shots-library-thumb] img') !== null`,
+      'captured shot thumbnail',
+      30000,
+    );
   }
   await clickOptionalButton(client, 'Continue to Export', 4000);
   await clickOptionalButton(client, 'Not right now', 1500);
@@ -125,7 +126,19 @@ try {
   await clickWorkspaceTab(client, 'Export');
   await clickOptionalButton(client, 'Got it', 2000);
   await clickButton(client, 'Export Selected Shots');
-  const zipPath = await waitForDownloadedZip(downloadDir, 60000);
+  await waitFor(
+    client,
+    `document.querySelector('[data-export-last-export]') !== null
+      || document.querySelector('[data-export-error]') !== null`,
+    'package export completion',
+    180000,
+  );
+  const exportError = await evaluate(
+    client,
+    `document.querySelector('[data-export-error]')?.textContent?.trim() || ''`,
+  );
+  if (exportError) throw new Error(`Package export failed: ${exportError}`);
+  const zipPath = await waitForDownloadedZip(downloadDir, 30000);
 
   console.log(JSON.stringify({
     ok: true,
@@ -261,9 +274,11 @@ async function createCdpClient(socketUrl) {
 function buttonMatchExpression(text, { exact = false } = {}) {
   const label = JSON.stringify(text);
   if (exact) {
-    return `(candidate) => candidate.textContent?.trim() === ${label}`;
+    return `(candidate) => candidate.textContent?.trim() === ${label}
+      || candidate.getAttribute('aria-label')?.trim() === ${label}`;
   }
-  return `(candidate) => candidate.textContent?.includes(${label})`;
+  return `(candidate) => candidate.textContent?.includes(${label})
+    || candidate.getAttribute('aria-label')?.includes(${label})`;
 }
 
 async function isButtonEnabled(client, text, { exact = false } = {}) {

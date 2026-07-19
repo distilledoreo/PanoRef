@@ -1249,11 +1249,12 @@ export function SceneViewport({
       resizeObserver.disconnect();
       window.removeEventListener('resize', syncViewportSize);
       clearTransformGizmo();
+      // Render targets are owned by this WebGL context and must be released
+      // while the renderer can still dispose their GPU resources.
+      disposeOcclusionMaps();
       if (sceneRef.current) disposeScene(sceneRef.current);
       renderer.dispose();
       renderer.domElement.remove();
-      // BUG-REVERT: dispose occlusion maps after the renderer (reproduces crash).
-      disposeOcclusionMaps();
     };
   }, [clearTransformGizmo, disposeOcclusionMaps, emitFramingCamera, syncTransformGizmo, theme]);
 

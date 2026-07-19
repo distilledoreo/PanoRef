@@ -488,8 +488,9 @@ describe('ui revamp fidelity surfaces', () => {
   it('keeps Build floating controls below the mobile-safe header', () => {
     const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
 
-    // Capture-origin gizmo chrome adds one more safe-header floating panel.
-    expect(build.match(/calc\(var\(--stage-header-safe\) \+ 0\.35rem\)/g)).toHaveLength(7);
+    expect(build).toContain("'calc(var(--stage-header-safe) + 4rem)'");
+    expect(build).toContain('data-build-selection-tools');
+    expect(build).toContain('top-[calc(var(--stage-header-safe)+7.5rem)]');
     expect(build).not.toContain('top-20');
   });
 

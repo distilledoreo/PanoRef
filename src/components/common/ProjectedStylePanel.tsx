@@ -8,6 +8,7 @@ import {
 } from '../../engine/projectedStyle';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, Select, TextInput, Toggle } from './Field';
+import { CoverageOptimizerPanel } from './CoverageOptimizerPanel';
 
 const BLEND_OPTIONS: ProjectorBlendMode[] = [
   'primary_only',
@@ -19,9 +20,18 @@ const BLEND_OPTIONS: ProjectorBlendMode[] = [
 export function ProjectedStylePanel({
   project,
   onChange,
+  onSetCaptureOrigin,
+  onApplyPanoramaOrigins,
 }: {
   project: LocationProject;
   onChange: (settings: ProjectedStyleSettings) => void;
+  onSetCaptureOrigin?: (origin: LocationProject['scene']['panoOrigin']) => void;
+  onApplyPanoramaOrigins?: (
+    primaryPanoId: string,
+    secondaryPanoId: string,
+    originA: LocationProject['scene']['panoOrigin'],
+    originB: LocationProject['scene']['panoOrigin'],
+  ) => void;
 }) {
   const occlusionStatus = useContinuityStore((state) => state.projectedOcclusionStatus);
   const settings = normalizeProjectedStyleSettings(project.settings.projectedStyle);
@@ -29,9 +39,9 @@ export function ProjectedStylePanel({
   const allPanos = project.panoRefs;
   const status = projectedStyleStatusLabel(project);
   const active = resolveProjectedStylePano(project);
-  const resolved = resolveProjectors(project, settings);
-  const dualAvailable = allPanos.length >= 2;
-  const dualReady = canUseDualProjectorBlend(project, settings);
+  const secondary = settings.secondaryPanoId
+    ? project.panoRefs.find((pano) => pano.id === settings.secondaryPanoId)
+    : undefined;
 
   const update = (partial: Partial<ProjectedStyleSettings>) => {
     onChange(normalizeProjectedStyleSettings({ ...settings, ...partial }));
@@ -266,6 +276,16 @@ export function ProjectedStylePanel({
           </details>
         </div>
       )}
+
+      <CoverageOptimizerPanel
+        project={project}
+        primaryPano={active}
+        secondaryPano={secondary}
+        onSetCaptureOrigin={onSetCaptureOrigin}
+        onApplyPanoramaOrigins={active && secondary && onApplyPanoramaOrigins
+          ? (originA, originB) => onApplyPanoramaOrigins(active.id, secondary.id, originA, originB)
+          : undefined}
+      />
 
       <Field label={`Opacity (${Math.round(settings.opacity * 100)}%)`}>
         <input

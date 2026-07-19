@@ -510,10 +510,10 @@ export function BuildWorkspace() {
                     ? 'bg-accent-soft text-accent'
                     : 'bg-transparent text-secondary hover:bg-surface-muted/80 hover:text-primary'
                 }`}
-              >
-                <Navigation className="h-4 w-4" />
-                <span>Free camera</span>
-              </button>
+                >
+                  <Navigation className="h-4 w-4" />
+                  <span className="hidden sm:inline">Free camera</span>
+                </button>
               <span className="h-4 w-px shrink-0 self-center bg-border-subtle/70" aria-hidden />
               <button
                 type="button"
@@ -646,9 +646,9 @@ export function BuildWorkspace() {
 
         <div
           className="pointer-events-auto absolute left-5 z-10"
-          style={{ top: freeCameraActive
-            ? (renderDistanceOpen ? 'calc(var(--stage-header-safe) + 11rem)' : 'calc(var(--stage-header-safe) + 4rem)')
-            : 'calc(var(--stage-header-safe) + 0.35rem)' }}
+          style={{ top: renderDistanceOpen
+            ? 'calc(var(--stage-header-safe) + 11rem)'
+            : 'calc(var(--stage-header-safe) + 4rem)' }}
         >
           <AppearanceModeToggle
             value={appearance}
@@ -674,8 +674,8 @@ export function BuildWorkspace() {
 
         {selectedObjects.length > 0 && editingChromeVisible && (
           <div
-            className="pointer-events-none absolute right-5 z-10"
-            style={{ top: 'calc(var(--stage-header-safe) + 0.35rem)' }}
+            className="pointer-events-none absolute right-5 top-[calc(var(--stage-header-safe)+7.5rem)] z-10 sm:top-[calc(var(--stage-header-safe)+4rem)]"
+            data-build-selection-tools
           >
             <ContextualPanel>
               <div className="flex items-center gap-2">

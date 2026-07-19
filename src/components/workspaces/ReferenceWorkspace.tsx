@@ -37,6 +37,7 @@ export function ReferenceWorkspace() {
     setPanoView,
     updatePanoReference,
     updateProjectSettings,
+    setPanoOrigin,
     importCanonicalPano,
     removePanoReference,
     approveGrayboxForReference,
@@ -456,10 +457,15 @@ export function ReferenceWorkspace() {
             </span>
           </label>
 
-            <div className="border-t border-subtle pt-4">
+          <div className="border-t border-subtle pt-4">
             <ProjectedStylePanel
               project={project}
               onChange={(projectedStyle) => updateProjectSettings({ projectedStyle })}
+              onSetCaptureOrigin={setPanoOrigin}
+              onApplyPanoramaOrigins={(primaryPanoId, secondaryPanoId, originA, originB) => {
+                updatePanoReference(primaryPanoId, { origin: originA });
+                updatePanoReference(secondaryPanoId, { origin: originB });
+              }}
             />
           </div>
 

@@ -276,7 +276,19 @@ fill; otherwise a neutral clay/neutral fallback shows.
 | `tests/projectedStyleMath.test.ts` | Pack/unpack/decode math + blend-weight gating |
 | `tests/projectedStyleCompile.test.ts` | Real WebGL compile of every variant: single/dual, occlusion on/off, primary/secondary-only occlusion, coverage debug |
 | `tests/uiFidelity.test.ts` | Viewport stays free of build-mode globals; occlusion status flows via an `onOcclusionStatusChange` callback, not a direct store import |
-| `scripts/goal-workflow-smoke.mjs` | End-to-end: opens Projected Style panel, toggles Geometry occlusion, asserts the engine reaches `Ready` or `Unavailable` |
+| `scripts/goal-workflow-smoke.mjs` | End-to-end: switches Shots to Projected, waits for viewport occlusion to reach `ready` or `unavailable`, captures a shot, and verifies a ZIP package download |
+
+### Shared projection-coverage optimization
+
+The Projected Style panel now feeds both dual-origin search modes from one coverage-analysis engine under `src/engine/projectionCoverage/`. The engine flattens the rendered solid meshes into world-space triangles, samples them deterministically by surface area, and uses a double-sided BVH segment query to reject occluded samples. Geometric face angle and approximate equirectangular texel density distinguish usable coverage from merely visible grazing surfaces.
+
+- **Fixed-first:** evaluates the selected primary panorama origin and ranks second origins by combined usable coverage, then quality gain, overlap, and clearance.
+- **Joint-pair:** ranks all coarse origin pairs by their coverage bitset union before fine evaluation, preserving candidates that are weak alone but complementary together.
+- **Search:** automatically derives cleared candidates from upward-facing floors, evaluates 4,096 coarse samples, refines retained seeds against 24,576 fine samples, and reports the reachable union across all legal coarse candidates.
+- **Runtime isolation:** geometry extraction happens once in the panel and candidate evaluation runs in a module Web Worker so the reference controls remain responsive.
+- **Application:** results can move the next graybox capture origin or update both selected panorama-reference origins; the existing cyan/magenta/white/red coverage preview then provides the live geometry check.
+
+`tests/projectionCoverage.test.ts` locks deterministic area weighting, double-sided occlusion, marginal-versus-joint ranking, floor candidate generation, and both coarse-to-fine search modes.
 
 **Automated checks (at feature completion):**
 

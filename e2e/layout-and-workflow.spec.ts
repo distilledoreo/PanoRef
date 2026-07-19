@@ -164,6 +164,23 @@ test.describe('layout and core chrome', () => {
     expect(trayBox.y + trayBox.height).toBeLessThanOrEqual(viewport.height + 2);
     expect(trayBox.x + Math.min(trayBox.width, 40)).toBeLessThanOrEqual(viewport.width + 2);
 
+    const floatingControls = await Promise.all([
+      page.locator('[data-build-free-camera-control]').boundingBox(),
+      page.locator('[data-build-top-tools]').boundingBox(),
+      page.locator('[data-appearance-mode-toggle]').boundingBox(),
+    ]);
+    expect(floatingControls.every(Boolean)).toBe(true);
+    const overlapArea = (a: NonNullable<typeof floatingControls[number]>, b: NonNullable<typeof floatingControls[number]>) => (
+      Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
+      * Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
+    );
+    const [freeCamera, topTools, appearance] = floatingControls;
+    if (freeCamera && topTools && appearance) {
+      expect(overlapArea(freeCamera, topTools)).toBeLessThanOrEqual(1);
+      expect(overlapArea(freeCamera, appearance)).toBeLessThanOrEqual(1);
+      expect(overlapArea(topTools, appearance)).toBeLessThanOrEqual(1);
+    }
+
     if (testInfo.project.name === 'phone-390') {
       // Shortcut badges make accessible names like "3 Box".
       const boxTool = tray.getByRole('button', { name: /Box/i }).first();
@@ -451,16 +468,91 @@ test.describe('workflow path smoke', () => {
     const sceneViewport = page.locator('[data-testid="scene-viewport"]');
     await expect(sceneViewport).toHaveAttribute('data-occlusion-status', 'ready', { timeout: 60_000 });
 
+    // Persist a projected shot so Export exercises the off-screen projected
+    // renderer and its occlusion render-target cleanup as well as the live view.
+    await page.locator('[data-shots-shutter]').click();
+    await expect(page.locator('[data-shots-library-thumb] img')).toBeVisible({ timeout: 30_000 });
+    await dismissOverlays(page);
+
     // Navigate to Export. The renderer cleanup must dispose render targets
     // before the renderer; an inverted order throws and blocks this transition.
     await workspaceTab(page, 'Export').click();
     await dismissOverlays(page);
     await expect(page.locator('[data-export-package-panel]')).toBeVisible({ timeout: 30_000 });
 
+    // Package generation creates a second projected renderer. It must follow
+    // the same cleanup ordering or the download fails with a Three.js error.
+    const downloadPromise = page.waitForEvent('download', { timeout: 120_000 });
+    await page.getByRole('button', { name: /Export Selected Shots|Export \d+ Shots/i }).click();
+    const download = await downloadPromise;
+    expect(await download.failure()).toBeNull();
+    expect(download.suggestedFilename()).toMatch(/\.zip$/);
+
     const failureDetail = [
       ...pageErrors.map((message) => `pageerror: ${message}`),
       ...unhandledRejections.map((message) => `unhandledrejection: ${message}`),
     ];
     expect(failureDetail, failureDetail.join('\n')).toHaveLength(0);
+  });
+
+  test('coverage optimizer completes without overflowing the Reference drawer', async ({ page }) => {
+    test.setTimeout(180_000);
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+
+    await enterContinuityStage(page);
+    await dismissOverlays(page);
+    await workspaceTab(page, 'Build').click();
+    await dismissOverlays(page);
+    const renderBtn = page.getByRole('button', { name: /Render 360 Reference/i });
+    if (await renderBtn.isVisible().catch(() => false)) {
+      await renderBtn.click();
+      await expect(
+        page.getByRole('button', { name: /Download Graybox|Re-render after scene changes/i }).first(),
+      ).toBeVisible({ timeout: 90_000 });
+    }
+    await dismissOverlays(page);
+
+    await workspaceTab(page, 'Reference').click();
+    await dismissOverlays(page);
+    const useAttached = page.getByRole('button', { name: /Use Attached Reference/i });
+    if (await useAttached.isVisible().catch(() => false)) {
+      await useAttached.click();
+      const startChecking = page.getByRole('button', { name: 'Start checking', exact: true });
+      await startChecking.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined);
+      if (await startChecking.isVisible().catch(() => false)) await startChecking.click();
+      await dismissOverlays(page);
+    }
+    await page.getByRole('button', { name: 'More', exact: true }).click();
+    const drawer = page.getByRole('dialog', { name: 'Reference Settings' });
+    await expect(drawer).toBeVisible();
+    await page.locator('[data-coverage-optimizer] summary').click();
+
+    const layout = await drawer.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      };
+    });
+    expect(layout.left).toBeGreaterThanOrEqual(0);
+    expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth);
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+
+    await page.locator('[data-coverage-analyze]').click();
+    const result = page.locator('[data-coverage-result]');
+    await expect(result).toBeVisible({ timeout: 90_000 });
+    await expect(result).toContainText('24,576 fine samples');
+    const originB = (await result.getAttribute('data-coverage-origin-b'))
+      ?.split(',').map((value) => Number(value));
+    expect(originB).toHaveLength(3);
+    expect(originB?.every(Number.isFinite)).toBe(true);
+    // The default set has an authored ground floor; props/rooftops must not
+    // become candidate platforms.
+    expect(originB?.[1]).toBeLessThan(2.5);
+    expect(pageErrors, pageErrors.join('\n')).toHaveLength(0);
   });
 });
