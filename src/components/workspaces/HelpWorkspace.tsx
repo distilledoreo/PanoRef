@@ -228,10 +228,10 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
               'Import the styled or photographed canonical panorama.',
               'Compare it with the graybox and adjust yaw until major openings and landmarks agree.',
               'Use graybox fade to inspect alignment without losing the photographic context.',
-              'Add landmarks for story-critical positions or recurring spatial anchors.',
-              'Approve the reference before composing shots.',
+              'Approve the reference, then optionally Fill missing areas (suggest a second vantage or place it in Build).',
+              'If capture origin moved: Add second capture to blend; same origin replaces the reference instead.',
             ]} />
-            <Tip>Non-2:1 images can be imported, but 360 viewing may distort. Letterboxed 16:9 inputs are detected and extracted when possible.</Tip>
+            <Tip>Non-2:1 images can be imported, but 360 viewing may distort. Letterboxed 16:9 inputs are detected and extracted when possible. Use the on-canvas Panoramas card or Settings for imports — not only the alignment panel.</Tip>
           </DocSection>
 
           <DocSection id="shots" visible={visibleIds.has('shots')} title="Shots workspace" eyebrow="Choose cameras and motion">

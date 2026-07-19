@@ -62,7 +62,7 @@ function AlignmentIntroBody() {
         Before you move on, check that your styled pano lines up with the 3D scene.
       </p>
       <p>
-        Use the pano viewer and the alignment controls in the drawer. Fade the styled pano to see the graybox underneath, then spin yaw until things match.
+        Use the pano viewer and the Alignment panel (top-right) for fade and yaw. Open Settings for advanced tools and additional panoramas.
       </p>
       <ol className="space-y-2">
         <li className="flex gap-3"><span className="font-semibold text-accent">1</span><span>Look around the viewer.</span></li>

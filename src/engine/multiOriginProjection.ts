@@ -44,14 +44,75 @@ export function originMoveWarningMessage(styledCount: number): string {
   const n = Math.max(1, styledCount);
   return (
     `Moving the capture origin after ${n === 1 ? 'a reference panorama is' : `${n} reference panoramas are`} loaded `
-    + 'will not move those panoramas with it. Projected appearance is locked to each panorama’s own origin, '
-    + 'so the projection can look off or inaccurate relative to the new capture origin. '
-    + 'Continue only if you intend to capture additional panoramas from a new origin.'
+    + 'does not move those panoramas — each stays locked to where it was captured. '
+    + 'Use this when you want a second vantage to fill weak areas, then import that second panorama in Reference to blend.'
   );
 }
 
 export function countStyledPanoramas(project: Pick<LocationProject, 'panoRefs'>): number {
   return project.panoRefs.filter(isEligibleProjectedStylePano).length;
+}
+
+/** Capture origin is treated as "same spot" as a pano when within this distance (meters). */
+export const CAPTURE_ORIGIN_NEAR_METERS = 0.25;
+
+export type StyledImportMode = 'first' | 'replace' | 'add_secondary';
+
+export function primaryStyledPano(
+  project: Pick<LocationProject, 'panoRefs' | 'settings'>,
+): PanoReference | undefined {
+  const settings = normalizeProjectedStyleSettings(project.settings?.projectedStyle);
+  if (settings.panoId) {
+    const explicit = project.panoRefs.find(
+      (pano) => pano.id === settings.panoId && isEligibleProjectedStylePano(pano),
+    );
+    if (explicit) return explicit;
+  }
+  return project.panoRefs.find((pano) => pano.isCanonical && isEligibleProjectedStylePano(pano))
+    ?? project.panoRefs.find((pano) => isEligibleProjectedStylePano(pano));
+}
+
+export function isCaptureOriginNearPano(
+  captureOrigin: Vec3,
+  pano: Pick<PanoReference, 'origin'>,
+  nearMeters = CAPTURE_ORIGIN_NEAR_METERS,
+): boolean {
+  return length(subtract(captureOrigin, pano.origin)) <= nearMeters;
+}
+
+/**
+ * Decide whether the next styled import replaces the reference or adds a blend partner.
+ * Same capture origin as the primary styled pano → replace; moved → add secondary.
+ */
+export function resolveStyledImportMode(
+  project: Pick<LocationProject, 'panoRefs' | 'settings' | 'scene'>,
+): StyledImportMode {
+  const primary = primaryStyledPano(project);
+  if (!primary) return 'first';
+  if (isCaptureOriginNearPano(project.scene.panoOrigin, primary)) return 'replace';
+  return 'add_secondary';
+}
+
+export function styledImportActionLabel(mode: StyledImportMode): string {
+  switch (mode) {
+    case 'first':
+      return 'Import styled pano';
+    case 'replace':
+      return 'Replace reference';
+    case 'add_secondary':
+      return 'Add second capture';
+  }
+}
+
+export function styledImportActionHint(mode: StyledImportMode): string {
+  switch (mode) {
+    case 'first':
+      return 'Import a styled 360 to use as your reference.';
+    case 'replace':
+      return 'Capture hasn’t moved — this import replaces the current reference.';
+    case 'add_secondary':
+      return 'Origin moved — this import adds a blend partner at the new capture point.';
+  }
 }
 
 export function normalizeProjectorBlendMode(
@@ -178,10 +239,9 @@ export function resolveProjectors(
   if (secondary && primary && secondary.id === primary.id) {
     secondary = undefined;
   }
-  // Auto-pick a secondary when using a dual mode and none set.
+  // Auto-pick a secondary when using a dual mode and none set (never auto-pick graybox).
   if (!secondary && primary && (blendMode === 'primary_dominant' || blendMode === 'secondary_dominant' || blendMode === 'secondary_only')) {
-    secondary = eligible.find((pano) => pano.id !== primary!.id)
-      ?? all.find((pano) => pano.id !== primary!.id);
+    secondary = eligible.find((pano) => pano.id !== primary!.id);
   }
 
   if (blendMode === 'secondary_only' && !secondary) {

@@ -225,6 +225,9 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).toContain('data-reference-alignment-chrome');
     expect(reference).toContain('data-reference-yaw-slider');
     expect(reference).toContain('Graybox fade');
+    expect(reference).toContain('data-panoramas-card');
+    expect(reference).toContain('data-reference-settings-gear');
+    expect(reference).toContain('SecondCaptureForkPanel');
   });
 
   it('exposes remove controls for pano references in reference settings', () => {
@@ -235,6 +238,29 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).toContain('Remove Uploaded Pano');
     expect(reference).toContain('removePanoReference');
     expect(store).toContain('removePanoReference:');
+    expect(store).toContain('importStyledPano:');
+  });
+
+  it('keeps second-capture progress ETA markers in the fork panel', () => {
+    const fork = readFileSync(new URL('../src/components/common/SecondCaptureForkPanel.tsx', import.meta.url), 'utf8');
+    expect(fork).toContain('data-second-capture-progress');
+    expect(fork).toContain('data-second-capture-eta');
+    expect(fork).toContain('About ');
+    expect(fork).toContain('remaining');
+    expect(fork).toContain('prepareSuggestedSecondCapture');
+  });
+
+  it('simplifies projected style with a happy-path blend toggle', () => {
+    const panel = readFileSync(new URL('../src/components/common/ProjectedStylePanel.tsx', import.meta.url), 'utf8');
+    expect(panel).toContain('data-projected-blend-toggle');
+    expect(panel).toContain('data-projected-style-advanced');
+    expect(panel).toContain('Blend both captures');
+  });
+
+  it('coaches Build users after the capture origin moves for a second pano', () => {
+    const build = readFileSync(new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url), 'utf8');
+    expect(build).toContain('data-build-second-capture-coach');
+    expect(build).toContain('resolveStyledImportMode');
   });
 
   it('keeps advanced shot tools in settings rather than the camera chrome', () => {

@@ -41,6 +41,7 @@ import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
 import {
   countStyledPanoramas,
   originMoveWarningMessage,
+  resolveStyledImportMode,
   shouldWarnOnOriginMove,
 } from '../../engine/multiOriginProjection';
 import {
@@ -903,6 +904,17 @@ export function BuildWorkspace() {
               />
             </div>
           )}
+          {canUseProjectedAppearance(project)
+            && resolveStyledImportMode(project) === 'add_secondary'
+            && (
+              <div
+                data-build-second-capture-coach
+                className="max-w-xs rounded-xl border border-[var(--accent)]/35 bg-surface-overlay px-3 py-2 text-xs leading-snug text-primary shadow-card backdrop-blur"
+              >
+                Capture moved. Download Projected 360, then open Reference and choose{' '}
+                <span className="font-semibold">Add second capture</span> to blend.
+              </div>
+            )}
           {grayboxRenderError && (
             <p
               role="alert"

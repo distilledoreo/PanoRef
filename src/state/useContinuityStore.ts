@@ -25,7 +25,11 @@ import {
   DEFAULT_GRAYBOX_PANO_HEIGHT,
   DEFAULT_GRAYBOX_PANO_WIDTH,
   normalizeProjectSettings,
+  normalizeProjectedStyleSettings,
 } from '../domain/defaults';
+import {
+  resolveStyledImportMode,
+} from '../engine/multiOriginProjection';
 import {
   getCanonicalPano,
   getPanoCropSettingsForShot,
@@ -148,6 +152,8 @@ interface ContinuityStore {
   setPanoRotation: (rotation: Euler) => void;
   renderGrayboxPano: () => Promise<PanoReference>;
   importCanonicalPano: (params: { name: string; dataUrl: string; width?: number; height?: number; importNote?: string }) => void;
+  /** Origin-aware import: replace at same capture, or add a secondary blend partner when origin moved. */
+  importStyledPano: (params: { name: string; dataUrl: string; width?: number; height?: number; importNote?: string }) => 'first' | 'replace' | 'add_secondary';
   removePanoReference: (id: string) => void;
   setActivePano: (id?: string) => void;
   updatePanoReference: (id: string, updates: Partial<PanoReference>) => void;
@@ -787,6 +793,59 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       seenAlignmentIntroForPanoId: undefined,
     };
   }),
+  importStyledPano: (params) => {
+    const mode = resolveStyledImportMode(get().project);
+    if (mode === 'add_secondary') {
+      set((state) => {
+        const primary = state.project.panoRefs.find(
+          (pano) => pano.isCanonical && pano.type !== 'graybox_render',
+        ) ?? state.project.panoRefs.find((pano) => pano.type !== 'graybox_render');
+        const asset = createPanoAsset({
+          name: params.name,
+          uri: params.dataUrl,
+          width: params.width ?? DEFAULT_GRAYBOX_PANO_WIDTH,
+          height: params.height ?? DEFAULT_GRAYBOX_PANO_HEIGHT,
+          metadata: { source: 'user_import' },
+        });
+        const graybox = state.project.panoRefs.find((pano) => pano.type === 'graybox_render');
+        const pano = createPanoReference({
+          name: params.name.replace(/\.[^.]+$/, '') || 'Second Capture',
+          assetId: asset.id,
+          type: 'ai_global_reference',
+          origin: state.project.scene.panoOrigin,
+          rotation: state.project.scene.panoRotation,
+          width: asset.width ?? DEFAULT_GRAYBOX_PANO_WIDTH,
+          height: asset.height ?? DEFAULT_GRAYBOX_PANO_HEIGHT,
+          isCanonical: false,
+          sourcePanoId: graybox?.id,
+          notes: params.importNote ?? 'Imported second capture for multi-origin blend.',
+        });
+        const projectedStyle = normalizeProjectedStyleSettings(state.project.settings.projectedStyle);
+        return {
+          project: touchProject({
+            ...state.project,
+            assets: { assets: { ...state.project.assets.assets, [asset.id]: asset } },
+            panoRefs: [...state.project.panoRefs, pano],
+            settings: {
+              ...state.project.settings,
+              projectedStyle: {
+                ...projectedStyle,
+                panoId: projectedStyle.panoId ?? primary?.id,
+                secondaryPanoId: pano.id,
+                blendMode: projectedStyle.blendMode === 'primary_only'
+                  ? 'primary_dominant'
+                  : projectedStyle.blendMode,
+              },
+            },
+          }),
+          activePanoId: pano.id,
+        };
+      });
+      return 'add_secondary';
+    }
+    get().importCanonicalPano(params);
+    return mode;
+  },
   setActivePano: (id) => set({ activePanoId: id }),
   removePanoReference: (id) => set((state) => {
     const target = state.project.panoRefs.find((pano) => pano.id === id);
@@ -820,11 +879,22 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       workflow.referenceAlignmentAcceptedForPanoId = undefined;
     }
 
-    let nextProject = {
+    const projectedStyle = normalizeProjectedStyleSettings(state.project.settings.projectedStyle);
+    const nextProjectedStyle = normalizeProjectedStyleSettings({
+      ...projectedStyle,
+      panoId: projectedStyle.panoId === id ? undefined : projectedStyle.panoId,
+      secondaryPanoId: projectedStyle.secondaryPanoId === id ? undefined : projectedStyle.secondaryPanoId,
+    });
+
+    let nextProject: LocationProject = {
       ...state.project,
       panoRefs: remaining,
       assets: { assets: nextAssets },
       workflow,
+      settings: {
+        ...state.project.settings,
+        projectedStyle: nextProjectedStyle,
+      },
       shots: state.project.shots.map((shot) => {
         const linkedToRemoved = shot.linkedPanoId === id || shot.panoCrop?.panoId === id;
         if (!linkedToRemoved) return shot;

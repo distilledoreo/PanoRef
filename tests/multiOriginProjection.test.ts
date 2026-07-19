@@ -14,6 +14,7 @@ import {
   resolveProjectedProjectorAssets,
   resolveProjectorPose,
   resolveProjectors,
+  resolveStyledImportMode,
   shouldWarnOnOriginMove,
   normalizeProjectorBlendMode,
 } from '../src/engine/multiOriginProjection';
@@ -87,7 +88,59 @@ describe('multi-origin projection helpers', () => {
     expect(shouldWarnOnOriginMove(project)).toBe(true);
     expect(countStyledPanoramas(project)).toBe(2);
     expect(originMoveWarningMessage(2)).toMatch(/reference panoramas/i);
-    expect(originMoveWarningMessage(2)).toMatch(/projection/i);
+    expect(originMoveWarningMessage(2)).toMatch(/second vantage/i);
+  });
+
+  it('resolves styled import mode from capture vs primary origin', () => {
+    const { project, a } = withTwoStyledPanos();
+    project.panoRefs = [a];
+    project.scene.panoOrigin = [...a.origin];
+    expect(resolveStyledImportMode(project)).toBe('replace');
+
+    project.scene.panoOrigin = [8, 1.6, 0];
+    expect(resolveStyledImportMode(project)).toBe('add_secondary');
+
+    project.panoRefs = [];
+    expect(resolveStyledImportMode(project)).toBe('first');
+  });
+
+  it('does not auto-pick graybox as dual secondary', () => {
+    const project = createDefaultProject();
+    const styledAsset = createPanoAsset({
+      name: 's.png',
+      uri: 'data:image/png;base64,SSSS',
+      width: 4,
+      height: 2,
+    });
+    const grayAsset = createPanoAsset({
+      name: 'g.png',
+      uri: 'data:image/png;base64,GGGG',
+      width: 4,
+      height: 2,
+    });
+    project.assets.assets[styledAsset.id] = styledAsset;
+    project.assets.assets[grayAsset.id] = grayAsset;
+    const styled = createPanoReference({
+      name: 'Styled',
+      assetId: styledAsset.id,
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: true,
+    });
+    const gray = createPanoReference({
+      name: 'Gray',
+      assetId: grayAsset.id,
+      type: 'graybox_render',
+      origin: [4, 1.6, 0],
+      width: 4,
+      height: 2,
+    });
+    project.panoRefs = [styled, gray];
+    const resolved = resolveProjectors(project, { blendMode: 'primary_dominant' });
+    expect(resolved.primary?.id).toBe(styled.id);
+    expect(resolved.secondary).toBeUndefined();
   });
 
   it('resolves projector pose from the pano itself, not the scene origin', () => {

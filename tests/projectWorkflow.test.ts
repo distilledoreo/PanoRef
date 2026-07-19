@@ -8,6 +8,7 @@ import { getProjectWarnings, getShotWarnings } from '../src/engine/warnings';
 import { getLatestGrayboxPano, getPanoAsset } from '../src/domain/selectors';
 import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
 import { useContinuityStore } from '../src/state/useContinuityStore';
+import { resolveStyledImportMode } from '../src/engine/multiOriginProjection';
 
 describe('project workflow logic', () => {
   it('creates a valid default local-first project', () => {
@@ -663,6 +664,146 @@ describe('project workflow logic', () => {
     expect(state.activePanoId).toBe(graybox.id);
     expect(state.project.shots[0]?.linkedPanoId).toBe(graybox.id);
     expect(state.seenAlignmentIntroForPanoId).toBeUndefined();
+  });
+
+  it('imports a second styled pano as blend partner when capture origin moved', () => {
+    const project = createDefaultProject();
+    const firstAsset = createPanoAsset({
+      name: 'first.png',
+      uri: 'data:image/png;base64,FIRST',
+      width: 4096,
+      height: 2048,
+    });
+    const first = createPanoReference({
+      name: 'First',
+      assetId: firstAsset.id,
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4096,
+      height: 2048,
+      isCanonical: true,
+    });
+    project.assets.assets[firstAsset.id] = firstAsset;
+    project.panoRefs = [first];
+    project.scene.panoOrigin = [0, 1.6, 0];
+    project.workflow.referenceAlignmentAcceptedForPanoId = first.id;
+    project.shots[0] = { ...project.shots[0], linkedPanoId: first.id };
+    project.settings.projectedStyle = {
+      ...project.settings.projectedStyle,
+      panoId: first.id,
+      blendMode: 'primary_only',
+    };
+
+    useContinuityStore.setState({ project, activePanoId: first.id });
+
+    // Same origin → replace
+    const replaceMode = useContinuityStore.getState().importStyledPano({
+      name: 'replacement.png',
+      dataUrl: 'data:image/png;base64,REPL',
+      width: 4096,
+      height: 2048,
+    });
+    expect(replaceMode).toBe('replace');
+    let state = useContinuityStore.getState();
+    const replacement = state.project.panoRefs.find((pano) => pano.isCanonical && pano.type === 'ai_global_reference');
+    expect(replacement?.name).toBe('replacement');
+    expect(state.project.workflow.referenceAlignmentAcceptedForPanoId).toBeUndefined();
+    expect(state.project.shots[0]?.linkedPanoId).toBe(replacement?.id);
+
+    // Re-seed a stable primary, then move origin and add secondary
+    const primaryAsset = createPanoAsset({
+      name: 'primary.png',
+      uri: 'data:image/png;base64,PRIM',
+      width: 4096,
+      height: 2048,
+    });
+    const primary = createPanoReference({
+      name: 'Primary',
+      assetId: primaryAsset.id,
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4096,
+      height: 2048,
+      isCanonical: true,
+    });
+    state.project.assets.assets[primaryAsset.id] = primaryAsset;
+    state.project.panoRefs = [primary];
+    state.project.scene.panoOrigin = [6, 1.6, 0];
+    state.project.workflow.referenceAlignmentAcceptedForPanoId = primary.id;
+    state.project.shots[0] = { ...state.project.shots[0], linkedPanoId: primary.id };
+    state.project.settings.projectedStyle = {
+      ...state.project.settings.projectedStyle,
+      panoId: primary.id,
+      blendMode: 'primary_only',
+      secondaryPanoId: undefined,
+    };
+    useContinuityStore.setState({
+      project: state.project,
+      activePanoId: primary.id,
+    });
+
+    expect(resolveStyledImportMode(useContinuityStore.getState().project)).toBe('add_secondary');
+    const addMode = useContinuityStore.getState().importStyledPano({
+      name: 'second.png',
+      dataUrl: 'data:image/png;base64,SEC',
+      width: 4096,
+      height: 2048,
+    });
+    expect(addMode).toBe('add_secondary');
+    state = useContinuityStore.getState();
+    expect(state.project.panoRefs.find((pano) => pano.id === primary.id)?.isCanonical).toBe(true);
+    expect(state.project.workflow.referenceAlignmentAcceptedForPanoId).toBe(primary.id);
+    expect(state.project.shots[0]?.linkedPanoId).toBe(primary.id);
+    expect(state.project.settings.projectedStyle.secondaryPanoId).toBeTruthy();
+    expect(state.project.settings.projectedStyle.blendMode).toBe('primary_dominant');
+    expect(state.project.settings.projectedStyle.panoId).toBe(primary.id);
+  });
+
+  it('clears projectedStyle ids when removing a pano reference', () => {
+    const project = createDefaultProject();
+    const aAsset = createPanoAsset({
+      name: 'a.png',
+      uri: 'data:image/png;base64,AAAA',
+      width: 4,
+      height: 2,
+    });
+    const bAsset = createPanoAsset({
+      name: 'b.png',
+      uri: 'data:image/png;base64,BBBB',
+      width: 4,
+      height: 2,
+    });
+    const a = createPanoReference({
+      name: 'A',
+      assetId: aAsset.id,
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: true,
+    });
+    const b = createPanoReference({
+      name: 'B',
+      assetId: bAsset.id,
+      type: 'ai_global_reference',
+      origin: [5, 1.6, 0],
+      width: 4,
+      height: 2,
+    });
+    project.assets.assets[aAsset.id] = aAsset;
+    project.assets.assets[bAsset.id] = bAsset;
+    project.panoRefs = [a, b];
+    project.settings.projectedStyle = {
+      ...project.settings.projectedStyle,
+      panoId: a.id,
+      secondaryPanoId: b.id,
+      blendMode: 'primary_dominant',
+    };
+    useContinuityStore.setState({ project, activePanoId: a.id });
+    useContinuityStore.getState().removePanoReference(b.id);
+    const state = useContinuityStore.getState();
+    expect(state.project.settings.projectedStyle.secondaryPanoId).toBeUndefined();
+    expect(state.project.settings.projectedStyle.panoId).toBe(a.id);
   });
 
   it('replaces a shot viewport preview without retaining its superseded asset', () => {

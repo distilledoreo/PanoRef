@@ -356,9 +356,9 @@ export function CoverageOptimizerPanel({
             </div>
 
             <p className="text-[11px] leading-snug text-muted" data-coverage-capture-plan>
-              Capture plan: move the capture origin, then use Build → Download Projected 360
-              (with a styled pano loaded) to seed inpainting at that point — or Render clay 360 and style from scratch.
-              Existing panorama origins are never rewritten because their pixels remain tied to where they were captured.
+              Capture plan: move the capture origin, then Download Projected 360
+              (Build) or use Reference → Fill missing areas → Suggest a spot
+              to prepare a seed automatically. Existing panorama origins are never rewritten.
             </p>
           </div>
         )}

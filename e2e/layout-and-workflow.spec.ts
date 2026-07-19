@@ -523,7 +523,7 @@ test.describe('workflow path smoke', () => {
       if (await startChecking.isVisible().catch(() => false)) await startChecking.click();
       await dismissOverlays(page);
     }
-    await page.getByRole('button', { name: 'More', exact: true }).click();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
     const drawer = page.getByRole('dialog', { name: 'Reference Settings' });
     await expect(drawer).toBeVisible();
     await page.locator('[data-coverage-optimizer] summary').click();

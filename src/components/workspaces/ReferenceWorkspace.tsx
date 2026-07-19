@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, FileDown, Hand, Sparkles, Star, Trash2 } from 'lucide-react';
+import { Check, FileDown, Hand, Settings, Sparkles, Star, Trash2 } from 'lucide-react';
 import { STYLED_PANO } from '../../domain/copy';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
@@ -7,6 +7,7 @@ import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
 import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
 import { ReferenceAlignmentPanel } from '../common/ReferenceAlignmentPanel';
 import { ProjectedStylePanel } from '../common/ProjectedStylePanel';
+import { SecondCaptureForkPanel } from '../common/SecondCaptureForkPanel';
 import { StyledPanoImportButton } from '../common/StyledPanoImportButton';
 import { ContextualPanel } from '../common/ContextualPanel';
 import { Field, IconButton, TextInput } from '../common/Field';
@@ -15,6 +16,12 @@ import { PrimaryCTA } from '../common/PrimaryCTA';
 import { LandmarkStrip, PanoLandmarkMarkers } from '../viewers/PanoLandmarkOverlay';
 import { PanoViewer } from '../viewers/PanoViewer';
 import { directionToYawPitch, subtract } from '../../engine/sync';
+import {
+  countStyledPanoramas,
+  resolveStyledImportMode,
+  styledImportActionHint,
+} from '../../engine/multiOriginProjection';
+import { isEligibleProjectedStylePano } from '../../engine/projectedStyle';
 import {
   hasReferenceCandidate,
   hasStyledCanonicalPano,
@@ -29,6 +36,8 @@ export function ReferenceWorkspace() {
   const [compareOpacity, setCompareOpacity] = useState(0.65);
   const [precisionOpen, setPrecisionOpen] = useState(false);
   const [focusedLandmarkId, setFocusedLandmarkId] = useState<string | undefined>();
+  const [fillGapsOpen, setFillGapsOpen] = useState(false);
+  const [awaitingSecondCapture, setAwaitingSecondCapture] = useState(false);
   const {
     project,
     activePanoId,
@@ -38,12 +47,13 @@ export function ReferenceWorkspace() {
     updatePanoReference,
     updateProjectSettings,
     setPanoOrigin,
-    importCanonicalPano,
+    importStyledPano,
     removePanoReference,
     approveGrayboxForReference,
     acceptReferenceAlignment,
     requestAlignmentIntro,
     requestAlignmentRetryModal,
+    setWorkspace,
   } = useContinuityStore();
   const activePano = project.panoRefs.find((pano) => pano.id === activePanoId) ?? project.panoRefs.find((pano) => pano.isCanonical);
   const activeAsset = activePano ? project.assets.assets[activePano.imageAssetId] : undefined;
@@ -51,6 +61,9 @@ export function ReferenceWorkspace() {
   const grayboxAsset = getPanoAsset(project, grayboxPano);
   const canCalibrate = Boolean(activePano && activePano.type !== 'graybox_render' && grayboxPano);
   const alignmentAccepted = isReferenceAlignmentAccepted(project);
+  const styledCount = countStyledPanoramas(project);
+  const importMode = resolveStyledImportMode(project);
+  const styledPanos = project.panoRefs.filter(isEligibleProjectedStylePano);
   const primaryAction = useMemo(
     () => resolveWorkspacePrimaryAction({ project, workspace: 'reference', shotCameraFlying: false }),
     [project],
@@ -69,7 +82,7 @@ export function ReferenceWorkspace() {
 
   const importPanoImage = async (params: { name: string; dataUrl: string; width: number; height: number }) => {
     const prepared = await preparePanoImport(params.dataUrl, params.width, params.height);
-    importCanonicalPano({
+    const mode = importStyledPano({
       name: params.name,
       dataUrl: prepared.dataUrl,
       width: prepared.width,
@@ -78,6 +91,7 @@ export function ReferenceWorkspace() {
         ? `Imported from ${params.width}×${params.height} letterboxed 16:9; extracted ${prepared.width}×${prepared.height} equirectangular region.`
         : undefined,
     });
+    if (mode === 'add_secondary') setAwaitingSecondCapture(false);
   };
 
   const loadAttachedReference = async () => {
@@ -126,13 +140,28 @@ export function ReferenceWorkspace() {
     setPanoView({ yawDegrees: targetYaw, pitchDegrees: targetPitch });
   };
 
+  const openFillGapsIfEligible = () => {
+    if (styledCount === 1) {
+      setFillGapsOpen(true);
+      return true;
+    }
+    return false;
+  };
+
   const approveReference = () => {
     if (canCalibrate && needsReferenceAlignment(project) && !alignmentAccepted) {
       acceptReferenceAlignment();
+      openFillGapsIfEligible();
       return;
     }
     if (grayboxPano && !hasReferenceCandidate(project)) {
       approveGrayboxForReference();
+      return;
+    }
+    if (isReferenceReady(project) || hasStyledCanonicalPano(project)) {
+      if (!openFillGapsIfEligible()) {
+        setWorkspace('shots');
+      }
     }
   };
 
@@ -224,6 +253,89 @@ export function ReferenceWorkspace() {
               </div>
             )}
 
+            {activeAsset && hasStyledCanonicalPano(project) && !fillGapsOpen && (
+              <div
+                className="pointer-events-none absolute left-5 top-5 z-20 w-[min(18rem,calc(100%-2.5rem))]"
+                data-panoramas-card
+              >
+                <ContextualPanel className="pointer-events-auto space-y-2 shadow-soft">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-secondary">Panoramas</div>
+                      <p className="mt-0.5 text-[11px] text-secondary">
+                        {awaitingSecondCapture || importMode === 'add_secondary'
+                          ? styledImportActionHint('add_secondary')
+                          : `${styledCount} styled capture${styledCount === 1 ? '' : 's'}`}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPrecisionOpen(true)}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-subtle text-secondary transition hover:border-accent hover:text-accent"
+                      aria-label="Reference settings"
+                      data-reference-settings-gear
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <ul className="space-y-1">
+                    {styledPanos.map((pano) => (
+                      <li key={pano.id} className="truncate text-xs text-primary">
+                        <button
+                          type="button"
+                          onClick={() => setActivePano(pano.id)}
+                          className={`w-full truncate text-left ${pano.id === activePano?.id ? 'font-semibold text-accent' : 'hover:text-accent'}`}
+                        >
+                          {pano.name}
+                          {pano.isCanonical ? ' · reference' : ''}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <StyledPanoImportButton
+                    modeAware
+                    onImported={(mode) => {
+                      if (mode === 'add_secondary') setAwaitingSecondCapture(false);
+                    }}
+                  />
+                  {styledCount === 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setFillGapsOpen(true)}
+                      className="w-full text-left text-[11px] font-medium text-accent hover:underline"
+                      data-open-fill-gaps
+                    >
+                      Fill missing areas with a second vantage…
+                    </button>
+                  )}
+                </ContextualPanel>
+              </div>
+            )}
+
+            {!activeAsset && (
+              <button
+                type="button"
+                onClick={() => setPrecisionOpen(true)}
+                className="pointer-events-auto absolute right-5 top-5 z-20 inline-flex h-11 w-11 items-center justify-center rounded-lg border border-subtle bg-surface-overlay/90 text-secondary shadow-card backdrop-blur-sm transition hover:border-accent hover:text-accent"
+                aria-label="Reference settings"
+                data-reference-settings-gear
+              >
+                <Settings className="h-4 w-4" />
+              </button>
+            )}
+
+            <SecondCaptureForkPanel
+              open={fillGapsOpen}
+              onClose={() => setFillGapsOpen(false)}
+              onContinue={() => {
+                setFillGapsOpen(false);
+                setWorkspace('shots');
+              }}
+              onAwaitingImport={() => {
+                setAwaitingSecondCapture(true);
+              }}
+            />
+
             <div
               data-reference-bottom-chrome
               className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 px-3 pb-3 sm:flex-row sm:items-end sm:gap-3 sm:px-4 sm:pb-4"
@@ -291,8 +403,9 @@ export function ReferenceWorkspace() {
                       type="button"
                       onClick={() => setPrecisionOpen(true)}
                       className="shrink-0 text-[11px] font-medium text-accent hover:underline"
+                      data-reference-settings-link
                     >
-                      More
+                      Settings
                     </button>
                   </div>
                   <label className="block text-[11px] font-medium text-secondary">
@@ -365,13 +478,25 @@ export function ReferenceWorkspace() {
           )}
           <div className="space-y-2" data-pano-reference-list>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-secondary">Pano References</h3>
-            <StyledPanoImportButton
-              label={hasStyledCanonicalPano(project) ? 'Import another styled pano' : 'Import styled pano'}
-              className="w-full"
-            />
+            <StyledPanoImportButton modeAware className="w-full" />
             <p className="text-[11px] leading-snug text-muted">
-              Imports stamp the current capture origin from Build. Move the origin first when adding a second panorama for multi-origin blend.
+              {styledImportActionHint(importMode)}
+              {' '}
+              Imports stamp the current capture origin from Build.
             </p>
+            {styledCount === 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPrecisionOpen(false);
+                  setFillGapsOpen(true);
+                }}
+                className="w-full rounded-lg border border-subtle px-3 py-2 text-sm text-secondary transition hover:border-accent hover:text-accent"
+                data-drawer-fill-gaps
+              >
+                Fill missing areas…
+              </button>
+            )}
             {project.panoRefs.length === 0 && (
               <p className="text-sm text-secondary">No pano references yet.</p>
             )}
