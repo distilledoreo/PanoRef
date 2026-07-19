@@ -705,7 +705,7 @@ async function appendShotPackageToZip(
 
   throwIfAborted(signal);
   emit('packaging', 'Writing manifest…');
-  const manifest = createShotPackageManifest(project, shot);
+  const manifest = createShotPackageManifest(project, shot, resolvedRootFolder);
   zip.file(`${resolvedRootFolder}/manifest.json`, JSON.stringify(manifest, null, 2));
   finishUnit('packaging', `${getShotExportProgressLabel(shot)} packaged`);
   return manifest.files.map((file) => file.path);

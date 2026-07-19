@@ -12,16 +12,26 @@ export function getShotPrimaryLabel(shot: Shot): string {
   return shot.productionShotId ?? `Shot ${shot.shotNumber}`;
 }
 
-/** Human-facing shot label: `42A · Courtyard entrance` or `Shot 020 · Courtyard entrance`. */
-export function getShotDisplayName(shot: Shot): string {
-  const primary = getShotPrimaryLabel(shot);
-  const title = shot.name.trim();
-  if (!title) return primary;
-  return `${primary} · ${title}`;
-}
-
 export function getDefaultShotTitle(shot: Shot): string {
   return `Camera ${shot.shotNumber}`;
+}
+
+function isDefaultGeneratedShotTitle(shot: Shot, title: string): boolean {
+  const trimmed = title.trim();
+  return trimmed === getDefaultShotTitle(shot) || trimmed === `Shot ${shot.shotNumber}`;
+}
+
+/** True when the shot has a user-authored title beyond the generated default. */
+export function hasCustomShotTitle(shot: Shot): boolean {
+  const title = shot.name.trim();
+  return title.length > 0 && !isDefaultGeneratedShotTitle(shot, title);
+}
+
+/** Human-facing shot label: `42A · Courtyard entrance`, or just `42A` until a custom title exists. */
+export function getShotDisplayName(shot: Shot): string {
+  const primary = getShotPrimaryLabel(shot);
+  if (!hasCustomShotTitle(shot)) return primary;
+  return `${primary} · ${shot.name.trim()}`;
 }
 
 /** Normalize a user-edited title; empty input reverts to the default camera label. */

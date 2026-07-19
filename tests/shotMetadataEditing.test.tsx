@@ -31,4 +31,29 @@ describe('shot metadata editing', () => {
     expect(html).toContain('42A · Courtyard entrance');
     expect(html).toContain('PanoRef shot');
   });
+
+  it('shows only the production ID until a custom title is set', () => {
+    const project = createDefaultProject();
+    const shot = {
+      ...project.shots[0],
+      productionShotId: '42A',
+      name: 'Camera 001',
+    };
+    project.shots[0] = shot;
+
+    const html = renderToStaticMarkup(
+      <ShotMediaModal
+        open
+        project={project}
+        shots={project.shots}
+        shotId={shot.id}
+        onClose={() => undefined}
+        onOpenShot={() => undefined}
+        onUpdateShot={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('>42A<');
+    expect(html).not.toContain('42A · Camera 001');
+  });
 });

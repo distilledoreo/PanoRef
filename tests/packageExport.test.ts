@@ -231,7 +231,42 @@ describe('package export', () => {
     expect(result.fileName).toBe(`${getShotPackageBaseName(shot)}_package.zip`);
 
     const paths = await zipPaths(result.blob);
-    expect(paths.some((path) => path.startsWith('42a_courtyard_entrance/metadata/shot.json'))).toBe(true);
+    expect(paths.some((path) => path.startsWith('42A_courtyard_entrance/metadata/shot.json'))).toBe(true);
+  });
+
+  it('writes collision-suffixed manifests with matching root folders', async () => {
+    const project = withGrayboxAndShot('Collision Export');
+    const first = {
+      ...project.shots[0],
+      id: 'shot-a',
+      productionShotId: '42A',
+      name: 'Courtyard entrance',
+    };
+    const second = {
+      ...project.shots[0],
+      id: 'shot-b',
+      productionShotId: '42A',
+      name: 'Courtyard entrance',
+    };
+    project.shots = [first, second];
+
+    const result = await buildMultiShotPackage(project, project.shots);
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer());
+    const secondManifestPath = '42A_courtyard_entrance_2/manifest.json';
+    const manifestJson = await zip.file(secondManifestPath)?.async('string');
+    expect(manifestJson).toBeTruthy();
+
+    const manifest = JSON.parse(manifestJson!) as {
+      rootFolder: string;
+      files: Array<{ path: string }>;
+    };
+    expect(manifest.rootFolder).toBe('42A_courtyard_entrance_2');
+    expect(manifest.files.length).toBeGreaterThan(0);
+    for (const file of manifest.files) {
+      expect(file.path.startsWith('42A_courtyard_entrance_2/')).toBe(true);
+    }
+    expect(result.manifestPaths.every((path) => path.startsWith('42A_courtyard_entrance'))).toBe(true);
+    expect(result.manifestPaths.some((path) => path.startsWith('42A_courtyard_entrance_2/'))).toBe(true);
   });
 
   it('builds a single-shot package zip', async () => {

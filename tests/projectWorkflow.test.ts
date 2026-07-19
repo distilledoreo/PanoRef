@@ -334,21 +334,21 @@ describe('project workflow logic', () => {
 
   it('keeps priority export output paths in capped preview lists', () => {
     const paths = [
-      'shot_001_camera_001/inputs/viewport_clay.png',
-      'shot_001_camera_001/inputs/global_reference.png',
-      'shot_001_camera_001/inputs/global_graybox.png',
-      'shot_001_camera_001/outputs/ai_result_frame.png',
-      'shot_001_camera_001/metadata/shot.json',
+      'shot_001/inputs/viewport_clay.png',
+      'shot_001/inputs/global_reference.png',
+      'shot_001/inputs/global_graybox.png',
+      'shot_001/outputs/ai_result_frame.png',
+      'shot_001/metadata/shot.json',
     ];
 
     expect(selectExportPathPreview(paths, 3)).toEqual([
-      'shot_001_camera_001/inputs/viewport_clay.png',
-      'shot_001_camera_001/inputs/global_reference.png',
-      'shot_001_camera_001/outputs/ai_result_frame.png',
+      'shot_001/inputs/viewport_clay.png',
+      'shot_001/inputs/global_reference.png',
+      'shot_001/outputs/ai_result_frame.png',
     ]);
     expect(selectExportPathPreview(paths, 2)).toEqual([
-      'shot_001_camera_001/inputs/viewport_clay.png',
-      'shot_001_camera_001/outputs/ai_result_frame.png',
+      'shot_001/inputs/viewport_clay.png',
+      'shot_001/outputs/ai_result_frame.png',
     ]);
   });
 
@@ -372,12 +372,12 @@ describe('project workflow logic', () => {
 
     const manifest = createShotPackageManifest(project, shot);
     const paths = manifest.files.map((file) => file.path);
-    expect(paths).toContain('shot_001_camera_001/inputs/viewport_clay_motion.mp4');
-    expect(paths).toContain('shot_001_camera_001/inputs/camera_move/clay_start.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/camera_move/clay_mid.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/camera_move/clay_end.png');
-    expect(paths).toContain('shot_001_camera_001/metadata/camera_keyframes.json');
-    expect(paths).toContain('shot_001_camera_001/metadata/camera_move_reference_frames.json');
+    expect(paths).toContain('shot_001/inputs/viewport_clay_motion.mp4');
+    expect(paths).toContain('shot_001/inputs/camera_move/clay_start.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/clay_mid.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/clay_end.png');
+    expect(paths).toContain('shot_001/metadata/camera_keyframes.json');
+    expect(paths).toContain('shot_001/metadata/camera_move_reference_frames.json');
   });
 
   it('lists camera move MP4 in the manifest from keyframes even without a pre-exported asset', () => {
@@ -399,7 +399,7 @@ describe('project workflow logic', () => {
     });
 
     const manifest = createShotPackageManifest(project, shot);
-    expect(manifest.files.map((file) => file.path)).toContain('shot_001_camera_001/inputs/viewport_clay_motion.mp4');
+    expect(manifest.files.map((file) => file.path)).toContain('shot_001/inputs/viewport_clay_motion.mp4');
   });
 
   it('adds cubemap references to the manifest when a camera move has a linked pano', () => {
@@ -438,17 +438,17 @@ describe('project workflow logic', () => {
     });
 
     const paths = createShotPackageManifest(project, shot).files.map((file) => file.path);
-    expect(paths).toContain('shot_001_camera_001/inputs/cubemap/px.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/cubemap/nx.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/cubemap/py.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/cubemap/ny.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/cubemap/pz.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/cubemap/nz.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/cubemap/cubemap_stitched.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/camera_move/clay_start.png');
-    expect(paths).not.toContain('shot_001_camera_001/metadata/camera_move_cubemap_visibility.json');
-    expect(paths).not.toContain('shot_001_camera_001/inputs/camera_move/cubemap_visible/start_stitched.png');
-    expect(paths).not.toContain('shot_001_camera_001/inputs/camera_move/pano_reference_start.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/px.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/nx.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/py.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/ny.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/pz.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/nz.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/cubemap_stitched.png');
+    expect(paths).toContain('shot_001/inputs/camera_move/clay_start.png');
+    expect(paths).not.toContain('shot_001/metadata/camera_move_cubemap_visibility.json');
+    expect(paths).not.toContain('shot_001/inputs/camera_move/cubemap_visible/start_stitched.png');
+    expect(paths).not.toContain('shot_001/inputs/camera_move/pano_reference_start.png');
   });
 
   it('includes cubemap with full pano even without camera keyframes', () => {
@@ -476,9 +476,9 @@ describe('project workflow logic', () => {
     shot.exportSettings.includeFullPano = true;
 
     const paths = createShotPackageManifest(project, shot).files.map((file) => file.path);
-    expect(paths).toContain('shot_001_camera_001/inputs/cubemap/pz.png');
-    expect(paths).toContain('shot_001_camera_001/inputs/cubemap/cubemap_stitched.png');
-    expect(paths).not.toContain('shot_001_camera_001/inputs/camera_move/clay_start.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/pz.png');
+    expect(paths).toContain('shot_001/inputs/cubemap/cubemap_stitched.png');
+    expect(paths).not.toContain('shot_001/inputs/camera_move/clay_start.png');
   });
 
   it('never lists cubemap_visible paths in the package manifest', () => {

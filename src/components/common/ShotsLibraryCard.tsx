@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Download, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
-import { getShotPrimaryLabel } from '../../domain/shotIdentity';
+import { getShotPrimaryLabel, hasCustomShotTitle } from '../../domain/shotIdentity';
 import { resolveShotMedia, resolveShotMediaPoster } from '../../domain/shotMedia';
 import { LocationProject, ProjectAsset, Shot } from '../../domain/types';
 import { downloadDataUrl } from '../../engine/projectIO';
@@ -12,7 +12,6 @@ export function ShotsLibraryCard({
   selected,
   landed,
   canDelete,
-  framePreviewSrc,
   onOpenMedia,
   onOpenShot,
   onRename,
@@ -23,7 +22,6 @@ export function ShotsLibraryCard({
   selected: boolean;
   landed: boolean;
   canDelete: boolean;
-  framePreviewSrc?: string;
   onOpenMedia: (shotId: string) => void;
   onOpenShot: (shotId: string) => void;
   onRename: (shotId: string, updates: { productionShotId?: string; name: string }) => void;
@@ -36,6 +34,7 @@ export function ShotsLibraryCard({
   const menuRef = useRef<HTMLDivElement>(null);
   const poster = resolveShotMediaPoster(project, shot);
   const primaryLabel = getShotPrimaryLabel(shot);
+  const customTitle = hasCustomShotTitle(shot);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -95,7 +94,6 @@ export function ShotsLibraryCard({
         <ShotCameraRollThumbnail
           project={project}
           shot={shot}
-          overrideSrc={framePreviewSrc}
           className="h-20 w-28 object-cover"
           showMediaCount
           showCapturedBadge
@@ -105,13 +103,22 @@ export function ShotsLibraryCard({
 
       <div className="space-y-0.5 bg-zinc-950/90 px-2 py-1.5">
         {renaming ? (
-          <div className="space-y-1" onClick={(event) => event.stopPropagation()}>
+          <form
+            className="space-y-1"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              commitRename();
+            }}
+          >
             <input
               value={draftProductionId}
               onChange={(event) => setDraftProductionId(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter') commitRename();
-                if (event.key === 'Escape') cancelRename();
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelRename();
+                }
               }}
               placeholder="Production ID"
               className="w-full rounded border border-white/15 bg-black/40 px-1.5 py-0.5 text-[10px] text-white outline-none focus:border-[var(--accent)]"
@@ -121,14 +128,30 @@ export function ShotsLibraryCard({
               value={draftTitle}
               onChange={(event) => setDraftTitle(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter') commitRename();
-                if (event.key === 'Escape') cancelRename();
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelRename();
+                }
               }}
-              onBlur={commitRename}
               className="w-full rounded border border-white/15 bg-black/40 px-1.5 py-0.5 text-[10px] text-white outline-none focus:border-[var(--accent)]"
               aria-label="Shot title"
             />
-          </div>
+            <div className="flex gap-1">
+              <button
+                type="submit"
+                className="flex-1 rounded bg-[var(--accent)] px-2 py-0.5 text-[10px] font-semibold text-white"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={cancelRename}
+                className="flex-1 rounded border border-white/15 px-2 py-0.5 text-[10px] font-semibold text-white/80"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
         ) : (
           <button
             type="button"
@@ -138,7 +161,9 @@ export function ShotsLibraryCard({
           >
             <div className="min-w-0 flex-1">
               <p className="truncate text-[11px] font-semibold text-white">{primaryLabel}</p>
-              <p className="truncate text-[10px] text-white/65">{shot.name}</p>
+              {customTitle && (
+                <p className="truncate text-[10px] text-white/65">{shot.name}</p>
+              )}
             </div>
             <Pencil className="mt-0.5 h-3 w-3 shrink-0 text-white/35 opacity-0 transition group-hover:opacity-100" />
           </button>

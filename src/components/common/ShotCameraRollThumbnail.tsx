@@ -4,6 +4,7 @@ import {
   hasShotCapture,
   resolveShotMedia,
   resolveShotMediaPoster,
+  shotHasCameraMoveVideo,
 } from '../../domain/shotMedia';
 import { LocationProject, Shot } from '../../domain/types';
 
@@ -24,6 +25,7 @@ export function ShotCameraRollThumbnail({
   project,
   shot,
   overrideSrc,
+  allowLivePreview = false,
   className,
   compact,
   showMediaCount,
@@ -32,8 +34,9 @@ export function ShotCameraRollThumbnail({
 }: {
   project: LocationProject;
   shot: Shot;
-  /** Live preview from the viewfinder — only used when no stored capture exists. */
+  /** Live preview from the viewfinder — only shown when allowLivePreview is true. */
   overrideSrc?: string;
+  allowLivePreview?: boolean;
   className?: string;
   compact?: boolean;
   showMediaCount?: boolean;
@@ -43,9 +46,10 @@ export function ShotCameraRollThumbnail({
   const poster = resolveShotMediaPoster(project, shot);
   const mediaCount = resolveShotMedia(project, shot).length;
   const hasCapture = hasShotCapture(project, shot);
+  const hasCameraMove = shotHasCameraMoveVideo(project, shot);
   const src = poster?.kind === 'image' ? poster.asset.uri : undefined;
   const videoSrc = poster?.kind === 'video' ? poster.asset.uri : undefined;
-  const previewSrc = !hasCapture ? overrideSrc : undefined;
+  const previewSrc = allowLivePreview && !hasCapture ? overrideSrc : undefined;
   const sizeClassName = className ?? 'h-full w-full';
 
   return (
@@ -54,9 +58,15 @@ export function ShotCameraRollThumbnail({
       data-shot-camera-roll-thumb
       data-shot-has-capture={hasCapture ? 'true' : 'false'}
     >
-      {previewSrc || src ? (
+      {src ? (
         <img
-          src={previewSrc ?? src}
+          src={src}
+          alt=""
+          className="h-full w-full object-cover"
+        />
+      ) : previewSrc ? (
+        <img
+          src={previewSrc}
           alt=""
           className="h-full w-full object-cover"
         />
@@ -72,7 +82,7 @@ export function ShotCameraRollThumbnail({
         <NoCapturePlaceholder compact={compact} />
       )}
 
-      {poster?.kind === 'video' && (
+      {hasCameraMove && (
         <span
           className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25"
           aria-hidden

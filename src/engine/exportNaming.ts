@@ -1,7 +1,7 @@
-import { getShotDisplayName } from '../domain/shotIdentity';
+import { getShotDisplayName, hasCustomShotTitle } from '../domain/shotIdentity';
 import { Shot } from '../domain/types';
 
-/** Sanitize a path/filename segment for export packages. */
+/** Sanitize descriptive title segments for export packages. */
 export function sanitizeExportSegment(value: string): string {
   const normalized = value
     .normalize('NFKD')
@@ -14,17 +14,30 @@ export function sanitizeExportSegment(value: string): string {
   return normalized || 'untitled';
 }
 
+/** Sanitize production IDs while preserving meaningful casing such as 42A or SC_120. */
+export function sanitizeProductionIdSegment(value: string): string {
+  const normalized = value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/[^\w\-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+  return normalized || 'untitled';
+}
+
 /** Production-aware identifier used in folder and ZIP names. */
 export function getShotDisplayIdentifier(shot: Shot): string {
   return shot.productionShotId?.trim() || `shot_${shot.shotNumber}`;
 }
 
-/** Root folder / package base name, optionally suffixed with the descriptive title. */
+/** Root folder / package base name, optionally suffixed with a custom descriptive title. */
 export function getShotPackageBaseName(shot: Shot): string {
-  const identifier = sanitizeExportSegment(getShotDisplayIdentifier(shot));
-  const title = shot.name.trim();
-  if (!title) return identifier;
-  return `${identifier}_${sanitizeExportSegment(title)}`;
+  const identifier = shot.productionShotId?.trim()
+    ? sanitizeProductionIdSegment(shot.productionShotId)
+    : `shot_${shot.shotNumber}`;
+  if (!hasCustomShotTitle(shot)) return identifier;
+  return `${identifier}_${sanitizeExportSegment(shot.name)}`;
 }
 
 export function getShotExportProgressLabel(shot: Shot): string {

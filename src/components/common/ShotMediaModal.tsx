@@ -82,8 +82,20 @@ export function ShotMediaModal({
     if (!open) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+
       if (event.key === 'Escape') {
         event.preventDefault();
+        if (editingProductionId) {
+          setDraftProductionId(shot?.productionShotId ?? '');
+          setEditingProductionId(false);
+          return;
+        }
+        if (editingTitle) {
+          setDraftTitle(shot?.name ?? '');
+          setEditingTitle(false);
+          return;
+        }
         pauseVideo();
         onClose();
         return;
@@ -100,7 +112,16 @@ export function ShotMediaModal({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [goToShot, onClose, open, pauseVideo]);
+  }, [
+    editingProductionId,
+    editingTitle,
+    goToShot,
+    onClose,
+    open,
+    pauseVideo,
+    shot?.name,
+    shot?.productionShotId,
+  ]);
 
   const saveProductionId = () => {
     if (!shot) return;
@@ -308,6 +329,12 @@ export function ShotMediaModal({
   return createPortal(modal, document.body);
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
+
 function FieldRow({
   label,
   editing,
@@ -337,10 +364,16 @@ function FieldRow({
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') onSave();
-            if (event.key === 'Escape') onCancel();
+            event.stopPropagation();
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onSave();
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancel();
+            }
           }}
-          onBlur={onSave}
           placeholder={placeholder}
           className="w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-[var(--accent)]"
           autoFocus

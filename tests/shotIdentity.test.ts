@@ -39,6 +39,18 @@ describe('shot identity', () => {
     expect(getShotDisplayName(shot)).toBe('Shot 020 · Courtyard entrance');
   });
 
+  it('omits generated default titles from display names', () => {
+    const project = createDefaultProject();
+    const shot = {
+      ...project.shots[0],
+      shotNumber: '020',
+      productionShotId: '42A',
+      name: 'Camera 020',
+    };
+
+    expect(getShotDisplayName(shot)).toBe('42A');
+  });
+
   it('normalizes empty titles back to the default camera label', () => {
     const project = createDefaultProject();
     const shot = { ...project.shots[0], shotNumber: '020' };

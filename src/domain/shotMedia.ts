@@ -59,12 +59,29 @@ export function resolveShotMedia(project: LocationProject, shot: Shot): ShotMedi
   return items;
 }
 
-/** First camera-roll media item suitable for reel thumbnails. */
+const posterMediaPriority: ShotMediaSource[] = [
+  'captured_still',
+  'ai_result',
+  'final_frame',
+  'pano_crop',
+  'camera_move',
+];
+
+/** Image-first poster for reel thumbnails; modal playback order stays in resolveShotMedia(). */
 export function resolveShotMediaPoster(
   project: LocationProject,
   shot: Shot,
 ): ShotMediaItem | undefined {
-  return resolveShotMedia(project, shot)[0];
+  const items = resolveShotMedia(project, shot);
+  for (const source of posterMediaPriority) {
+    const item = items.find((candidate) => candidate.source === source);
+    if (item) return item;
+  }
+  return undefined;
+}
+
+export function shotHasCameraMoveVideo(project: LocationProject, shot: Shot): boolean {
+  return resolveShotMedia(project, shot).some((item) => item.source === 'camera_move');
 }
 
 export function getShotMediaCount(project: LocationProject, shot: Shot): number {

@@ -41,6 +41,23 @@ describe('resolveShotMedia', () => {
     ]);
     expect(media[0].kind).toBe('video');
     expect(media[1].kind).toBe('image');
+    expect(resolveShotMediaPoster(project, shot)?.source).toBe('captured_still');
+  });
+
+  it('falls back to video posters only when no still image exists', () => {
+    const project = createDefaultProject();
+    const shot = project.shots[0];
+    const videoAsset = createVideoAsset({
+      name: 'camera_move.mp4',
+      uri: 'data:video/mp4;base64,VIDEO',
+      mimeType: 'video/mp4',
+      width: 1920,
+      height: 1080,
+    });
+    project.assets.assets[videoAsset.id] = videoAsset;
+    shot.assets.cameraMoveVideoAssetId = videoAsset.id;
+
+    expect(resolveShotMediaPoster(project, shot)?.source).toBe('camera_move');
   });
 
   it('excludes linked and canonical panoramas', () => {

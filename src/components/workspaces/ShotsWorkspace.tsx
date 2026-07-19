@@ -995,7 +995,6 @@ export function ShotsWorkspace() {
                       selected={selected}
                       landed={landed}
                       canDelete={canDelete}
-                      framePreviewSrc={framePreviewByShotId[shot.id]}
                       onOpenMedia={setMediaModalShotId}
                       onOpenShot={handleOpenShotFromLibrary}
                       onRename={handleLibraryRename}
@@ -1172,6 +1171,7 @@ export function ShotsWorkspace() {
                   project={project}
                   shot={libraryThumbShot}
                   overrideSrc={framePreviewByShotId[libraryThumbShot.id]}
+                  allowLivePreview
                   className="h-full w-full object-cover"
                   compact
                 />
