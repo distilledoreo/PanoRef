@@ -32,12 +32,16 @@ import {
 } from '../../engine/cameraKeyframes';
 import { downloadBlob, downloadDataUrl } from '../../engine/projectIO';
 import {
+  canUseRenderMp4Export,
   getSupportedCameraMoveMp4MimeType,
   renderShotCameraMoveMp4,
   renderShotFrame,
   renderShotProjectedFrame,
   renderViewportProjected,
+  type CameraMoveExportProgress,
 } from '../../engine/renderers';
+import type { VideoResolutionPresetId } from '../../engine/videoPresets';
+import { VIDEO_RESOLUTION_PRESETS } from '../../engine/videoPresets';
 import { getCameraMoveReferenceFrames } from '../../engine/cameraKeyframes';
 import { isShotFramingAccepted } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
@@ -128,9 +132,13 @@ export function ShotsWorkspace() {
   const [cameraMovePreviewUrl, setCameraMovePreviewUrl] = useState<string | undefined>();
   const [isExportingCameraMove, setIsExportingCameraMove] = useState(false);
   const [cameraMoveProgress, setCameraMoveProgress] = useState(0);
+  const [cameraMoveProgressMessage, setCameraMoveProgressMessage] = useState('Preparing scene');
   const [cameraMoveError, setCameraMoveError] = useState<string | undefined>();
   const [snapshotError, setSnapshotError] = useState<string | undefined>();
   const cameraMoveAbortRef = useRef<{ cancelled: boolean; abort?: () => void }>({ cancelled: false });
+  const [videoExportMode, setVideoExportMode] = useState<'render' | 'quickPreview'>('render');
+  const [videoResolutionPreset, setVideoResolutionPreset] = useState<VideoResolutionPresetId>('1080p');
+  const [canRenderMp4, setCanRenderMp4] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -185,6 +193,51 @@ export function ShotsWorkspace() {
     ? project.assets.assets[selectedShot.assets.cameraMoveVideoAssetId]
     : undefined;
   const supportedMp4MimeType = getSupportedCameraMoveMp4MimeType();
+  const canExportVideo = canRenderMp4 === true || Boolean(supportedMp4MimeType);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCanRenderMp4(null);
+    void canUseRenderMp4Export(videoResolutionPreset).then((supported) => {
+      if (!cancelled) setCanRenderMp4(supported);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [videoResolutionPreset]);
+
+  // Keep the mode selector honest: if Render is confirmed unsupported for the current preset,
+  // switch the control to Quick Preview when that path exists (never silently encode as preview).
+  useEffect(() => {
+    if (videoExportMode === 'render' && canRenderMp4 === false && supportedMp4MimeType) {
+      setVideoExportMode('quickPreview');
+    }
+  }, [canRenderMp4, supportedMp4MimeType, videoExportMode]);
+
+  const selectedExportModeAvailable = videoExportMode === 'render'
+    ? canRenderMp4 === true
+    : Boolean(supportedMp4MimeType);
+  const applyExportProgress = useCallback((
+    progress: number | CameraMoveExportProgress,
+    mapProgress: (value: number) => number = (value) => value,
+  ) => {
+    if (cameraMoveAbortRef.current.cancelled) return;
+    if (typeof progress === 'number') {
+      setCameraMoveProgress(mapProgress(progress));
+      return;
+    }
+    setCameraMoveProgress(mapProgress(progress.progress));
+    setCameraMoveProgressMessage(progress.message);
+  }, []);
+
+  const cancelCameraMoveExport = useCallback(() => {
+    cameraMoveAbortRef.current.cancelled = true;
+    cameraMoveAbortRef.current.abort?.();
+    setIsExportingCameraMove(false);
+    setCameraMoveProgress(0);
+    setCameraMoveProgressMessage('Preparing scene');
+    setCameraMoveError('MP4 export was cancelled.');
+  }, []);
 
   const setShotFramePreview = useCallback((shotId: string, dataUrl: string) => {
     setFramePreviewByShotId((current) => ({ ...current, [shotId]: dataUrl }));
@@ -264,8 +317,7 @@ export function ShotsWorkspace() {
 
   const exportCameraMoveVideo = useCallback(async () => {
     if (!selectedShot) return;
-    const mimeType = getSupportedCameraMoveMp4MimeType();
-    if (!mimeType) {
+    if (!canExportVideo) {
       setCameraMoveError('MP4 export is not supported in this browser. Try Chrome or Edge.');
       return;
     }
@@ -274,27 +326,46 @@ export function ShotsWorkspace() {
       return;
     }
 
+    if (videoExportMode === 'render' && canRenderMp4 !== true) {
+      setCameraMoveError(
+        `Render MP4 is unavailable for ${videoResolutionPreset === '4k' ? '4K' : '1080p'} in this browser. `
+        + 'Choose Quick Preview, or try Chrome/Edge with a supported resolution.',
+      );
+      return;
+    }
+    if (videoExportMode === 'quickPreview' && !supportedMp4MimeType) {
+      setCameraMoveError('Quick Preview MP4 is not supported in this browser.');
+      return;
+    }
+
+    const preferredMode = videoExportMode;
+
     const abortController = new AbortController();
     cameraMoveAbortRef.current = { cancelled: false, abort: () => abortController.abort() };
     setIsExportingCameraMove(true);
     setCameraMoveProgress(0);
+    setCameraMoveProgressMessage('Preparing scene');
     setCameraMoveError(undefined);
 
     try {
       // Progress splits: clay motion 0–55%, projected motion 55–100% when dual.
       const dualProjectedVideo = canUseProjectedAppearance(project);
       const video = await renderShotCameraMoveMp4(project, selectedShot, {
-        mimeType,
+        mode: preferredMode,
+        resolutionPreset: videoResolutionPreset,
         frameRate: 30,
         appearance: 'clay',
+        // Persist clay in the shot library as a data URL; downloads use the blob.
+        includeDataUrl: true,
         signal: abortController.signal,
         onProgress: (progress) => {
-          if (!cameraMoveAbortRef.current.cancelled) {
-            setCameraMoveProgress(dualProjectedVideo ? progress * 0.55 : progress);
-          }
+          applyExportProgress(progress, (value) => (dualProjectedVideo ? value * 0.55 : value));
         },
       });
       if (cameraMoveAbortRef.current.cancelled) return;
+      if (!video.dataUrl) {
+        throw new Error('Camera move export did not produce a persistable video URI.');
+      }
       const asset = attachCameraMoveVideoToShot(selectedShot.id, {
         name: cameraMoveFileName,
         dataUrl: video.dataUrl,
@@ -303,28 +374,33 @@ export function ShotsWorkspace() {
         height: video.height,
         durationSeconds: video.durationSeconds,
         frameRate: video.frameRate,
+        encodeMode: video.encodeMode ?? preferredMode,
+        codecString: video.codecString,
+        frameCount: video.frameCount,
+        resolutionPreset: videoResolutionPreset,
       });
       setCameraMovePreviewUrl(asset.uri);
-      // Download from the MediaRecorder blob — multi‑MB data: URLs fail as anchor hrefs.
+      // Download from the encoded blob — multi‑MB data: URLs fail as anchor hrefs.
       downloadBlob(video.blob, asset.name || cameraMoveFileName);
 
       if (dualProjectedVideo && !cameraMoveAbortRef.current.cancelled) {
         try {
           const projectedVideo = await renderShotCameraMoveMp4(project, selectedShot, {
-            mimeType,
+            mode: preferredMode,
+            resolutionPreset: videoResolutionPreset,
             frameRate: 30,
             appearance: 'projected',
+            occlusionFilter: preferredMode === 'render' ? 'fast' : 'soft',
+            includeDataUrl: false,
             signal: abortController.signal,
             onProgress: (progress) => {
-              if (!cameraMoveAbortRef.current.cancelled) {
-                setCameraMoveProgress(0.55 + progress * 0.45);
-              }
+              applyExportProgress(progress, (value) => 0.55 + value * 0.45);
             },
           });
           if (cameraMoveAbortRef.current.cancelled) return;
           const projectedName = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '_projected.mp4');
           downloadBlob(projectedVideo.blob, projectedName);
-          // Optional still contact sheet companions.
+          // Optional still contact sheet companions (still export resolution).
           const frames = getCameraMoveReferenceFrames(selectedShot.cameraKeyframes);
           const base = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '');
           for (const frame of frames) {
@@ -337,6 +413,7 @@ export function ShotsWorkspace() {
             downloadDataUrl(projected.dataUrl, `${base}_projected_${frame.id}.png`);
           }
           setCameraMoveProgress(1);
+          setCameraMoveProgressMessage('Complete');
         } catch {
           // Soft-fail projected companions; clay MP4 already succeeded.
         }
@@ -350,7 +427,18 @@ export function ShotsWorkspace() {
         setIsExportingCameraMove(false);
       }
     }
-  }, [attachCameraMoveVideoToShot, cameraMoveFileName, project, selectedShot]);
+  }, [
+    applyExportProgress,
+    attachCameraMoveVideoToShot,
+    cameraMoveFileName,
+    canExportVideo,
+    canRenderMp4,
+    project,
+    selectedShot,
+    supportedMp4MimeType,
+    videoExportMode,
+    videoResolutionPreset,
+  ]);
 
   useEffect(() => {
     if (!selectedShot) return;
@@ -738,7 +826,7 @@ export function ShotsWorkspace() {
         : videoPhase === 'stop'
           ? 'Stop and set end'
           : isExportingCameraMove
-            ? `Exporting ${Math.round(cameraMoveProgress * 100)}%`
+            ? `${cameraMoveProgressMessage} · ${Math.round(cameraMoveProgress * 100)}%`
             : 'Export video')
       : 'Capture';
 
@@ -747,7 +835,7 @@ export function ShotsWorkspace() {
       ? 'Pose the start, then press record'
       : videoPhase === 'stop'
         ? 'Fly to the end pose, then press stop'
-        : 'Export the graybox move as MP4')
+        : 'Render a smooth 1080p30 MP4 (or Quick Preview)')
     : 'Capture adds a shot — viewfinder stays live';
 
   const captureFlashLabel = captureMode === 'video'
@@ -1010,7 +1098,7 @@ export function ShotsWorkspace() {
             </div>
           )}
 
-          {captureMode === 'video' && (!supportedMp4MimeType || cameraMoveError) && (
+          {captureMode === 'video' && (!canExportVideo || cameraMoveError) && (
             <p
               role="alert"
               data-shots-camera-move-status
@@ -1018,6 +1106,28 @@ export function ShotsWorkspace() {
             >
               {cameraMoveError ?? 'MP4 export is not supported in this browser. Try Chrome or Edge.'}
             </p>
+          )}
+
+          {captureMode === 'video' && isExportingCameraMove && (
+            <div
+              data-shots-camera-move-progress
+              className="pointer-events-auto flex max-w-md flex-col items-center gap-2 rounded-lg border border-white/15 bg-black/65 px-3 py-2 text-center shadow-soft backdrop-blur-sm"
+            >
+              <p className="text-xs text-white/85">{cameraMoveProgressMessage}</p>
+              <div className="h-1.5 w-48 overflow-hidden rounded-full bg-white/15">
+                <div
+                  className="h-full rounded-full bg-white/80 transition-[width]"
+                  style={{ width: `${Math.round(cameraMoveProgress * 100)}%` }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={cancelCameraMoveExport}
+                className="text-[11px] font-semibold uppercase tracking-wide text-white/70 underline-offset-2 hover:text-white hover:underline"
+              >
+                Cancel
+              </button>
+            </div>
           )}
 
           {captureMode === 'still' && snapshotError && (
@@ -1060,7 +1170,7 @@ export function ShotsWorkspace() {
             <button
               type="button"
               onClick={onCapture}
-              disabled={captureMode === 'video' && videoPhase === 'export' && (isExportingCameraMove || !supportedMp4MimeType)}
+              disabled={captureMode === 'video' && videoPhase === 'export' && (isExportingCameraMove || !canExportVideo)}
               className="group relative flex h-[4.75rem] w-[4.75rem] shrink-0 items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-50"
               aria-label={captureLabel}
               data-shots-shutter
@@ -1280,15 +1390,56 @@ export function ShotsWorkspace() {
                     onChange={(event) => changeCameraMoveDuration(Number(event.target.value))}
                   />
                 </Field>
-                <IconButton
-                  onClick={() => void exportCameraMoveVideo()}
-                  disabled={!cameraMoveReady || isExportingCameraMove || !supportedMp4MimeType}
-                  className="w-full"
-                >
-                  <Film className="h-4 w-4" />
-                  {isExportingCameraMove ? `Exporting ${Math.round(cameraMoveProgress * 100)}%` : 'Export MP4'}
-                </IconButton>
-                {!supportedMp4MimeType && (
+                <Field label="Export mode" hint="Render MP4 is fixed-step H.264 for Resolve. Quick Preview is real-time and may drop frames.">
+                  <Select
+                    value={videoExportMode}
+                    onChange={(event) => setVideoExportMode(event.target.value as 'render' | 'quickPreview')}
+                  >
+                    <option value="render" disabled={canRenderMp4 !== true}>
+                      Render MP4{canRenderMp4 === true ? '' : canRenderMp4 === false ? ' (unavailable)' : '…'}
+                    </option>
+                    <option value="quickPreview" disabled={!supportedMp4MimeType}>
+                      Quick Preview{supportedMp4MimeType ? '' : ' (unavailable)'}
+                    </option>
+                  </Select>
+                </Field>
+                <Field label="Video resolution" hint="Stills stay at shot resolution. Video defaults to 1080p30.">
+                  <Select
+                    value={videoResolutionPreset}
+                    onChange={(event) => setVideoResolutionPreset(event.target.value as VideoResolutionPresetId)}
+                  >
+                    <option value="1080p">{VIDEO_RESOLUTION_PRESETS['1080p'].label}</option>
+                    <option value="4k">{VIDEO_RESOLUTION_PRESETS['4k'].label}</option>
+                  </Select>
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <IconButton
+                    onClick={() => void exportCameraMoveVideo()}
+                    disabled={!cameraMoveReady || isExportingCameraMove || !canExportVideo || !selectedExportModeAvailable}
+                    className="w-full"
+                  >
+                    <Film className="h-4 w-4" />
+                    {isExportingCameraMove
+                      ? `${Math.round(cameraMoveProgress * 100)}%`
+                      : videoExportMode === 'quickPreview'
+                        ? 'Quick Preview'
+                        : 'Render MP4'}
+                  </IconButton>
+                  <IconButton
+                    onClick={cancelCameraMoveExport}
+                    disabled={!isExportingCameraMove}
+                    className="w-full"
+                  >
+                    <X className="h-4 w-4" />
+                    Cancel
+                  </IconButton>
+                </div>
+                {isExportingCameraMove && (
+                  <p className="rounded-lg border border-subtle bg-panel px-3 py-2 text-xs text-muted">
+                    {cameraMoveProgressMessage}
+                  </p>
+                )}
+                {!canExportVideo && (
                   <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                     MP4 export is not supported in this browser.
                   </p>

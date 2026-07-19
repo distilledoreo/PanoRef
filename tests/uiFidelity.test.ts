@@ -491,8 +491,18 @@ describe('ui revamp fidelity surfaces', () => {
     const store = readFileSync(new URL('../src/state/useContinuityStore.ts', import.meta.url), 'utf8');
     expect(exportWorkspace).toContain('reconcileExportSelectedShotIds');
     expect(exportWorkspace).toContain('navigateToShots: false');
-    expect(exportWorkspace).toContain('WarningPopover');
+    expect(exportWorkspace).toContain('WarningDetailsButton');
+    expect(exportWorkspace).toContain('getExportSelectionWarnings');
+    expect(exportWorkspace).toContain('data-export-project-readiness');
+    expect(exportWorkspace).toContain('Package readiness');
+    expect(exportWorkspace).toContain('getShotWarnings');
+    expect(exportWorkspace).toContain('data-export-progress-panel');
+    expect(exportWorkspace).toContain('abortRef.current?.abort()');
+    expect(exportWorkspace).not.toContain('WarningPopover');
+    expect(exportWorkspace).toContain('shouldShowMissingLandmarkPromptNote');
+    expect(exportWorkspace).toContain('data-export-prompt-landmark-note');
     expect(exportWorkspace).toContain('Handoff packages');
+    expect(store).toContain('An export is currently running. Cancel it and leave?');
     expect(store).toContain('navigateToShots?: boolean');
   });
 

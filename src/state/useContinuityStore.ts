@@ -177,7 +177,20 @@ interface ContinuityStore {
   landShotFraming: (shotId: string, camera?: CameraData, options?: { keepFlying?: boolean }) => void;
   updateShot: (id: string, updates: Partial<Shot>) => void;
   removeShot: (id: string) => void;
-  attachCameraMoveVideoToShot: (shotId: string, params: { name: string; dataUrl: string; mimeType: string; width: number; height: number; durationSeconds: number; frameRate: number }) => ProjectAsset;
+  attachCameraMoveVideoToShot: (shotId: string, params: {
+    name: string;
+    dataUrl: string;
+    mimeType: string;
+    width: number;
+    height: number;
+    durationSeconds: number;
+    frameRate: number;
+    encodeMode?: 'render' | 'quickPreview';
+    codecString?: string;
+    frameCount?: number;
+    resolutionPreset?: string;
+    validated?: boolean;
+  }) => ProjectAsset;
   attachViewportRenderToShot: (shotId: string, params: { name: string; dataUrl: string; width: number; height: number }) => ProjectAsset;
   attachAiResultFrameToShot: (shotId: string, params: { name: string; dataUrl: string; width?: number; height?: number }) => ProjectAsset;
   addLandmark: () => Landmark;
@@ -293,24 +306,44 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     return true;
   },
 
-  setWorkspace: (workspace) => set((state) => {
+  setWorkspace: (workspace) => {
     workspace = normalizeWorkspace(workspace);
-    if (workspace !== 'shots') {
-      return { workspace };
+    const state = get();
+    let clearExportingPackage = false;
+    if (
+      state.isExportingPackage
+      && state.workspace === 'export'
+      && workspace !== 'export'
+    ) {
+      // Catch nav chrome, workflow guidance, and any other setWorkspace callers.
+      const confirmed = typeof globalThis.confirm === 'function'
+        && globalThis.confirm('An export is currently running. Cancel it and leave?');
+      if (!confirmed) return;
+      clearExportingPackage = true;
     }
-    const project = ensureProjectHasCamera(state.project);
-    const shot = project.shots.find((item) => item.id === state.selectedShotId)
-      ?? project.shots[0];
-    return {
-      workspace,
-      project,
-      selectedShotId: shot.id,
-      activePanoId: shot.linkedPanoId ?? state.activePanoId,
-      panoView: panoViewFromCamera(shot.camera),
-      // Still camera is always live (phone-camera style); capture does not freeze.
-      shotCameraFlying: true,
-    };
-  }),
+
+    set((current) => {
+      if (workspace !== 'shots') {
+        return {
+          workspace,
+          ...(clearExportingPackage ? { isExportingPackage: false } : {}),
+        };
+      }
+      const project = ensureProjectHasCamera(current.project);
+      const shot = project.shots.find((item) => item.id === current.selectedShotId)
+        ?? project.shots[0];
+      return {
+        workspace,
+        project,
+        selectedShotId: shot.id,
+        activePanoId: shot.linkedPanoId ?? current.activePanoId,
+        panoView: panoViewFromCamera(shot.camera),
+        // Still camera is always live (phone-camera style); capture does not freeze.
+        shotCameraFlying: true,
+        ...(clearExportingPackage ? { isExportingPackage: false } : {}),
+      };
+    });
+  },
   setProject: (project) => {
     const linkedProject = linkAllShotsToCanonicalPano(project);
     const canonical = linkedProject.panoRefs.find((pano) => pano.isCanonical) ?? linkedProject.panoRefs[0];
@@ -1104,6 +1137,11 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         shotId: shot.id,
         durationSeconds: params.durationSeconds,
         frameRate: params.frameRate,
+        ...(params.encodeMode ? { encodeMode: params.encodeMode } : {}),
+        ...(params.codecString ? { codecString: params.codecString } : {}),
+        ...(params.frameCount !== undefined ? { frameCount: params.frameCount } : {}),
+        ...(params.resolutionPreset ? { resolutionPreset: params.resolutionPreset } : {}),
+        ...(params.validated !== undefined ? { validated: params.validated } : {}),
       },
     });
     set((current) => ({

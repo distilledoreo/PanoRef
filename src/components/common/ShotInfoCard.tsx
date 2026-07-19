@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Globe, MoreHorizontal, Ruler } from 'lucide-react';
 import { LocationProject, Shot } from '../../domain/types';
-import { getShotWarnings } from '../../engine/warnings';
+import { formatWarningSummary, getShotWarnings } from '../../engine/warnings';
 import { ShotThumbnail } from './ShotThumbnail';
 import { WarningPopover } from './StatusBadge';
 
@@ -104,7 +104,7 @@ export function ShotInfoCard({
           <div className="relative h-5" data-shot-card-warning>
             <WarningPopover warnings={warnings} placement="below">
               <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                {warnings.length} issue{warnings.length === 1 ? '' : 's'}
+                {formatWarningSummary(warnings)}
               </span>
             </WarningPopover>
           </div>
