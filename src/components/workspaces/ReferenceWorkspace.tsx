@@ -365,6 +365,13 @@ export function ReferenceWorkspace() {
           )}
           <div className="space-y-2" data-pano-reference-list>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-secondary">Pano References</h3>
+            <StyledPanoImportButton
+              label={hasStyledCanonicalPano(project) ? 'Import another styled pano' : 'Import styled pano'}
+              className="w-full"
+            />
+            <p className="text-[11px] leading-snug text-muted">
+              Imports stamp the current capture origin from Build. Move the origin first when adding a second panorama for multi-origin blend.
+            </p>
             {project.panoRefs.length === 0 && (
               <p className="text-sm text-secondary">No pano references yet.</p>
             )}
