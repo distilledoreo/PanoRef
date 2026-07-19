@@ -136,6 +136,7 @@ export function CoverageOptimizerPanel({
         >
           <Toggle
             checked={restrictFloorRegion}
+            disabled={status === 'running'}
             onChange={(value) => {
               setRestrictFloorRegion(value);
               setStatus('idle');
@@ -151,8 +152,9 @@ export function CoverageOptimizerPanel({
               <div key={axis} className="contents">
                 <Field label={`${axis} minimum`}>
                   <TextInput
-                    type="number"
-                    step="0.1"
+                  type="number"
+                  step="0.1"
+                  disabled={status === 'running'}
                     value={floorRegion.min[axisIndex]}
                     onChange={(event) => setFloorRegion((current) => {
                       const min = [...current.min] as Vec3;
@@ -164,8 +166,9 @@ export function CoverageOptimizerPanel({
                 </Field>
                 <Field label={`${axis} maximum`}>
                   <TextInput
-                    type="number"
-                    step="0.1"
+                  type="number"
+                  step="0.1"
+                  disabled={status === 'running'}
                     value={floorRegion.max[axisIndex]}
                     onChange={(event) => setFloorRegion((current) => {
                       const max = [...current.max] as Vec3;

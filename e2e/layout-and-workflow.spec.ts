@@ -537,7 +537,9 @@ test.describe('workflow path smoke', () => {
     await drawer.locator('[data-coverage-floor-max="y"]').fill('0');
     await expect(drawer.locator('[data-coverage-floor-region-error]')).toBeVisible();
     await expect(drawer.locator('[data-coverage-analyze]')).toBeDisabled();
-    await floorRegionToggle.click();
+    await drawer.locator('[data-coverage-floor-min="y"]').fill('-0.25');
+    await drawer.locator('[data-coverage-floor-max="y"]').fill('0.25');
+    await expect(drawer.locator('[data-coverage-analyze]')).toBeEnabled();
 
     const layout = await drawer.evaluate((element) => {
       const rect = element.getBoundingClientRect();
@@ -554,8 +556,12 @@ test.describe('workflow path smoke', () => {
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
 
     await page.locator('[data-coverage-analyze]').click();
+    await expect(floorRegionToggle).toBeDisabled();
+    await expect(drawer.locator('[data-coverage-floor-min="x"]')).toBeDisabled();
+    await expect(drawer.locator('[data-coverage-floor-max="z"]')).toBeDisabled();
     const result = page.locator('[data-coverage-result]');
     await expect(result).toBeVisible({ timeout: 90_000 });
+    await expect(floorRegionToggle).toBeEnabled();
     await expect(result).toContainText('24,576 fine samples');
     const originB = (await result.getAttribute('data-coverage-origin-b'))
       ?.split(',').map((value) => Number(value));
