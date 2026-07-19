@@ -154,17 +154,11 @@ async function run() {
   ];
   shot.camera = startCamera;
 
-  const basePreset = resolveVideoPreset('1080p');
   const preset = {
-    ...basePreset,
+    ...resolveVideoPreset('1080p'),
     width: WIDTH,
     height: HEIGHT,
     frameRate: FRAME_RATE,
-    // Lower bitrate + Level 3.0 for a tiny harness clip (encoder may negotiate below 1080p Level 4.0).
-    bitrate: 1_500_000,
-    avcCodecString: 'avc1.64001e',
-    level: '3.0',
-    label: '320x180@30 harness',
   };
 
   setStatus('Rendering reference stills…');

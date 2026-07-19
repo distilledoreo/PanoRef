@@ -97,15 +97,19 @@ export async function validateCameraMoveMp4(
       });
     }
 
-    // Profile/level: prefer matching the configured full codec string when present.
+    // Profile: require the preset's AVC profile IDC (e.g. High = 0x64). Encoders often
+    // negotiate a lower level than requested for small frames; that is still valid.
     const codecParam = await videoTrack.getCodecParameterString() ?? codec;
-    if (codecParam && !codecParam.toLowerCase().includes(preset.avcCodecString.slice(5).toLowerCase())) {
-      // Soft check: warn only when level digits clearly mismatch resolution family.
-      const expectedLevel = preset.avcCodecString.slice(-2).toLowerCase();
-      if (!codecParam.toLowerCase().includes(expectedLevel)) {
+    if (codecParam) {
+      const expectedProfileIdc = preset.avcCodecString.slice(5, 7).toLowerCase();
+      const encoded = codecParam.toLowerCase();
+      const profileOk = encoded.includes(`avc1.${expectedProfileIdc}`)
+        || encoded.startsWith(expectedProfileIdc)
+        || encoded.includes(preset.avcCodecString.slice(5).toLowerCase());
+      if (!profileOk) {
         issues.push({
           code: 'profileLevel',
-          message: `Expected codec near ${preset.avcCodecString}, got ${codecParam}.`,
+          message: `Expected AVC profile near ${preset.avcCodecString}, got ${codecParam}.`,
         });
       }
     }
