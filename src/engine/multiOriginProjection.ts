@@ -81,17 +81,45 @@ export function isCaptureOriginNearPano(
 }
 
 /**
+ * Frozen plan for the next secondary styled import.
+ * Suggest path locks origin/rotation; manual place may set trackLiveOrigin so Build moves update the plan.
+ */
+export interface PendingSecondCapturePlan {
+  primaryPanoId: string;
+  origin: Vec3;
+  rotation: Euler;
+  createdAt: string;
+  /** When true, setPanoOrigin / setPanoRotation keep this plan aligned with the live Build capture. */
+  trackLiveOrigin?: boolean;
+}
+
+export function createPendingSecondCapturePlan(params: {
+  primaryPanoId: string;
+  origin: Vec3;
+  rotation: Euler;
+  trackLiveOrigin?: boolean;
+}): PendingSecondCapturePlan {
+  return {
+    primaryPanoId: params.primaryPanoId,
+    origin: [...params.origin] as Vec3,
+    rotation: [...params.rotation] as Euler,
+    createdAt: new Date().toISOString(),
+    trackLiveOrigin: params.trackLiveOrigin,
+  };
+}
+
+/**
  * Decide whether the next styled import replaces the reference or adds a blend partner.
  * Same capture origin as the primary styled pano → replace; moved → add secondary.
- * A latched pending-secondary intent always adds (survives undo / modal close races).
+ * A latched pending second-capture plan always adds (survives undo / modal close races).
  */
 export function resolveStyledImportMode(
   project: Pick<LocationProject, 'panoRefs' | 'settings' | 'scene'>,
-  options?: { pendingSecondaryStyledImport?: boolean },
+  options?: { pendingSecondCapturePlan?: PendingSecondCapturePlan | null },
 ): StyledImportMode {
   const primary = primaryStyledPano(project);
   if (!primary) return 'first';
-  if (options?.pendingSecondaryStyledImport) return 'add_secondary';
+  if (options?.pendingSecondCapturePlan) return 'add_secondary';
   if (isCaptureOriginNearPano(project.scene.panoOrigin, primary)) return 'replace';
   return 'add_secondary';
 }

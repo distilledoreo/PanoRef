@@ -4,7 +4,7 @@ import { STYLED_PANO } from '../../domain/copy';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { preparePanoImport, downloadPanoImage } from '../../engine/panoImage';
 import { downloadDataUrl, readFileAsDataUrl } from '../../engine/projectIO';
-import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
+import { getLatestGrayboxPano, getPanoAsset, listGrayboxPanos, resolveCompareGraybox } from '../../domain/selectors';
 import { ReferenceAlignmentPanel } from '../common/ReferenceAlignmentPanel';
 import { ProjectedStylePanel } from '../common/ProjectedStylePanel';
 import { SecondCaptureForkPanel } from '../common/SecondCaptureForkPanel';
@@ -18,7 +18,6 @@ import { PanoViewer } from '../viewers/PanoViewer';
 import { directionToYawPitch, subtract } from '../../engine/sync';
 import {
   countStyledPanoramas,
-  isCaptureOriginNearPano,
   resolveStyledImportMode,
   styledImportActionHint,
 } from '../../engine/multiOriginProjection';
@@ -42,7 +41,7 @@ export function ReferenceWorkspace() {
     project,
     activePanoId,
     panoView,
-    pendingSecondaryStyledImport,
+    pendingSecondCapturePlan,
     setActivePano,
     setPanoView,
     updatePanoReference,
@@ -55,24 +54,19 @@ export function ReferenceWorkspace() {
     requestAlignmentIntro,
     requestAlignmentRetryModal,
     setWorkspace,
-    setPendingSecondaryStyledImport,
+    setPendingSecondCapturePlan,
   } = useContinuityStore();
   const activePano = project.panoRefs.find((pano) => pano.id === activePanoId) ?? project.panoRefs.find((pano) => pano.isCanonical);
   const activeAsset = activePano ? project.assets.assets[activePano.imageAssetId] : undefined;
-  const grayboxPano = getLatestGrayboxPano(project);
+  const compareGraybox = resolveCompareGraybox(project, activePano);
+  const compareGrayboxAsset = getPanoAsset(project, compareGraybox);
+  const grayboxPano = compareGraybox ?? getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
-  // Compare/align only against a graybox captured at this pano's frozen origin — never move Build's capture origin.
-  const grayboxMatchesActive = Boolean(
-    activePano
-    && grayboxPano
-    && isCaptureOriginNearPano(grayboxPano.origin, activePano),
-  );
-  const compareGraybox = grayboxMatchesActive ? grayboxPano : undefined;
-  const compareGrayboxAsset = grayboxMatchesActive ? grayboxAsset : undefined;
+  const grayboxCount = listGrayboxPanos(project).length;
   const canCalibrate = Boolean(activePano && activePano.type !== 'graybox_render' && compareGraybox);
   const alignmentAccepted = isReferenceAlignmentAccepted(project);
   const styledCount = countStyledPanoramas(project);
-  const importMode = resolveStyledImportMode(project, { pendingSecondaryStyledImport });
+  const importMode = resolveStyledImportMode(project, { pendingSecondCapturePlan });
   const styledPanos = project.panoRefs.filter(isEligibleProjectedStylePano);
   const primaryAction = useMemo(
     () => resolveWorkspacePrimaryAction({ project, workspace: 'reference', shotCameraFlying: false }),
@@ -101,7 +95,7 @@ export function ReferenceWorkspace() {
         ? `Imported from ${params.width}×${params.height} letterboxed 16:9; extracted ${prepared.width}×${prepared.height} equirectangular region.`
         : undefined,
     });
-    if (mode === 'add_secondary') setPendingSecondaryStyledImport(false);
+    if (mode === 'add_secondary') setPendingSecondCapturePlan(undefined);
   };
 
   const loadAttachedReference = async () => {
@@ -279,7 +273,12 @@ export function ReferenceWorkspace() {
                       <Settings className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <ul className="space-y-1" data-reference-pano-origins>
+                  <ul
+                    className="space-y-1"
+                    data-reference-pano-origins
+                    data-graybox-count={grayboxCount}
+                    data-styled-pano-count={styledPanos.length}
+                  >
                     {styledPanos.map((pano, index) => {
                       const isActive = pano.id === activePano?.id;
                       const captureLabel = styledPanos.length > 1
@@ -296,6 +295,7 @@ export function ReferenceWorkspace() {
                                 : 'hover:bg-surface-muted/80 hover:text-accent'
                             }`}
                             data-reference-pano-option={pano.id}
+                            data-pano-origin={pano.origin.map((value) => value.toFixed(3)).join(',')}
                             aria-pressed={isActive}
                           >
                             <span className="block truncate">
@@ -316,8 +316,8 @@ export function ReferenceWorkspace() {
                   {activePano && styledPanos.length > 1 && (
                     <p className="text-[10px] leading-snug text-secondary" data-reference-active-origin-hint>
                       Preview uses this capture’s origin for landmarks
-                      {!grayboxMatchesActive && grayboxPano
-                        ? ' · graybox is from another capture, so alignment is hidden'
+                      {!compareGraybox && grayboxCount > 0
+                        ? ' · no graybox matches this capture, so alignment is hidden'
                         : ''}
                       .
                     </p>
@@ -325,7 +325,7 @@ export function ReferenceWorkspace() {
                   <StyledPanoImportButton
                     modeAware
                     onImported={(mode) => {
-                      if (mode === 'add_secondary') setPendingSecondaryStyledImport(false);
+                      if (mode === 'add_secondary') setPendingSecondCapturePlan(undefined);
                     }}
                   />
                   {styledCount === 1 && (
@@ -362,7 +362,7 @@ export function ReferenceWorkspace() {
                 setWorkspace('shots');
               }}
               onAwaitingImport={() => {
-                setPendingSecondaryStyledImport(true);
+                // Plan is already latched by the fork; keep the panel flow open for import.
               }}
             />
 
@@ -644,13 +644,13 @@ export function ReferenceWorkspace() {
               Render a graybox in Build first. Then open Objective for the image AI prompt.
             </p>
           )}
-          {!canCalibrate && grayboxPano && activePano && activePano.type !== 'graybox_render' && !grayboxMatchesActive && (
+          {!canCalibrate && grayboxCount > 0 && activePano && activePano.type !== 'graybox_render' && !compareGraybox && (
             <p className="text-sm text-secondary" data-reference-origin-mismatch>
-              This panorama was captured at a different origin than the current graybox.
+              This panorama was captured at a different origin than available grayboxes.
               Landmarks still use this pano’s origin. Render a clay 360 at this capture point in Build if you need graybox alignment.
             </p>
           )}
-          {!canCalibrate && grayboxPano && (!activePano || activePano.type === 'graybox_render' || grayboxMatchesActive) && (
+          {!canCalibrate && grayboxPano && (!activePano || activePano.type === 'graybox_render' || compareGraybox) && (
             <p className="text-sm text-secondary">
               Import a {STYLED_PANO.short} to compare it against the graybox.
             </p>

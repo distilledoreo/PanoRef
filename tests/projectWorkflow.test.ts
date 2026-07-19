@@ -760,7 +760,7 @@ describe('project workflow logic', () => {
     expect(state.activePanoId).toBe(primary.id);
   });
 
-  it('adds a secondary styled pano when pending even if capture origin was undone', () => {
+  it('adds a secondary styled pano from a frozen pending plan even if capture origin was undone', () => {
     const project = createDefaultProject();
     const primaryAsset = createPanoAsset({
       name: 'primary.png',
@@ -780,6 +780,7 @@ describe('project workflow logic', () => {
     project.assets.assets[primaryAsset.id] = primaryAsset;
     project.panoRefs = [primary];
     project.scene.panoOrigin = [0, 1.6, 0];
+    project.scene.panoRotation = [0, 0.1, 0];
     project.workflow.referenceAlignmentAcceptedForPanoId = primary.id;
     project.shots[0] = { ...project.shots[0], linkedPanoId: primary.id };
     project.settings.projectedStyle = {
@@ -789,14 +790,21 @@ describe('project workflow logic', () => {
       secondaryPanoId: undefined,
     };
 
+    const frozenOrigin: [number, number, number] = [4.5, 1.6, 2.25];
+    const frozenRotation: [number, number, number] = [0, 0.35, 0];
     useContinuityStore.setState({
       project,
       activePanoId: primary.id,
-      pendingSecondaryStyledImport: true,
+      pendingSecondCapturePlan: {
+        primaryPanoId: primary.id,
+        origin: frozenOrigin,
+        rotation: frozenRotation,
+        createdAt: new Date().toISOString(),
+      },
     });
 
     expect(resolveStyledImportMode(useContinuityStore.getState().project, {
-      pendingSecondaryStyledImport: true,
+      pendingSecondCapturePlan: useContinuityStore.getState().pendingSecondCapturePlan,
     })).toBe('add_secondary');
 
     const addMode = useContinuityStore.getState().importStyledPano({
@@ -809,12 +817,15 @@ describe('project workflow logic', () => {
     const state = useContinuityStore.getState();
     expect(state.project.panoRefs.find((pano) => pano.id === primary.id)?.isCanonical).toBe(true);
     expect(state.project.settings.projectedStyle.secondaryPanoId).toBeTruthy();
-    expect(state.pendingSecondaryStyledImport).toBe(false);
+    expect(state.pendingSecondCapturePlan).toBeUndefined();
     expect(state.activePanoId).toBe(primary.id);
     const secondary = state.project.panoRefs.find(
       (pano) => pano.id === state.project.settings.projectedStyle.secondaryPanoId,
     );
-    expect(secondary?.origin).toEqual([0, 1.6, 0]);
+    expect(secondary?.origin).toEqual(frozenOrigin);
+    expect(secondary?.rotation).toEqual(frozenRotation);
+    // Live Build origin was never moved to B — secondary still stamped from the plan.
+    expect(state.project.scene.panoOrigin).toEqual([0, 1.6, 0]);
   });
 
   it('clears projectedStyle ids when removing a pano reference', () => {

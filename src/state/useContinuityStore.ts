@@ -28,9 +28,12 @@ import {
   normalizeProjectedStyleSettings,
 } from '../domain/defaults';
 import {
+  isCaptureOriginNearPano,
   primaryStyledPano,
   resolveStyledImportMode,
+  type PendingSecondCapturePlan,
 } from '../engine/multiOriginProjection';
+import { findGrayboxNearOrigin } from '../domain/selectors';
 import {
   getCanonicalPano,
   getPanoCropSettingsForShot,
@@ -156,11 +159,11 @@ interface ContinuityStore {
   /** Origin-aware import: replace at same capture, or add a secondary blend partner when origin moved. */
   importStyledPano: (params: { name: string; dataUrl: string; width?: number; height?: number; importNote?: string }) => 'first' | 'replace' | 'add_secondary';
   /**
-   * Latched intent to add a second styled capture (fill-gaps / suggested vantage).
-   * Forces add_secondary even if capture origin was undone back near the primary.
+   * Frozen plan for the next secondary styled import (suggest or manual place).
+   * Forces add_secondary and stamps the secondary with plan.origin / plan.rotation.
    */
-  pendingSecondaryStyledImport: boolean;
-  setPendingSecondaryStyledImport: (value: boolean) => void;
+  pendingSecondCapturePlan: PendingSecondCapturePlan | undefined;
+  setPendingSecondCapturePlan: (plan: PendingSecondCapturePlan | undefined) => void;
   removePanoReference: (id: string) => void;
   setActivePano: (id?: string) => void;
   updatePanoReference: (id: string, updates: Partial<PanoReference>) => void;
@@ -238,8 +241,8 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   alignmentIntroRequest: 0,
   alignmentRetryModalRequest: 0,
   seenAlignmentIntroForPanoId: undefined,
-  pendingSecondaryStyledImport: false,
-  setPendingSecondaryStyledImport: (value) => set({ pendingSecondaryStyledImport: value }),
+  pendingSecondCapturePlan: undefined,
+  setPendingSecondCapturePlan: (plan) => set({ pendingSecondCapturePlan: plan }),
 
   projectedOcclusionStatus: 'disabled',
   setProjectedOcclusionStatus: (status) => set({ projectedOcclusionStatus: status }),
@@ -343,7 +346,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       alignmentIntroRequest: 0,
       alignmentRetryModalRequest: 0,
       seenAlignmentIntroForPanoId: undefined,
-      pendingSecondaryStyledImport: false,
+      pendingSecondCapturePlan: undefined,
     });
   },
   updateProjectInfo: (updates) => set((state) => ({
@@ -675,10 +678,16 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   }),
   setPanoOrigin: (origin) => set((state) => {
     if (vec3NearlyEqual(state.project.scene.panoOrigin, origin)) return state;
+    const nextOrigin = [...origin] as Vec3;
+    const plan = state.pendingSecondCapturePlan;
+    const nextPlan = plan?.trackLiveOrigin
+      ? { ...plan, origin: nextOrigin }
+      : plan;
     // Scene capture origin only — never rewrite existing pano projector poses.
     return applyBuildSceneChange(state, {
-      panoOrigin: [...origin] as Vec3,
+      panoOrigin: nextOrigin,
       history: 'step',
+      extra: nextPlan !== plan ? { pendingSecondCapturePlan: nextPlan } : undefined,
     });
   }),
   setPanoRotation: (rotation) => set((state) => {
@@ -690,13 +699,19 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     ) {
       return state;
     }
+    const nextRotation = [
+      rotation[0],
+      rotation[1],
+      rotation[2],
+    ] as Euler;
+    const plan = state.pendingSecondCapturePlan;
+    const nextPlan = plan?.trackLiveOrigin
+      ? { ...plan, rotation: nextRotation }
+      : plan;
     return applyBuildSceneChange(state, {
-      panoRotation: [
-        rotation[0],
-        rotation[1],
-        rotation[2],
-      ] as Euler,
+      panoRotation: nextRotation,
       history: 'step',
+      extra: nextPlan !== plan ? { pendingSecondCapturePlan: nextPlan } : undefined,
     });
   }),
   renderGrayboxPano: async () => {
@@ -720,6 +735,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         height: render.height,
         metadata: { source: 'graybox_scene', theme },
       });
+      const captureOrigin = [...state.project.scene.panoOrigin] as Vec3;
       const hadOnlyGrayboxCanonical = state.project.panoRefs.every(
         (existing) => !existing.isCanonical || existing.type === 'graybox_render',
       );
@@ -727,7 +743,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         name: 'Graybox 360',
         assetId: asset.id,
         type: 'graybox_render',
-        origin: state.project.scene.panoOrigin,
+        origin: captureOrigin,
         rotation: state.project.scene.panoRotation,
         width: render.width,
         height: render.height,
@@ -737,7 +753,11 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       });
 
       set((current) => {
-        const staleGrayboxes = current.project.panoRefs.filter((existing) => existing.type === 'graybox_render');
+        // Only replace grayboxes captured near this origin — keep other capture grayboxes.
+        const staleGrayboxes = current.project.panoRefs.filter(
+          (existing) => existing.type === 'graybox_render'
+            && isCaptureOriginNearPano(captureOrigin, existing),
+        );
         const staleAssetIds = new Set(staleGrayboxes.map((existing) => existing.imageAssetId));
         const nextAssets = { ...current.project.assets.assets };
         for (const assetId of staleAssetIds) {
@@ -746,7 +766,10 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         nextAssets[asset.id] = asset;
 
         const remainingPanos = current.project.panoRefs
-          .filter((existing) => existing.type !== 'graybox_render')
+          .filter(
+            (existing) => !(existing.type === 'graybox_render'
+              && isCaptureOriginNearPano(captureOrigin, existing)),
+          )
           .map((existing) => (
             pano.isCanonical ? { ...existing, isCanonical: false } : existing
           ));
@@ -774,7 +797,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       height: params.height ?? DEFAULT_GRAYBOX_PANO_HEIGHT,
       metadata: { source: 'user_import' },
     });
-    const graybox = state.project.panoRefs.find((pano) => pano.type === 'graybox_render');
+    const graybox = findGrayboxNearOrigin(state.project, state.project.scene.panoOrigin);
     const pano = createPanoReference({
       name: params.name.replace(/\.[^.]+$/, '') || 'Styled Reference',
       assetId: asset.id,
@@ -806,7 +829,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   importStyledPano: (params) => {
     const state = get();
     const mode = resolveStyledImportMode(state.project, {
-      pendingSecondaryStyledImport: state.pendingSecondaryStyledImport,
+      pendingSecondCapturePlan: state.pendingSecondCapturePlan,
     });
     if (mode === 'add_secondary') {
       set((current) => {
@@ -822,13 +845,20 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
           height: params.height ?? DEFAULT_GRAYBOX_PANO_HEIGHT,
           metadata: { source: 'user_import' },
         });
-        const graybox = current.project.panoRefs.find((pano) => pano.type === 'graybox_render');
+        const plan = current.pendingSecondCapturePlan;
+        const frozenOrigin = plan
+          ? [...plan.origin] as Vec3
+          : [...current.project.scene.panoOrigin] as Vec3;
+        const frozenRotation = plan
+          ? [...plan.rotation] as Euler
+          : [...current.project.scene.panoRotation] as Euler;
+        const graybox = findGrayboxNearOrigin(current.project, frozenOrigin);
         const pano = createPanoReference({
           name: params.name.replace(/\.[^.]+$/, '') || 'Second Capture',
           assetId: asset.id,
           type: 'ai_global_reference',
-          origin: [...current.project.scene.panoOrigin] as Vec3,
-          rotation: [...current.project.scene.panoRotation] as Euler,
+          origin: frozenOrigin,
+          rotation: frozenRotation,
           width: asset.width ?? DEFAULT_GRAYBOX_PANO_WIDTH,
           height: asset.height ?? DEFAULT_GRAYBOX_PANO_HEIGHT,
           isCanonical: false,
@@ -855,7 +885,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
           }),
           // Keep the viewer on the primary reference so the second capture does not look like a replace.
           activePanoId: primary?.id ?? current.activePanoId,
-          pendingSecondaryStyledImport: false,
+          pendingSecondCapturePlan: undefined,
         };
       });
       return 'add_secondary';
@@ -1309,7 +1339,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     alignmentIntroRequest: 0,
     alignmentRetryModalRequest: 0,
     seenAlignmentIntroForPanoId: undefined,
-    pendingSecondaryStyledImport: false,
+    pendingSecondCapturePlan: undefined,
   }),
 }));
 

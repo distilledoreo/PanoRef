@@ -189,7 +189,7 @@ describe('ui revamp fidelity surfaces', () => {
     expect(referenceGuide).toContain('Download the graybox image.');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_WIDTH = 4096');
     expect(defaults).toContain('DEFAULT_GRAYBOX_PANO_HEIGHT = 2048');
-    expect(store).toContain("existing.type !== 'graybox_render'");
+    expect(store).toContain('isCaptureOriginNearPano(captureOrigin, existing)');
     expect(store).toContain('isRenderingGraybox: false');
     expect(store).toContain('shotCameraFlying: false');
     expect(store).toMatch(/setProject:[\s\S]*isExportingPackage: false/);
@@ -232,8 +232,8 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).toContain('data-reference-settings-gear');
     expect(reference).toContain('SecondCaptureForkPanel');
     expect(reference).toContain('data-reference-pano-origins');
-    expect(reference).toContain('isCaptureOriginNearPano');
-    expect(reference).toContain('grayboxMatchesActive');
+    expect(reference).toContain('resolveCompareGraybox');
+    expect(reference).toContain('compareGraybox');
     expect(reference).toContain('activePano?.origin ?? project.scene.panoOrigin');
   });
 
@@ -246,8 +246,15 @@ describe('ui revamp fidelity surfaces', () => {
     expect(reference).toContain('removePanoReference');
     expect(store).toContain('removePanoReference:');
     expect(store).toContain('importStyledPano:');
-    expect(store).toContain('pendingSecondaryStyledImport');
-    expect(store).toContain('setPendingSecondaryStyledImport');
+    expect(store).toContain('pendingSecondCapturePlan');
+    expect(store).toContain('setPendingSecondCapturePlan');
+  });
+
+  it('keeps second-capture seed download status truthful', () => {
+    const fork = readFileSync(new URL('../src/components/common/SecondCaptureForkPanel.tsx', import.meta.url), 'utf8');
+    expect(fork).toContain('data-second-capture-seed-status');
+    expect(fork).toContain('Download seed again');
+    expect(fork).toContain('data-second-capture-download-seed-again');
   });
 
   it('keeps second-capture progress ETA markers in the fork panel', () => {

@@ -96,7 +96,6 @@ export function WorkflowGuidance() {
     markObjectiveSeen,
     markAlignmentIntroSeen,
     updateProjectInfo,
-    setPendingSecondaryStyledImport,
   } = useContinuityStore();
 
   const [isDownloadingGraybox, setIsDownloadingGraybox] = useState(false);
@@ -373,7 +372,7 @@ export function WorkflowGuidance() {
             onContinue={handleAdvanceNext}
             onClose={handleAdvanceDismiss}
             onAwaitingImport={() => {
-              setPendingSecondaryStyledImport(true);
+              // Frozen plan is latched inside SecondCaptureForkContent.
             }}
             onPlaceInBuild={handleAdvanceDismiss}
           />

@@ -19,6 +19,11 @@ import {
   shouldWarnOnOriginMove,
   normalizeProjectorBlendMode,
 } from '../src/engine/multiOriginProjection';
+import {
+  findGrayboxNearOrigin,
+  listGrayboxPanos,
+  resolveCompareGraybox,
+} from '../src/domain/selectors';
 
 function withTwoStyledPanos() {
   const project = createDefaultProject();
@@ -102,7 +107,14 @@ describe('multi-origin projection helpers', () => {
     expect(resolveStyledImportMode(project)).toBe('add_secondary');
 
     project.scene.panoOrigin = [...a.origin];
-    expect(resolveStyledImportMode(project, { pendingSecondaryStyledImport: true })).toBe('add_secondary');
+    expect(resolveStyledImportMode(project, {
+      pendingSecondCapturePlan: {
+        primaryPanoId: a.id,
+        origin: [8, 1.6, 0],
+        rotation: [0, 0, 0],
+        createdAt: new Date().toISOString(),
+      },
+    })).toBe('add_secondary');
 
     project.panoRefs = [];
     expect(resolveStyledImportMode(project)).toBe('first');
@@ -169,6 +181,51 @@ describe('multi-origin projection helpers', () => {
     expect(isCaptureOriginNearPano(project.scene.panoOrigin, primary)).toBe(true);
     project.scene.panoOrigin = [9, 1.6, 9];
     expect(isCaptureOriginNearPano(grayboxAtPrimary.origin, primary)).toBe(true);
+  });
+
+  it('resolves compare graybox via sourcePanoId then nearest matching origin', () => {
+    const project = createDefaultProject();
+    const grayA = createPanoReference({
+      name: 'Gray A',
+      assetId: 'g1',
+      type: 'graybox_render',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+    });
+    const grayB = createPanoReference({
+      name: 'Gray B',
+      assetId: 'g2',
+      type: 'graybox_render',
+      origin: [5, 1.6, 0],
+      width: 4,
+      height: 2,
+    });
+    const primary = createPanoReference({
+      name: 'Primary',
+      assetId: 'a1',
+      type: 'ai_global_reference',
+      origin: [0, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: true,
+      sourcePanoId: grayA.id,
+    });
+    const secondary = createPanoReference({
+      name: 'Secondary',
+      assetId: 'a2',
+      type: 'ai_global_reference',
+      origin: [5, 1.6, 0],
+      width: 4,
+      height: 2,
+      isCanonical: false,
+    });
+    project.panoRefs = [grayA, grayB, primary, secondary];
+
+    expect(resolveCompareGraybox(project, primary)?.id).toBe(grayA.id);
+    expect(resolveCompareGraybox(project, secondary)?.id).toBe(grayB.id);
+    expect(findGrayboxNearOrigin(project, [5.05, 1.6, 0])?.id).toBe(grayB.id);
+    expect(listGrayboxPanos(project)).toHaveLength(2);
   });
 
   it('does not auto-pick graybox as dual secondary', () => {

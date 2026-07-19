@@ -37,7 +37,7 @@ import {
 import { Euler, ObjectSurfaceStyle, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
 import type { GizmoMode } from '../../engine/transformGizmo';
 import { objectDisplayName } from '../../domain/defaults';
-import { getLatestGrayboxPano, getPanoAsset } from '../../domain/selectors';
+import { getLatestGrayboxPano, getPanoAsset, listGrayboxPanos } from '../../domain/selectors';
 import {
   countStyledPanoramas,
   originMoveWarningMessage,
@@ -164,7 +164,7 @@ export function BuildWorkspace() {
     redoBuild,
     buildHistoryPast,
     buildHistoryFuture,
-    pendingSecondaryStyledImport,
+    pendingSecondCapturePlan,
   } = useContinuityStore();
   const canUndo = buildHistoryPast.length > 0;
   const canRedo = buildHistoryFuture.length > 0;
@@ -258,6 +258,7 @@ export function BuildWorkspace() {
   const editingChromeVisible = !freeCameraActive && !renderDistanceOpen;
   const grayboxPano = getLatestGrayboxPano(project);
   const grayboxAsset = getPanoAsset(project, grayboxPano);
+  const grayboxCount = listGrayboxPanos(project).length;
   const primaryAction = useMemo(
     () => resolveWorkspacePrimaryAction({ project, workspace: 'build', shotCameraFlying: false }),
     [project],
@@ -906,7 +907,7 @@ export function BuildWorkspace() {
             </div>
           )}
           {canUseProjectedAppearance(project)
-            && resolveStyledImportMode(project, { pendingSecondaryStyledImport }) === 'add_secondary'
+            && resolveStyledImportMode(project, { pendingSecondCapturePlan }) === 'add_secondary'
             && (
               <div
                 data-build-second-capture-coach
@@ -916,6 +917,7 @@ export function BuildWorkspace() {
                 <span className="font-semibold">Add second capture</span> to blend.
               </div>
             )}
+          <div className="sr-only" data-graybox-count={grayboxCount} aria-hidden />
           {grayboxRenderError && (
             <p
               role="alert"
