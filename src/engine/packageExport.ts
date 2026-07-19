@@ -329,7 +329,10 @@ async function compressZip(
   const blob = await zip.generateAsync(
     { type: 'blob' },
     (metadata) => {
-      if (args.signal?.aborted) return;
+      // Cooperative: JSZip may still finish the current chunk before rejecting.
+      if (args.signal?.aborted) {
+        throw new DOMException('Export cancelled.', 'AbortError');
+      }
       const fraction = Math.min(1, Math.max(0, (metadata.percent ?? 0) / 100));
       args.tracker.report({
         phase: 'compressing',

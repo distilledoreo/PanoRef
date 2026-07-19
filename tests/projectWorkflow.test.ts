@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDefaultProject, createPanoAsset, createPanoReference, createShot } from '../src/domain/defaults';
 import { createShotPackageManifest, selectExportPathPreview } from '../src/engine/exportManifest';
 import { generateImagePrompt } from '../src/engine/prompts';
@@ -604,6 +604,26 @@ describe('project workflow logic', () => {
     expect(state.activePrimitive).toBe('box');
     expect(state.gridSnap).toBe(true);
     expect(state.selectedShotId).toBe(incoming.shots[0]?.id);
+  });
+
+  it('confirms before leaving Export while a package export is running', () => {
+    const confirmMock = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirmMock);
+    useContinuityStore.setState({
+      workspace: 'export',
+      isExportingPackage: true,
+    });
+
+    useContinuityStore.getState().setWorkspace('build');
+    expect(confirmMock).toHaveBeenCalledWith('An export is currently running. Cancel it and leave?');
+    expect(useContinuityStore.getState().workspace).toBe('export');
+    expect(useContinuityStore.getState().isExportingPackage).toBe(true);
+
+    confirmMock.mockReturnValue(true);
+    useContinuityStore.getState().setWorkspace('shots');
+    expect(useContinuityStore.getState().workspace).toBe('shots');
+    expect(useContinuityStore.getState().isExportingPackage).toBe(false);
+    vi.unstubAllGlobals();
   });
 
   it('removes an uploaded pano reference, frees its asset, and re-links shots', () => {

@@ -41,6 +41,7 @@ export function ExportWorkspace() {
   const [exportProgress, setExportProgress] = useState<PackageExportProgress | undefined>();
   const [exportUiPhase, setExportUiPhase] = useState<ExportUiPhase>('idle');
   const abortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
   const projectIdRef = useRef(project.id);
   const prevShotIdsRef = useRef(project.shots.map((shot) => shot.id));
   const shotIdsKey = project.shots.map((shot) => shot.id).join('\0');
@@ -56,6 +57,15 @@ export function ExportWorkspace() {
     }),
     [project, selectedShot?.id],
   );
+
+  // Abort in-flight packaging if Export unmounts (e.g. confirmed leave during export).
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   // Keep multi-select in sync when opening another project or adding/removing shots.
   useEffect(() => {
@@ -93,6 +103,7 @@ export function ExportWorkspace() {
   };
 
   const handlePackageProgress = (progress: PackageExportProgress) => {
+    if (!mountedRef.current) return;
     setExportProgress(progress);
     if (progress.shotId) {
       setExportingShotId(progress.shotId);
@@ -111,9 +122,11 @@ export function ExportWorkspace() {
   };
 
   const finishExport = (phase: Exclude<ExportUiPhase, 'idle' | 'running'>, errorMessage?: string) => {
+    // Always clear the store flag so navigation/busy state recovers even after unmount.
     setExportingPackage(false);
-    setExportingShotId(undefined);
     abortRef.current = null;
+    if (!mountedRef.current) return;
+    setExportingShotId(undefined);
     setExportUiPhase(phase);
     if (errorMessage) setExportError(errorMessage);
   };
@@ -150,26 +163,30 @@ export function ExportWorkspace() {
         updateShot(shot.id, { status: 'exported' });
         markFinalPackageExported(shot.id);
       }
-      setExportProgress((current) => (
-        current
-          ? { ...current, phase: 'complete', progress: 1, message: 'Package downloaded', indeterminate: false }
-          : {
-              phase: 'complete',
-              progress: 1,
-              currentShot: shotsToExport.length,
-              totalShots: shotsToExport.length,
-              message: 'Package downloaded',
-            }
-      ));
+      if (mountedRef.current) {
+        setExportProgress((current) => (
+          current
+            ? { ...current, phase: 'complete', progress: 1, message: 'Package downloaded', indeterminate: false }
+            : {
+                phase: 'complete',
+                progress: 1,
+                currentShot: shotsToExport.length,
+                totalShots: shotsToExport.length,
+                message: 'Package downloaded',
+              }
+        ));
+      }
       finishExport('complete');
     } catch (error) {
       if (isPackageExportCancelled(error) || controller.signal.aborted) {
         finishExport('cancelled');
-        setExportProgress((current) => (
-          current
-            ? { ...current, message: 'Export cancelled', indeterminate: false }
-            : current
-        ));
+        if (mountedRef.current) {
+          setExportProgress((current) => (
+            current
+              ? { ...current, message: 'Export cancelled', indeterminate: false }
+              : current
+          ));
+        }
         return;
       }
       finishExport('failed', error instanceof Error ? error.message : 'Export failed.');
@@ -189,28 +206,32 @@ export function ExportWorkspace() {
       setLastExport(result.manifestPaths);
       updateShot(selectedShot.id, { status: 'exported' });
       markFinalPackageExported(selectedShot.id);
-      setExportProgress((current) => (
-        current
-          ? { ...current, phase: 'complete', progress: 1, message: 'Package downloaded', indeterminate: false }
-          : {
-              phase: 'complete',
-              progress: 1,
-              currentShot: 1,
-              totalShots: 1,
-              shotId: selectedShot.id,
-              shotName: `Shot ${selectedShot.shotNumber}`,
-              message: 'Package downloaded',
-            }
-      ));
+      if (mountedRef.current) {
+        setExportProgress((current) => (
+          current
+            ? { ...current, phase: 'complete', progress: 1, message: 'Package downloaded', indeterminate: false }
+            : {
+                phase: 'complete',
+                progress: 1,
+                currentShot: 1,
+                totalShots: 1,
+                shotId: selectedShot.id,
+                shotName: `Shot ${selectedShot.shotNumber}`,
+                message: 'Package downloaded',
+              }
+        ));
+      }
       finishExport('complete');
     } catch (error) {
       if (isPackageExportCancelled(error) || controller.signal.aborted) {
         finishExport('cancelled');
-        setExportProgress((current) => (
-          current
-            ? { ...current, message: 'Export cancelled', indeterminate: false }
-            : current
-        ));
+        if (mountedRef.current) {
+          setExportProgress((current) => (
+            current
+              ? { ...current, message: 'Export cancelled', indeterminate: false }
+              : current
+          ));
+        }
         return;
       }
       finishExport('failed', error instanceof Error ? error.message : 'Export failed.');
@@ -590,14 +611,19 @@ function ExportProgressPanel({
         </div>
 
         {running && (
-          <button
-            type="button"
-            onClick={onCancel}
-            data-export-cancel
-            className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-lg border border-subtle text-sm font-medium text-secondary transition hover:border-strong hover:text-primary"
-          >
-            Cancel export
-          </button>
+          <div className="mt-4 space-y-1.5">
+            <button
+              type="button"
+              onClick={onCancel}
+              data-export-cancel
+              className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-subtle text-sm font-medium text-secondary transition hover:border-strong hover:text-primary"
+            >
+              Cancel export
+            </button>
+            <p className="text-[11px] leading-snug text-muted">
+              Cancellation applies between major steps; the current render or ZIP pass may finish first.
+            </p>
+          </div>
         )}
       </div>
     </div>

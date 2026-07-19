@@ -495,8 +495,10 @@ describe('ui revamp fidelity surfaces', () => {
     expect(exportWorkspace).toContain('data-export-project-readiness');
     expect(exportWorkspace).toContain('getShotWarnings');
     expect(exportWorkspace).toContain('data-export-progress-panel');
+    expect(exportWorkspace).toContain('abortRef.current?.abort()');
     expect(exportWorkspace).not.toContain('WarningPopover');
     expect(exportWorkspace).toContain('Handoff packages');
+    expect(store).toContain('An export is currently running. Cancel it and leave?');
     expect(store).toContain('navigateToShots?: boolean');
   });
 
