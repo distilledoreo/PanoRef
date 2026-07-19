@@ -1,17 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, Check, Download, FileJson, FolderArchive, Settings } from 'lucide-react';
+import { Archive, Check, Download, FileJson, FolderArchive, Settings, X } from 'lucide-react';
 import { createShotPackageManifest, selectExportPathPreview } from '../../engine/exportManifest';
 import { reconcileExportSelectedShotIds } from '../../engine/exportSelection';
-import { buildMultiShotPackage, buildShotPackage, downloadBlob } from '../../engine/packageExport';
+import {
+  buildMultiShotPackage,
+  buildShotPackage,
+  downloadBlob,
+  isPackageExportCancelled,
+  PackageExportProgress,
+} from '../../engine/packageExport';
 import { getProjectWarnings, getShotWarnings } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
 import { ShotThumbnail } from '../common/ShotThumbnail';
-import { WarningPopover } from '../common/StatusBadge';
+import { WarningDetailsButton } from '../common/WarningDetailsButton';
+import { WarningList } from '../common/WarningList';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { FullBleedLayout } from './WorkspaceShell';
+
+type ExportUiPhase = 'idle' | 'running' | 'complete' | 'failed' | 'cancelled';
 
 export function ExportWorkspace() {
   const {
@@ -29,11 +38,15 @@ export function ExportWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportingShotId, setExportingShotId] = useState<string | undefined>();
   const [exportError, setExportError] = useState<string | undefined>();
+  const [exportProgress, setExportProgress] = useState<PackageExportProgress | undefined>();
+  const [exportUiPhase, setExportUiPhase] = useState<ExportUiPhase>('idle');
+  const abortRef = useRef<AbortController | null>(null);
   const projectIdRef = useRef(project.id);
   const prevShotIdsRef = useRef(project.shots.map((shot) => shot.id));
   const shotIdsKey = project.shots.map((shot) => shot.id).join('\0');
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const manifest = useMemo(() => selectedShot ? createShotPackageManifest(project, selectedShot) : undefined, [project, selectedShot]);
+  const projectWarnings = useMemo(() => getProjectWarnings(project), [project]);
   const primaryAction = useMemo(
     () => resolveWorkspacePrimaryAction({
       project,
@@ -60,6 +73,16 @@ export function ExportWorkspace() {
     }));
   }, [project.id, shotIdsKey]);
 
+  useEffect(() => {
+    if (!isExportingPackage) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isExportingPackage]);
+
   const toggleShotSelection = (shotId: string) => {
     setSelectedShotIds((current) => {
       const next = new Set(current);
@@ -69,43 +92,128 @@ export function ExportWorkspace() {
     });
   };
 
+  const handlePackageProgress = (progress: PackageExportProgress) => {
+    setExportProgress(progress);
+    if (progress.shotId) {
+      setExportingShotId(progress.shotId);
+    }
+  };
+
+  const beginExport = () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setExportingPackage(true);
+    setExportError(undefined);
+    setExportProgress(undefined);
+    setExportUiPhase('running');
+    return controller;
+  };
+
+  const finishExport = (phase: Exclude<ExportUiPhase, 'idle' | 'running'>, errorMessage?: string) => {
+    setExportingPackage(false);
+    setExportingShotId(undefined);
+    abortRef.current = null;
+    setExportUiPhase(phase);
+    if (errorMessage) setExportError(errorMessage);
+  };
+
+  const cancelExport = () => {
+    abortRef.current?.abort();
+    setExportProgress((current) => (
+      current
+        ? { ...current, message: 'Cancelling export…', indeterminate: true }
+        : current
+    ));
+  };
+
+  const dismissProgressPanel = () => {
+    if (exportUiPhase === 'running') return;
+    setExportUiPhase('idle');
+    setExportProgress(undefined);
+  };
+
   const exportSelectedShots = async () => {
     const shotsToExport = project.shots.filter((shot) => selectedShotIds.has(shot.id));
     if (shotsToExport.length === 0) return;
-    setExportingPackage(true);
-    setExportError(undefined);
+    const controller = beginExport();
     setExportingShotId(shotsToExport[0]?.id);
     try {
       // One download for N shots — avoids browser multi-download blocking.
-      const result = await buildMultiShotPackage(project, shotsToExport);
+      const result = await buildMultiShotPackage(project, shotsToExport, {
+        signal: controller.signal,
+        onProgress: handlePackageProgress,
+      });
       downloadBlob(result.blob, result.fileName);
       setLastExport(result.manifestPaths);
       for (const shot of shotsToExport) {
         updateShot(shot.id, { status: 'exported' });
         markFinalPackageExported(shot.id);
       }
+      setExportProgress((current) => (
+        current
+          ? { ...current, phase: 'complete', progress: 1, message: 'Package downloaded', indeterminate: false }
+          : {
+              phase: 'complete',
+              progress: 1,
+              currentShot: shotsToExport.length,
+              totalShots: shotsToExport.length,
+              message: 'Package downloaded',
+            }
+      ));
+      finishExport('complete');
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'Export failed.');
-    } finally {
-      setExportingPackage(false);
-      setExportingShotId(undefined);
+      if (isPackageExportCancelled(error) || controller.signal.aborted) {
+        finishExport('cancelled');
+        setExportProgress((current) => (
+          current
+            ? { ...current, message: 'Export cancelled', indeterminate: false }
+            : current
+        ));
+        return;
+      }
+      finishExport('failed', error instanceof Error ? error.message : 'Export failed.');
     }
   };
 
   const exportShot = async () => {
     if (!selectedShot) return;
-    setExportingPackage(true);
-    setExportError(undefined);
+    const controller = beginExport();
+    setExportingShotId(selectedShot.id);
     try {
-      const result = await buildShotPackage(project, selectedShot);
+      const result = await buildShotPackage(project, selectedShot, {
+        signal: controller.signal,
+        onProgress: handlePackageProgress,
+      });
       downloadBlob(result.blob, result.fileName);
       setLastExport(result.manifestPaths);
       updateShot(selectedShot.id, { status: 'exported' });
       markFinalPackageExported(selectedShot.id);
+      setExportProgress((current) => (
+        current
+          ? { ...current, phase: 'complete', progress: 1, message: 'Package downloaded', indeterminate: false }
+          : {
+              phase: 'complete',
+              progress: 1,
+              currentShot: 1,
+              totalShots: 1,
+              shotId: selectedShot.id,
+              shotName: `Shot ${selectedShot.shotNumber}`,
+              message: 'Package downloaded',
+            }
+      ));
+      finishExport('complete');
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'Export failed.');
-    } finally {
-      setExportingPackage(false);
+      if (isPackageExportCancelled(error) || controller.signal.aborted) {
+        finishExport('cancelled');
+        setExportProgress((current) => (
+          current
+            ? { ...current, message: 'Export cancelled', indeterminate: false }
+            : current
+        ));
+        return;
+      }
+      finishExport('failed', error instanceof Error ? error.message : 'Export failed.');
     }
   };
 
@@ -117,7 +225,11 @@ export function ExportWorkspace() {
     { name: 'manifest.json', description: 'Package manifest' },
   ];
 
-  const fitsCompactShotList = project.shots.length > 0 && project.shots.length <= 6;
+  const fitsCompactShotList = (
+    project.shots.length > 0
+    && project.shots.length <= 6
+    && projectWarnings.length === 0
+  );
   const manifestPreviewPaths = useMemo(
     () => (manifest ? selectExportPathPreview(manifest.files.map((file) => file.path), 3) : []),
     [manifest],
@@ -126,10 +238,11 @@ export function ExportWorkspace() {
     () => selectExportPathPreview(lastExport, 3),
     [lastExport],
   );
+  const showProgressPanel = exportUiPhase !== 'idle';
 
   return (
     <FullBleedLayout reserveHeader>
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-base p-4">
+      <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-surface-base p-4">
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
           <div
             data-export-package-panel="composed"
@@ -186,7 +299,8 @@ export function ExportWorkspace() {
                 type="button"
                 onClick={() => setSettingsOpen(true)}
                 data-export-settings-trigger
-                className="inline-flex items-center gap-1.5 text-[11px] font-medium text-secondary transition hover:text-accent"
+                disabled={isExportingPackage}
+                className="inline-flex items-center gap-1.5 text-[11px] font-medium text-secondary transition hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Settings className="h-3.5 w-3.5" />
                 Export Settings
@@ -210,13 +324,26 @@ export function ExportWorkspace() {
               <h2 className="text-sm font-semibold text-primary">Select Shots to Export</h2>
               <p className="text-[11px] text-secondary">{selectedShotIds.size} shot{selectedShotIds.size === 1 ? '' : 's'} selected</p>
             </div>
+
+            {projectWarnings.length > 0 && (
+              <div
+                data-export-project-readiness
+                className="shrink-0 space-y-1.5 border-b border-subtle px-3 py-2"
+              >
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-secondary">
+                  Project readiness
+                </div>
+                <WarningList warnings={projectWarnings} />
+              </div>
+            )}
+
             <div
               className={`min-h-0 flex-1 space-y-1 p-2 ${
                 fitsCompactShotList ? 'overflow-hidden' : 'overflow-y-auto'
               }`}
             >
               {project.shots.map((shot) => {
-                const warnings = [...getProjectWarnings(project), ...getShotWarnings(project, shot)];
+                const shotWarnings = getShotWarnings(project, shot);
                 const checked = selectedShotIds.has(shot.id);
                 const active = selectedShotId === shot.id;
                 return (
@@ -233,13 +360,15 @@ export function ExportWorkspace() {
                       type="checkbox"
                       checked={checked}
                       onChange={() => toggleShotSelection(shot.id)}
+                      disabled={isExportingPackage}
                       className="h-5 w-5 accent-[var(--accent)]"
                       aria-label={`Export Shot ${shot.shotNumber}`}
                     />
                     <button
                       type="button"
                       onClick={() => selectShot(shot.id)}
-                      className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left"
+                      disabled={isExportingPackage}
+                      className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-70"
                     >
                       <ShotThumbnail project={project} shot={shot} compact className="h-9 w-16 shrink-0" />
                       <span className="min-w-0 flex-1 leading-tight">
@@ -247,18 +376,18 @@ export function ExportWorkspace() {
                         <span className="block truncate text-[11px] text-secondary">{shot.name}</span>
                       </span>
                     </button>
-                    {warnings.length > 0 && (
-                      <WarningPopover warnings={warnings}>
-                        <span
-                          className="shrink-0 cursor-pointer rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
-                          title="Show warning details"
-                        >
-                          {warnings.length}
-                        </span>
-                      </WarningPopover>
+                    {shotWarnings.length > 0 ? (
+                      <WarningDetailsButton
+                        warnings={shotWarnings}
+                        title={`Shot ${shot.shotNumber} issues`}
+                      />
+                    ) : (
+                      <span className="shrink-0 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                        Ready
+                      </span>
                     )}
-                    {exportingShotId === shot.id && (
-                      <span className="shrink-0 text-[10px] text-accent">Exporting...</span>
+                    {exportingShotId === shot.id && exportUiPhase === 'running' && (
+                      <span className="shrink-0 text-[10px] text-accent">Exporting…</span>
                     )}
                   </div>
                 );
@@ -268,7 +397,7 @@ export function ExportWorkspace() {
               )}
             </div>
             <div className="shrink-0 border-t border-subtle space-y-2 px-2 py-2">
-              {exportError && (
+              {exportError && exportUiPhase === 'failed' && (
                 <p
                   role="alert"
                   className="rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-2 text-xs text-primary"
@@ -295,6 +424,15 @@ export function ExportWorkspace() {
             </div>
           </div>
         </div>
+
+        {showProgressPanel && (
+          <ExportProgressPanel
+            progress={exportProgress}
+            phase={exportUiPhase}
+            onCancel={cancelExport}
+            onDismiss={dismissProgressPanel}
+          />
+        )}
       </div>
 
       <PrecisionDrawer open={settingsOpen} title="Export Settings" onClose={() => setSettingsOpen(false)}>
@@ -357,7 +495,7 @@ export function ExportWorkspace() {
               <FileJson className="h-4 w-4" />
               Export Final ZIP (current shot)
             </IconButton>
-            <IconButton onClick={() => addCamera({ navigateToShots: false })} className="w-full">
+            <IconButton onClick={() => addCamera({ navigateToShots: false })} disabled={isExportingPackage} className="w-full">
               Add Camera
             </IconButton>
           </div>
@@ -366,5 +504,102 @@ export function ExportWorkspace() {
         )}
       </PrecisionDrawer>
     </FullBleedLayout>
+  );
+}
+
+function ExportProgressPanel({
+  progress,
+  phase,
+  onCancel,
+  onDismiss,
+}: {
+  progress?: PackageExportProgress;
+  phase: ExportUiPhase;
+  onCancel: () => void;
+  onDismiss: () => void;
+}) {
+  const running = phase === 'running';
+  const percent = progress && !progress.indeterminate
+    ? Math.round(Math.min(1, Math.max(0, progress.progress)) * 100)
+    : undefined;
+  const shotLine = progress
+    ? `Exporting Shot ${progress.currentShot} of ${progress.totalShots}`
+    : 'Preparing export…';
+  const statusLabel = phase === 'complete'
+    ? 'Export complete'
+    : phase === 'failed'
+      ? 'Export failed'
+      : phase === 'cancelled'
+        ? 'Export cancelled'
+        : shotLine;
+
+  return (
+    <div
+      data-export-progress-panel={phase}
+      className="absolute inset-0 z-40 flex items-center justify-center bg-surface-base/70 p-4 backdrop-blur-[2px]"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="w-full max-w-md rounded-[var(--radius-card)] border border-subtle bg-surface-raised p-5 shadow-soft">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-primary">{statusLabel}</h2>
+            {progress?.shotName && running && (
+              <p className="mt-0.5 text-sm text-secondary">{progress.shotName}</p>
+            )}
+          </div>
+          {!running && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="rounded-lg p-1 text-secondary transition hover:bg-surface-muted hover:text-primary"
+              aria-label="Dismiss export progress"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        <p className="mt-3 text-sm text-secondary">
+          {progress?.message ?? (phase === 'failed' ? 'Something went wrong while building the package.' : 'Working…')}
+        </p>
+
+        <div className="mt-4">
+          {progress?.indeterminate || percent === undefined ? (
+            <div
+              data-export-progress-indeterminate
+              className="h-2 overflow-hidden rounded-full bg-surface-muted"
+            >
+              <div className="h-full w-full origin-left animate-pulse rounded-full bg-[var(--accent)]/70" />
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] text-secondary">
+                <span>Progress</span>
+                <span>{percent}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-surface-muted">
+                <div
+                  data-export-progress-bar
+                  className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-200"
+                  style={{ width: `${percent}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {running && (
+          <button
+            type="button"
+            onClick={onCancel}
+            data-export-cancel
+            className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-lg border border-subtle text-sm font-medium text-secondary transition hover:border-strong hover:text-primary"
+          >
+            Cancel export
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

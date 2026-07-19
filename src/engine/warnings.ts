@@ -35,6 +35,28 @@ export function getProjectWarnings(project: LocationProject): WarningItem[] {
   return warnings;
 }
 
+/** Compact severity summary for export / shot issue buttons (e.g. "1 error · 2 warnings"). */
+export function formatWarningSummary(warnings: WarningItem[]): string {
+  if (warnings.length === 0) return 'Ready';
+
+  const errors = warnings.filter((warning) => warning.severity === 'danger').length;
+  const warningCount = warnings.filter((warning) => warning.severity === 'warning').length;
+  const infos = warnings.filter((warning) => warning.severity === 'info').length;
+  const parts: string[] = [];
+
+  if (errors > 0) {
+    parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
+  }
+  if (warningCount > 0) {
+    parts.push(`${warningCount} warning${warningCount === 1 ? '' : 's'}`);
+  }
+  if (infos > 0) {
+    parts.push(`${infos} info item${infos === 1 ? '' : 's'}`);
+  }
+
+  return parts.join(' · ');
+}
+
 export function getShotWarnings(project: LocationProject, shot: Shot): WarningItem[] {
   const warnings: WarningItem[] = [];
   const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);

@@ -2,7 +2,12 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { createDefaultProject, createPanoAsset, createPanoReference } from '../src/domain/defaults';
-import { buildMultiShotPackage, buildShotPackage } from '../src/engine/packageExport';
+import {
+  buildMultiShotPackage,
+  buildShotPackage,
+  countShotPackageUnits,
+  PackageExportProgress,
+} from '../src/engine/packageExport';
 
 function withGrayboxAndShot(name = 'Temple') {
   const project = createDefaultProject();
@@ -102,5 +107,52 @@ describe('package export', () => {
     const multi = await buildMultiShotPackage(project, [project.shots[0]]);
     const single = await buildShotPackage(project, project.shots[0]);
     expect(multi.fileName).toBe(single.fileName);
+  });
+
+  it('emits staged package progress and advances the active shot', async () => {
+    const project = withGrayboxAndShot('Progress Export');
+    const second = {
+      ...project.shots[0],
+      id: 'shot-test-2',
+      shotNumber: '002',
+      name: 'Camera 002',
+    };
+    project.shots.push(second);
+
+    const events: PackageExportProgress[] = [];
+    await buildMultiShotPackage(project, project.shots, {
+      onProgress: (progress) => events.push({ ...progress }),
+    });
+
+    expect(events.length).toBeGreaterThan(3);
+    expect(events[0]?.phase).toBe('preparing');
+    expect(events.some((event) => event.phase === 'packaging')).toBe(true);
+    expect(events.some((event) => event.phase === 'compressing')).toBe(true);
+    expect(events.at(-1)?.phase).toBe('complete');
+    expect(events.some((event) => event.currentShot === 1 && event.shotId === project.shots[0].id)).toBe(true);
+    expect(events.some((event) => event.currentShot === 2 && event.shotId === second.id)).toBe(true);
+    expect(events.at(-1)?.progress).toBe(1);
+  });
+
+  it('honours abort during multi-shot package export', async () => {
+    const project = withGrayboxAndShot('Cancel Export');
+    const second = {
+      ...project.shots[0],
+      id: 'shot-test-2',
+      shotNumber: '002',
+      name: 'Camera 002',
+    };
+    project.shots.push(second);
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      buildMultiShotPackage(project, project.shots, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('counts at least one package unit per shot', () => {
+    const project = withGrayboxAndShot();
+    expect(countShotPackageUnits(project, project.shots[0])).toBeGreaterThanOrEqual(1);
   });
 });

@@ -4,7 +4,7 @@ import { createShotPackageManifest, selectExportPathPreview } from '../src/engin
 import { generateImagePrompt } from '../src/engine/prompts';
 import { ShotPackageError, buildShotPackage } from '../src/engine/packageExport';
 import { serializeProject, parseProject } from '../src/engine/projectIO';
-import { getProjectWarnings, getShotWarnings } from '../src/engine/warnings';
+import { formatWarningSummary, getProjectWarnings, getShotWarnings } from '../src/engine/warnings';
 import { getLatestGrayboxPano, getPanoAsset } from '../src/domain/selectors';
 import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
 import { useContinuityStore } from '../src/state/useContinuityStore';
@@ -190,6 +190,7 @@ describe('project workflow logic', () => {
     const warnings = getProjectWarnings(project).map((warning) => warning.id);
     expect(warnings).toContain('missing-graybox-pano');
     expect(warnings).toContain('missing-canonical-pano');
+    expect(formatWarningSummary(getProjectWarnings(project))).toBe('2 warnings');
   });
 
   it('builds shot prompts with selected prompt-critical landmarks', () => {
