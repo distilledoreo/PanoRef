@@ -37,6 +37,66 @@ export function getProjectWarnings(project: LocationProject): WarningItem[] {
   return warnings;
 }
 
+/**
+ * Export package readiness for the current multi-select.
+ * Only reports gaps that selected shots actually request — clay-only packages stay quiet.
+ */
+export function getExportSelectionWarnings(
+  project: LocationProject,
+  shots: Shot[],
+): WarningItem[] {
+  const warnings: WarningItem[] = [];
+  if (shots.length === 0) {
+    return [{
+      id: 'no-export-shots-selected',
+      severity: 'info',
+      message: 'Select at least one shot to export.',
+    }];
+  }
+
+  const grayboxPano = project.panoRefs.find((pano) => pano.type === 'graybox_render');
+  const canonicalPano = project.panoRefs.find((pano) => pano.isCanonical);
+  const canProject = canUseProjectedAppearance(project);
+
+  const wantsGraybox = shots.some((shot) => shot.exportSettings.includeGrayboxPano);
+  const wantsProjected = shots.some((shot) => (
+    Boolean(shot.exportSettings.includeProjectedViewport)
+    || Boolean(shot.exportSettings.includeProjectedCameraMoveVideo)
+    || Boolean(shot.exportSettings.includeProjectedCameraMoveReferenceFrames)
+  ));
+  const wantsFullPanoWithoutSource = shots.some((shot) => {
+    if (!shot.exportSettings.includeFullPano) return false;
+    const linked = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);
+    return !linked && !canonicalPano;
+  });
+
+  if (wantsGraybox && !grayboxPano) {
+    warnings.push({
+      id: 'selection-missing-graybox-pano',
+      severity: 'warning',
+      message: 'Graybox panorama export is enabled for a selected shot, but no graybox 360 has been rendered from Build.',
+    });
+  }
+
+  if (wantsProjected && !canProject) {
+    warnings.push({
+      id: 'selection-missing-projector',
+      severity: 'warning',
+      message: 'Projected exports are enabled for a selected shot, but no usable styled panorama projector is available.',
+    });
+  }
+
+  if (wantsFullPanoWithoutSource) {
+    warnings.push({
+      id: 'selection-missing-full-pano',
+      severity: 'warning',
+      message: 'Full pano / cubemap export is enabled for a selected shot, but no canonical or linked panorama is available.',
+    });
+  }
+
+  return warnings;
+}
+
 /** Ready / Ready with notes / Needs attention — from check severities. */
 export function getShotReadinessLevel(warnings: WarningItem[]): ShotReadinessLevel {
   if (warnings.some((item) => item.severity === 'warning' || item.severity === 'danger')) {
@@ -65,9 +125,19 @@ export function formatWarningSummary(warnings: WarningItem[]): string {
   return 'Needs attention';
 }
 
-/** Quiet prompt-authoring hint — not an export readiness failure. */
-export function shouldShowMissingLandmarkPromptNote(shot: Shot): boolean {
-  return shot.exportSettings.includePrompt && shot.landmarkIds.length === 0;
+/**
+ * Quiet prompt-authoring hint — not an export readiness failure.
+ * Matches generateImagePrompt: only promptCritical landmarks count.
+ */
+export function shouldShowMissingLandmarkPromptNote(
+  project: LocationProject,
+  shot: Shot,
+): boolean {
+  if (!shot.exportSettings.includePrompt) return false;
+  const pinnedCritical = project.landmarks.some(
+    (landmark) => landmark.promptCritical && shot.landmarkIds.includes(landmark.id),
+  );
+  return !pinnedCritical;
 }
 
 /**
@@ -79,6 +149,7 @@ export function getShotWarnings(project: LocationProject, shot: Shot): WarningIt
   const warnings: WarningItem[] = [];
   const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);
   const canonicalPano = project.panoRefs.find((pano) => pano.isCanonical);
+  const grayboxPano = project.panoRefs.find((pano) => pano.type === 'graybox_render');
   const settings = shot.exportSettings;
   const canProject = canUseProjectedAppearance(project);
 
@@ -89,6 +160,14 @@ export function getShotWarnings(project: LocationProject, shot: Shot): WarningIt
   );
   const wantsPanoCrop = Boolean(settings.includePanoCrop);
   const wantsFullPano = Boolean(settings.includeFullPano);
+
+  if (settings.includeGrayboxPano && !grayboxPano) {
+    warnings.push({
+      id: `${shot.id}-missing-graybox-pano`,
+      severity: 'warning',
+      message: 'Graybox panorama export is enabled, but no graybox 360 has been rendered from Build.',
+    });
+  }
 
   if (wantsProjected && !canProject) {
     warnings.push({

@@ -4,7 +4,7 @@ import { createShotPackageManifest, selectExportPathPreview } from '../src/engin
 import { generateImagePrompt } from '../src/engine/prompts';
 import { ShotPackageError, buildShotPackage } from '../src/engine/packageExport';
 import { serializeProject, parseProject } from '../src/engine/projectIO';
-import { formatWarningSummary, getProjectWarnings, getShotWarnings, shouldShowMissingLandmarkPromptNote } from '../src/engine/warnings';
+import { formatWarningSummary, getExportSelectionWarnings, getProjectWarnings, getShotWarnings, shouldShowMissingLandmarkPromptNote } from '../src/engine/warnings';
 import { getLatestGrayboxPano, getPanoAsset } from '../src/domain/selectors';
 import { setTwoPointCameraKeyframe } from '../src/engine/cameraKeyframes';
 import { useContinuityStore } from '../src/state/useContinuityStore';
@@ -580,6 +580,7 @@ describe('project workflow logic', () => {
       ...shot.exportSettings,
       includePanoCrop: false,
       includeFullPano: false,
+      includeGrayboxPano: false,
       includeProjectedViewport: false,
       includeProjectedCameraMoveVideo: false,
       includeProjectedCameraMoveReferenceFrames: false,
@@ -591,7 +592,59 @@ describe('project workflow logic', () => {
     expect(warnings.some((warning) => warning.id.endsWith('missing-landmarks'))).toBe(false);
     expect(warnings.some((warning) => warning.id.includes('pano-match') || warning.id.includes('pano-origin'))).toBe(false);
     expect(formatWarningSummary(warnings)).toBe('Ready');
-    expect(shouldShowMissingLandmarkPromptNote(shot)).toBe(true);
+    expect(shouldShowMissingLandmarkPromptNote(project, shot)).toBe(true);
+
+    // Non-critical landmark alone still leaves the prompt note visible.
+    const nonCritical = project.landmarks.find((landmark) => !landmark.promptCritical);
+    if (nonCritical) {
+      shot.landmarkIds = [nonCritical.id];
+    } else {
+      project.landmarks.push({
+        ...project.landmarks[0],
+        id: 'landmark-non-critical',
+        promptCritical: false,
+        displayName: 'Prop',
+        name: 'Prop',
+      });
+      shot.landmarkIds = ['landmark-non-critical'];
+    }
+    expect(shouldShowMissingLandmarkPromptNote(project, shot)).toBe(true);
+
+    shot.landmarkIds = [project.landmarks.find((landmark) => landmark.promptCritical)!.id];
+    expect(shouldShowMissingLandmarkPromptNote(project, shot)).toBe(false);
+  });
+
+  it('scopes package readiness to selected shot export settings', () => {
+    const project = createDefaultProject();
+    const clayOnly = {
+      ...project.shots[0],
+      id: 'shot-clay-only',
+      shotNumber: '010',
+      exportSettings: {
+        ...project.shots[0].exportSettings,
+        includeGrayboxPano: false,
+        includeFullPano: false,
+        includePanoCrop: false,
+        includeProjectedViewport: false,
+        includeProjectedCameraMoveVideo: false,
+        includeProjectedCameraMoveReferenceFrames: false,
+      },
+    };
+    project.shots = [clayOnly];
+
+    expect(getExportSelectionWarnings(project, [clayOnly])).toEqual([]);
+    expect(getProjectWarnings(project).map((warning) => warning.id)).toEqual(
+      expect.arrayContaining(['missing-graybox-pano', 'missing-canonical-pano']),
+    );
+
+    clayOnly.exportSettings = {
+      ...clayOnly.exportSettings,
+      includeGrayboxPano: true,
+      includeProjectedViewport: true,
+    };
+    const selection = getExportSelectionWarnings(project, [clayOnly]).map((warning) => warning.id);
+    expect(selection).toContain('selection-missing-graybox-pano');
+    expect(selection).toContain('selection-missing-projector');
   });
 
   it('notes pano origin distance only when panorama crop export is enabled', () => {
@@ -630,6 +683,7 @@ describe('project workflow logic', () => {
       ...shot.exportSettings,
       includePanoCrop: true,
       includeFullPano: false,
+      includeGrayboxPano: false,
       includeProjectedViewport: false,
       includeProjectedCameraMoveVideo: false,
       includeProjectedCameraMoveReferenceFrames: false,

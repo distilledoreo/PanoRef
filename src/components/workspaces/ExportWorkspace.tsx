@@ -9,7 +9,7 @@ import {
   isPackageExportCancelled,
   PackageExportProgress,
 } from '../../engine/packageExport';
-import { getProjectWarnings, getShotWarnings, shouldShowMissingLandmarkPromptNote } from '../../engine/warnings';
+import { getExportSelectionWarnings, getShotWarnings, shouldShowMissingLandmarkPromptNote } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
 import { Field, IconButton, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
@@ -47,7 +47,14 @@ export function ExportWorkspace() {
   const shotIdsKey = project.shots.map((shot) => shot.id).join('\0');
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const manifest = useMemo(() => selectedShot ? createShotPackageManifest(project, selectedShot) : undefined, [project, selectedShot]);
-  const projectWarnings = useMemo(() => getProjectWarnings(project), [project]);
+  const selectedShots = useMemo(
+    () => project.shots.filter((shot) => selectedShotIds.has(shot.id)),
+    [project.shots, selectedShotIds],
+  );
+  const selectionWarnings = useMemo(
+    () => getExportSelectionWarnings(project, selectedShots),
+    [project, selectedShots],
+  );
   const primaryAction = useMemo(
     () => resolveWorkspacePrimaryAction({
       project,
@@ -249,7 +256,7 @@ export function ExportWorkspace() {
   const fitsCompactShotList = (
     project.shots.length > 0
     && project.shots.length <= 6
-    && projectWarnings.length === 0
+    && selectionWarnings.length === 0
   );
   const manifestPreviewPaths = useMemo(
     () => (manifest ? selectExportPathPreview(manifest.files.map((file) => file.path), 3) : []),
@@ -346,15 +353,15 @@ export function ExportWorkspace() {
               <p className="text-[11px] text-secondary">{selectedShotIds.size} shot{selectedShotIds.size === 1 ? '' : 's'} selected</p>
             </div>
 
-            {projectWarnings.length > 0 && (
+            {selectionWarnings.length > 0 && (
               <div
                 data-export-project-readiness
                 className="shrink-0 space-y-1.5 border-b border-subtle px-3 py-2"
               >
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-secondary">
-                  Project readiness
+                  Package readiness
                 </div>
-                <WarningList warnings={projectWarnings} />
+                <WarningList warnings={selectionWarnings} />
               </div>
             )}
 
@@ -512,7 +519,7 @@ export function ExportWorkspace() {
                   />
                   {label}
                 </label>
-                {key === 'includePrompt' && shouldShowMissingLandmarkPromptNote(selectedShot) && (
+                {key === 'includePrompt' && shouldShowMissingLandmarkPromptNote(project, selectedShot) && (
                   <p
                     data-export-prompt-landmark-note
                     className="px-1 text-[11px] leading-snug text-muted"
