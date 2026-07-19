@@ -133,7 +133,8 @@ float sampleProjectorVisibility(
   float farMeters,
   float faceSize,
   float baseBias,
-  float softness
+  float softness,
+  float fastMode
 ) {
   vec3 projectorOffset = worldPosition - projectorOrigin;
   float fragmentDistance = length(projectorOffset);
@@ -143,7 +144,20 @@ float sampleProjectorVisibility(
     + fragmentDistance * 0.0015
     + 2.0 * fwidth(fragmentDistance);
 
-  // Robust tangent basis for angular offsets.
+  // Export / Fast: one center cubemap sample (~5× fewer occlusion lookups).
+  if (fastMode > 0.5) {
+    return singleOcclusionSample(
+      direction,
+      worldPosition,
+      projectorOrigin,
+      occlusionCube,
+      nearMeters,
+      farMeters,
+      effectiveBias
+    );
+  }
+
+  // Soft edges: five-tap angular filter (viewport quality).
   vec3 helperAxis = abs(direction.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
   vec3 tangent = normalize(cross(helperAxis, direction));
   vec3 bitangent = normalize(cross(direction, tangent));

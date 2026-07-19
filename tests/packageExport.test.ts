@@ -56,7 +56,9 @@ describe('package export', () => {
     expect(source).toContain('hasRenderableCameraMove(shot.cameraKeyframes)');
     expect(source).toContain('renderShotCameraMoveMp4');
     expect(source).toContain('viewport_clay_motion.mp4');
-    expect(source).toContain('getSupportedCameraMoveMp4MimeType');
+    expect(source).toContain("resolutionPreset: '1080p'");
+    expect(source).toContain("mode: 'render'");
+    expect(source).not.toContain('getSupportedCameraMoveMp4MimeType');
   });
 
   it('builds a single-shot package zip', async () => {

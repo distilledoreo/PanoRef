@@ -28,7 +28,6 @@ import {
   type SceneVisualTheme,
 } from './sceneObjects';
 import {
-  computeProjectorOcclusionKey,
   DEFAULT_OCCLUSION_FACE_SIZE,
   DEFAULT_OCCLUSION_NEAR,
   generateProjectorOcclusionMap,
@@ -37,6 +36,19 @@ import {
 } from './projectorOcclusion';
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 import { computeGrayboxPanoFarPlane } from './sceneBounds';
+import { createFinalRenderSceneOptions } from './finalRenderProfile';
+import { computeCameraMoveClippingRange } from './exportClipping';
+import {
+  canUseDeterministicMp4Export,
+  encodeCanvasFramesToMp4,
+} from './videoEncode';
+import {
+  cameraMoveFrameTimeSeconds,
+  computeCameraMoveFrameCount,
+  DEFAULT_VIDEO_FRAME_RATE,
+  resolveVideoPreset,
+  type VideoResolutionPresetId,
+} from './videoPresets';
 
 export interface ImageRenderResult {
   dataUrl: string;
@@ -53,6 +65,10 @@ export interface VideoRenderResult {
   frameRate: number;
   mimeType: string;
   fileExtension: 'mp4';
+  /** How the file was produced. */
+  encodeMode?: 'render' | 'quickPreview';
+  frameCount?: number;
+  codecString?: string;
 }
 
 export interface PanoCubemapRenderResult {
@@ -60,20 +76,49 @@ export interface PanoCubemapRenderResult {
   faces: Record<CameraMoveCubemapFaceId, ImageRenderResult>;
 }
 
+export type CameraMoveExportPhase =
+  | 'preparing'
+  | 'rendering'
+  | 'finalizing'
+  | 'complete';
+
+export interface CameraMoveExportProgress {
+  phase: CameraMoveExportPhase;
+  /** Overall 0–1 progress. */
+  progress: number;
+  completedFrames?: number;
+  totalFrames?: number;
+  message: string;
+}
+
 export interface CameraMoveVideoOptions {
   frameRate?: number;
   mimeType?: string;
   videoBitsPerSecond?: number;
-  onProgress?: (progress: number) => void;
-  /** Optional abort; stops the recorder and rejects. */
+  onProgress?: (progress: number | CameraMoveExportProgress) => void;
+  /** Optional abort; stops encoding and rejects without downloading. */
   signal?: AbortSignal;
-  /** Wall-clock timeout in ms (default 90s). */
+  /** Wall-clock timeout in ms (Quick Preview only; default 90s). */
   timeoutMs?: number;
   /**
    * Scene appearance for the encoded move.
    * `projected` requires a valid styled panorama projector.
    */
   appearance?: 'clay' | 'projected';
+  /**
+   * `render` = fixed-step WebCodecs + Mediabunny MP4 (default when supported).
+   * `quickPreview` = real-time MediaRecorder fallback.
+   */
+  mode?: 'render' | 'quickPreview';
+  /** Video resolution preset. Stills keep shot.exportSettings; video defaults to 1080p. */
+  resolutionPreset?: VideoResolutionPresetId;
+  width?: number;
+  height?: number;
+  /**
+   * Projected occlusion filtering for video exports.
+   * Defaults to `fast` (one cubemap sample) for Render MP4.
+   */
+  occlusionFilter?: 'soft' | 'fast';
 }
 
 const MP4_MIME_CANDIDATES = [
@@ -91,8 +136,23 @@ export function getSupportedCameraMoveMp4MimeType(): string | undefined {
   return MP4_MIME_CANDIDATES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
+/** True when deterministic WebCodecs H.264 export can run for the given preset. */
+export async function canUseRenderMp4Export(
+  resolutionPreset: VideoResolutionPresetId = '1080p',
+): Promise<boolean> {
+  return canUseDeterministicMp4Export(resolveVideoPreset(resolutionPreset));
+}
+
+function emitProgress(
+  onProgress: CameraMoveVideoOptions['onProgress'] | undefined,
+  info: CameraMoveExportProgress,
+) {
+  onProgress?.(info);
+}
+
 /** Re-exported for backward compatibility (history/imports). */
 export { computeGrayboxPanoFarPlane };
+
 
 /**
  * Bake capture-origin yaw into the equirect so stamping scene.panoRotation on the
@@ -234,40 +294,285 @@ export async function renderShotCameraMoveMp4(
     throw new Error('Capture start and end camera keyframes before exporting MP4.');
   }
 
-  const mimeType = options.mimeType ?? getSupportedCameraMoveMp4MimeType();
-  if (!mimeType) {
-    throw new Error('MP4 camera move export is not supported in this browser.');
-  }
-
   const appearance = options.appearance ?? 'clay';
-
   if (appearance === 'projected' && !canUseProjectedAppearance(project)) {
     throw new Error(
       'Projected camera-move MP4 requires an importable styled panorama with a valid image asset.',
     );
   }
 
-  const frameRate = options.frameRate ?? 30;
+  const requestedMode = options.mode ?? 'render';
+  const resolutionPresetId = options.resolutionPreset ?? '1080p';
+  const preset = resolveVideoPreset(resolutionPresetId);
+  const frameRate = options.frameRate ?? preset.frameRate ?? DEFAULT_VIDEO_FRAME_RATE;
+  const width = options.width ?? preset.width;
+  const height = options.height ?? preset.height;
   const durationSeconds = getCameraMoveDurationSeconds(keyframes);
-  const width = shot.exportSettings.width;
-  const height = shot.exportSettings.height;
+
+  // Prefer deterministic Render MP4; fall back to Quick Preview when WebCodecs is unavailable.
+  let mode: 'render' | 'quickPreview' = requestedMode;
+  if (mode === 'render') {
+    const canRender = await canUseDeterministicMp4Export({
+      ...preset,
+      width,
+      height,
+      frameRate,
+    });
+    if (!canRender) {
+      if (!getSupportedCameraMoveMp4MimeType()) {
+        throw new Error(
+          'Reliable MP4 export requires WebCodecs H.264 (Chrome/Edge). MediaRecorder fallback is also unavailable.',
+        );
+      }
+      mode = 'quickPreview';
+    }
+  }
+
+  if (mode === 'quickPreview') {
+    const mimeType = options.mimeType ?? getSupportedCameraMoveMp4MimeType();
+    if (!mimeType) {
+      throw new Error('MP4 camera move export is not supported in this browser.');
+    }
+    return renderShotCameraMoveMp4QuickPreview(project, shot, {
+      ...options,
+      mimeType,
+      frameRate,
+      width,
+      height,
+      appearance,
+      durationSeconds,
+      keyframes,
+    });
+  }
+
+  return renderShotCameraMoveMp4Deterministic(project, shot, {
+    ...options,
+    frameRate,
+    width,
+    height,
+    appearance,
+    durationSeconds,
+    keyframes,
+    preset: { ...preset, width, height, frameRate },
+    occlusionFilter: options.occlusionFilter ?? 'fast',
+  });
+}
+
+interface CameraMoveRenderContext {
+  mimeType?: string;
+  frameRate: number;
+  width: number;
+  height: number;
+  appearance: 'clay' | 'projected';
+  durationSeconds: number;
+  keyframes: ReturnType<typeof getSortedCameraKeyframes>;
+  onProgress?: CameraMoveVideoOptions['onProgress'];
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  videoBitsPerSecond?: number;
+  preset?: ReturnType<typeof resolveVideoPreset> & { width: number; height: number; frameRate: number };
+  occlusionFilter?: 'soft' | 'fast';
+}
+
+async function renderShotCameraMoveMp4Deterministic(
+  project: LocationProject,
+  shot: Shot,
+  ctx: CameraMoveRenderContext,
+): Promise<VideoRenderResult> {
+  const {
+    frameRate,
+    width,
+    height,
+    appearance,
+    durationSeconds,
+    keyframes,
+    signal,
+    onProgress,
+    preset,
+    occlusionFilter = 'fast',
+  } = ctx;
+
+  if (!preset) {
+    throw new Error('Deterministic MP4 export requires a video preset.');
+  }
+
+  const totalFrames = computeCameraMoveFrameCount(durationSeconds, frameRate);
+  emitProgress(onProgress, {
+    phase: 'preparing',
+    progress: 0,
+    completedFrames: 0,
+    totalFrames,
+    message: 'Preparing scene',
+  });
+
+  if (signal?.aborted) {
+    throw new Error('MP4 export was cancelled.');
+  }
+
+  await ensureHumanMannequinModel();
+  const renderer = createRenderer(width, height);
+  let projectedResources: ProjectedSceneResources | undefined;
+  let scene: THREE.Scene | undefined;
+
+  try {
+    if (appearance === 'projected') {
+      projectedResources = await loadProjectedSceneResources(renderer, project, {
+        occlusionFilterMode: occlusionFilter,
+      });
+    }
+
+    scene = buildScene(project, {
+      ...createFinalRenderSceneOptions(),
+      appearance: projectedResources ? 'projected' : 'clay',
+      projected: projectedResources?.options,
+    });
+
+    const clipping = computeCameraMoveClippingRange({
+      scene,
+      keyframeCameras: keyframes.map((keyframe) => keyframe.camera),
+    });
+
+    const camera = new THREE.PerspectiveCamera(
+      shot.camera.fovDegrees,
+      width / height,
+      clipping.near,
+      clipping.far,
+    );
+
+    emitProgress(onProgress, {
+      phase: 'rendering',
+      progress: 0.02,
+      completedFrames: 0,
+      totalFrames,
+      message: `Rendering frame 0 of ${totalFrames}`,
+    });
+
+    const encoded = await encodeCanvasFramesToMp4({
+      canvas: renderer.domElement,
+      preset,
+      totalFrames,
+      signal,
+      renderFrame: (frameIndex) => {
+        if (signal?.aborted) {
+          throw new Error('MP4 export was cancelled.');
+        }
+        const timeSeconds = cameraMoveFrameTimeSeconds(frameIndex, frameRate, durationSeconds);
+        renderCameraMoveFrame(
+          renderer,
+          scene!,
+          camera,
+          keyframes,
+          timeSeconds,
+          width,
+          height,
+          clipping,
+        );
+      },
+      onFrameEncoded: (completedFrames, frames) => {
+        const renderProgress = completedFrames / frames;
+        emitProgress(onProgress, {
+          phase: 'rendering',
+          progress: 0.02 + renderProgress * 0.90,
+          completedFrames,
+          totalFrames: frames,
+          message: `Rendering frame ${completedFrames} of ${frames}`,
+        });
+      },
+    });
+
+    emitProgress(onProgress, {
+      phase: 'finalizing',
+      progress: 0.95,
+      completedFrames: totalFrames,
+      totalFrames,
+      message: 'Finalizing MP4',
+    });
+
+    const result: VideoRenderResult = {
+      blob: encoded.blob,
+      dataUrl: await blobToDataUrl(encoded.blob),
+      width: encoded.width,
+      height: encoded.height,
+      durationSeconds,
+      frameRate: encoded.frameRate,
+      mimeType: encoded.mimeType,
+      fileExtension: 'mp4',
+      encodeMode: 'render',
+      frameCount: encoded.frameCount,
+      codecString: encoded.codecString,
+    };
+
+    emitProgress(onProgress, {
+      phase: 'complete',
+      progress: 1,
+      completedFrames: totalFrames,
+      totalFrames,
+      message: 'Complete',
+    });
+
+    return result;
+  } finally {
+    if (scene) disposeScene(scene);
+    projectedResources?.dispose();
+    disposeRenderer(renderer);
+  }
+}
+
+/** Real-time MediaRecorder path — fast, may drop frames (Quick Preview). */
+async function renderShotCameraMoveMp4QuickPreview(
+  project: LocationProject,
+  shot: Shot,
+  ctx: CameraMoveRenderContext,
+): Promise<VideoRenderResult> {
+  const {
+    mimeType,
+    frameRate,
+    width,
+    height,
+    appearance,
+    durationSeconds,
+    keyframes,
+    signal: externalSignal,
+    onProgress,
+    timeoutMs: optionTimeoutMs,
+    videoBitsPerSecond,
+    occlusionFilter = 'soft',
+  } = ctx;
+
+  if (!mimeType) {
+    throw new Error('MP4 camera move export is not supported in this browser.');
+  }
+
+  emitProgress(onProgress, {
+    phase: 'preparing',
+    progress: 0,
+    message: 'Preparing scene',
+  });
+
   await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
   let projectedResources: ProjectedSceneResources | undefined;
   if (appearance === 'projected') {
-    projectedResources = await loadProjectedSceneResources(renderer, project);
+    projectedResources = await loadProjectedSceneResources(renderer, project, {
+      occlusionFilterMode: occlusionFilter,
+    });
   }
   const scene = buildScene(project, {
-    showHelpers: false,
-    hiddenObjectTypes: ['sun_marker'],
+    ...createFinalRenderSceneOptions(),
     appearance: projectedResources ? 'projected' : 'clay',
     projected: projectedResources?.options,
   });
+
+  const clipping = computeCameraMoveClippingRange({
+    scene,
+    keyframeCameras: keyframes.map((keyframe) => keyframe.camera),
+  });
+
   const camera = new THREE.PerspectiveCamera(
     shot.camera.fovDegrees,
     width / height,
-    shot.camera.near,
-    shot.camera.far,
+    clipping.near,
+    clipping.far,
   );
 
   const captureStream = renderer.domElement.captureStream?.bind(renderer.domElement);
@@ -280,9 +585,7 @@ export async function renderShotCameraMoveMp4(
 
   const stream = captureStream(frameRate);
   const chunks: Blob[] = [];
-  // Longer moves need more wall time (esp. 4K projected).
-  const timeoutMs = options.timeoutMs ?? Math.max(90_000, Math.ceil(durationSeconds * 12_000));
-  const externalSignal = options.signal;
+  const timeoutMs = optionTimeoutMs ?? Math.max(90_000, Math.ceil(durationSeconds * 12_000));
 
   try {
     if (externalSignal?.aborted) {
@@ -291,7 +594,7 @@ export async function renderShotCameraMoveMp4(
 
     const recorder = new MediaRecorder(stream, {
       mimeType,
-      videoBitsPerSecond: options.videoBitsPerSecond ?? Math.max(1_000_000, width * height * 2),
+      videoBitsPerSecond: videoBitsPerSecond ?? Math.max(1_000_000, width * height * 2),
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -338,11 +641,14 @@ export async function renderShotCameraMoveMp4(
         if (settled) return;
         if (!startTime) startTime = now;
         const elapsedSeconds = Math.min((now - startTime) / 1000, durationSeconds);
-        renderCameraMoveFrame(renderer, scene, camera, keyframes, elapsedSeconds, width, height);
-        options.onProgress?.(durationSeconds === 0 ? 1 : elapsedSeconds / durationSeconds);
+        renderCameraMoveFrame(renderer, scene, camera, keyframes, elapsedSeconds, width, height, clipping);
+        emitProgress(onProgress, {
+          phase: 'rendering',
+          progress: durationSeconds === 0 ? 1 : elapsedSeconds / durationSeconds,
+          message: `Rendering (quick preview) ${Math.round((elapsedSeconds / Math.max(durationSeconds, 1e-6)) * 100)}%`,
+        });
 
         if (elapsedSeconds >= durationSeconds) {
-          // Request a final chunk before stopping so empty-blob silent failures are rare.
           try {
             if (recorder.state === 'recording') recorder.requestData();
           } catch {
@@ -362,8 +668,7 @@ export async function renderShotCameraMoveMp4(
         )));
       }, timeoutMs);
 
-      renderCameraMoveFrame(renderer, scene, camera, keyframes, 0, width, height);
-      // Timeslice keeps data flowing; some Chromium builds otherwise emit one empty blob.
+      renderCameraMoveFrame(renderer, scene, camera, keyframes, 0, width, height, clipping);
       recorder.start(250);
       animationFrame = requestAnimationFrame(renderFrame);
     });
@@ -380,6 +685,13 @@ export async function renderShotCameraMoveMp4(
       'MP4 recording produced an empty file. Try Chrome or Edge, or reduce resolution/duration.',
     );
   }
+
+  emitProgress(onProgress, {
+    phase: 'complete',
+    progress: 1,
+    message: 'Complete',
+  });
+
   return {
     blob,
     dataUrl: await blobToDataUrl(blob),
@@ -389,6 +701,7 @@ export async function renderShotCameraMoveMp4(
     frameRate,
     mimeType,
     fileExtension: 'mp4',
+    encodeMode: 'quickPreview',
   };
 }
 
@@ -420,6 +733,7 @@ function renderCameraMoveFrame(
   timeSeconds: number,
   width: number,
   height: number,
+  clipping?: { near: number; far: number },
 ) {
   const cameraData = interpolateCameraKeyframes(keyframes, timeSeconds);
   applyFlyCameraToPerspectiveCamera(
@@ -427,8 +741,8 @@ function renderCameraMoveFrame(
     flyCameraFromCamera(cameraData),
     cameraData.fovDegrees,
     width / height,
-    cameraData.near,
-    cameraData.far,
+    clipping?.near ?? cameraData.near,
+    clipping?.far ?? cameraData.far,
   );
   renderer.render(scene, camera);
 }
@@ -441,20 +755,24 @@ export async function renderViewportClay(
 ): Promise<ImageRenderResult> {
   await ensureHumanMannequinModel();
   const renderer = createRenderer(width, height);
-  const scene = buildScene(project, { showHelpers: false, hiddenObjectTypes: ['sun_marker'] });
+  const scene = buildScene(project, createFinalRenderSceneOptions());
+  const clipping = computeCameraMoveClippingRange({
+    scene,
+    keyframeCameras: [cameraData],
+  });
   const camera = new THREE.PerspectiveCamera(
     cameraData.fovDegrees,
     width / height,
-    cameraData.near,
-    cameraData.far,
+    clipping.near,
+    clipping.far,
   );
   applyFlyCameraToPerspectiveCamera(
     camera,
     flyCameraFromCamera(cameraData),
     cameraData.fovDegrees,
     width / height,
-    cameraData.near,
-    cameraData.far,
+    clipping.near,
+    clipping.far,
   );
   renderer.render(scene, camera);
   const dataUrl = renderer.domElement.toDataURL('image/png');
@@ -482,11 +800,17 @@ export interface ProjectedSceneResources {
 export async function loadProjectedSceneResources(
   renderer: THREE.WebGLRenderer,
   project: LocationProject,
+  loadOptions: {
+    occlusionFilterMode?: 'soft' | 'fast';
+  } = {},
 ): Promise<ProjectedSceneResources | undefined> {
   if (!canUseProjectedAppearance(project)) return undefined;
   const assets = resolveProjectedProjectorAssets(project);
   if (!assets) return undefined;
-  const settings = assets.settings;
+  const settings = {
+    ...assets.settings,
+    occlusionFilterMode: loadOptions.occlusionFilterMode ?? assets.settings.occlusionFilterMode ?? 'soft',
+  };
   const pano = assets.primary;
   const imageUrl = assets.primaryUrl;
 
@@ -634,24 +958,27 @@ export async function renderViewportProjected(
   }
 
   const scene = buildScene(project, {
-    showHelpers: false,
-    hiddenObjectTypes: ['sun_marker'],
+    ...createFinalRenderSceneOptions(),
     appearance: 'projected',
     projected: resources.options,
+  });
+  const clipping = computeCameraMoveClippingRange({
+    scene,
+    keyframeCameras: [cameraData],
   });
   const camera = new THREE.PerspectiveCamera(
     cameraData.fovDegrees,
     width / height,
-    cameraData.near,
-    cameraData.far,
+    clipping.near,
+    clipping.far,
   );
   applyFlyCameraToPerspectiveCamera(
     camera,
     flyCameraFromCamera(cameraData),
     cameraData.fovDegrees,
     width / height,
-    cameraData.near,
-    cameraData.far,
+    clipping.near,
+    clipping.far,
   );
   renderer.render(scene, camera);
   const dataUrl = renderer.domElement.toDataURL('image/png');

@@ -204,6 +204,12 @@ export interface ProjectedStyleSettings {
   /** Angular filtering radius, in approximate cubemap texels. */
   occlusionSoftness?: number;
 
+  /**
+   * Occlusion cubemap filtering for projected materials.
+   * `soft` = five samples (viewport quality); `fast` = one center sample (export).
+   */
+  occlusionFilterMode?: 'soft' | 'fast';
+
   /** Optional diagnostic appearance. */
   occlusionDebugMode?: 'off' | 'coverage';
 }

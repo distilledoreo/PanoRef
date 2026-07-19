@@ -238,7 +238,7 @@ export function HelpWorkspace({ onClose }: HelpWorkspaceProps) {
             <p className="doc-lead">Treat Shots like a live phone camera inside the graybox. The viewfinder stays live after capture so you can move directly to the next composition.</p>
             <FeatureGrid items={[
               ['Still mode', 'Fly the camera, set the FOV, and press Capture at 4K (3840×2160) by default. A persisted thumbnail is added to the library.'],
-              ['Video mode', 'Press record for the start keyframe, fly to the end, press stop, then export the 4K graybox MP4.'],
+              ['Video mode', 'Press record for the start keyframe, fly to the end, press stop, then Render MP4 for a smooth fog-free 1080p30 H.264 file (Resolve-safe). Quick Preview keeps the older real-time recorder as a fallback.'],
               ['Shot library', 'Open the bottom-left thumbnail to review, rename, duplicate, or delete captured shots.'],
               ['Camera settings', 'Fine-tune FOV, duration, keyframes, preview downloads, and pano matching.'],
             ]} />
@@ -356,7 +356,7 @@ function Troubleshooting() {
   const items = [
     ['A panorama looks stretched', 'Use a true 2:1 equirectangular image. Re-export or crop the source before alignment.'],
     ['Clipboard paste does nothing', 'Keep the app focused and allow clipboard access. Continuity Stage falls back to its in-app clipboard when browser access is blocked.'],
-    ['MP4 export is unavailable', 'Use a current Chromium browser. MediaRecorder codec support varies by browser and operating system.'],
+    ['MP4 export is unavailable', 'Use a current Chromium browser with WebCodecs for Render MP4. Quick Preview falls back to MediaRecorder when available.'],
     ['A Build object will not move', 'Check whether any object in the current selection is locked. Unlock the whole selection before group transforms.'],
     ['An export takes a while', '360 renders, cubemaps, and video frames are generated locally. Reduce optional package contents or camera-move length for faster exports.'],
   ];

@@ -224,6 +224,7 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
   const useSecondaryOcclusion = useSecondary && useOcclusion && Boolean(params.secondaryOcclusionTexture);
   const occlusionBias = params.settings.occlusionBiasMeters ?? 0.04;
   const occlusionSoftness = params.settings.occlusionSoftness ?? 1;
+  const occlusionFastMode = params.settings.occlusionFilterMode === 'fast';
   const debugCoverage = params.settings.occlusionDebugMode === 'coverage';
   const blendMode = params.settings.blendMode ?? 'primary_only';
   const blendModeId = blendMode === 'secondary_only'
@@ -257,6 +258,7 @@ export function createProjectedStyleMaterial(params: ProjectedMaterialParams): T
     shader.uniforms.projectedOcclusionFaceSize = { value: params.occlusionFaceSize ?? 512 };
     shader.uniforms.projectedOcclusionBias = { value: occlusionBias };
     shader.uniforms.projectedOcclusionSoftness = { value: occlusionSoftness };
+    shader.uniforms.projectedOcclusionFastMode = { value: occlusionFastMode ? 1 : 0 };
 
     shader.uniforms.projectedUseSecondary = { value: useSecondary ? 1 : 0 };
     shader.uniforms.projectedSecondaryPanoMap = { value: params.secondaryTexture ?? null };
@@ -313,6 +315,7 @@ uniform float projectedOcclusionFar;
 uniform float projectedOcclusionFaceSize;
 uniform float projectedOcclusionBias;
 uniform float projectedOcclusionSoftness;
+uniform float projectedOcclusionFastMode;
 uniform int projectedUseSecondary;
 uniform sampler2D projectedSecondaryPanoMap;
 uniform vec3 projectedSecondaryOrigin;
@@ -372,7 +375,8 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
       projectedOcclusionFar,
       projectedOcclusionFaceSize,
       projectedOcclusionBias,
-      projectedOcclusionSoftness
+      projectedOcclusionSoftness,
+      projectedOcclusionFastMode
     );
   }
   if (projectedUseSecondaryOcclusion == 1) {
@@ -384,7 +388,8 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
       projectedSecondaryOcclusionFar,
       projectedSecondaryOcclusionFaceSize,
       projectedOcclusionBias,
-      projectedOcclusionSoftness
+      projectedOcclusionSoftness,
+      projectedOcclusionFastMode
     );
   }
 

@@ -33,10 +33,19 @@ describe('rendered shot output', () => {
 
   it('keeps sun markers out of AI-facing export renders', () => {
     const source = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
+    const profile = readFileSync(new URL('../src/engine/finalRenderProfile.ts', import.meta.url), 'utf8');
 
     expect(source).toMatch(/renderGrayboxEquirectangularPano[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
     expect(source).toMatch(/renderProjectedEquirectangularPano[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
-    expect(source).toMatch(/renderViewportClay[\s\S]*hiddenObjectTypes: \['sun_marker'\]/);
+    expect(source).toContain('createFinalRenderSceneOptions');
+    expect(profile).toContain("'sun_marker'");
+  });
+
+  it('disables fog on clay and projected viewport still exports', () => {
+    const source = readFileSync(new URL('../src/engine/renderers.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/renderViewportClay[\s\S]*createFinalRenderSceneOptions\(\)/);
+    expect(source).toMatch(/renderViewportProjected[\s\S]*createFinalRenderSceneOptions\(\)/);
+    expect(source).toContain('createFinalRenderSceneOptions');
   });
 
   it('exports projected equirect from the capture origin without writing a graybox pano ref', () => {

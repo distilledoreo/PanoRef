@@ -13,7 +13,6 @@ import { ensureHumanMannequinModel } from './humanMannequinModel';
 import { downloadBlob } from './projectIO';
 import { canUseProjectedAppearance } from './projectedStyle';
 import {
-  getSupportedCameraMoveMp4MimeType,
   renderPanoCubemapFaces,
   renderPanoPerspectiveCrop,
   renderShotCameraMoveMp4,
@@ -140,18 +139,21 @@ async function appendShotPackageToZip(
       addBinaryToZip(zip, `${rootFolder}/inputs/viewport_clay_motion.mp4`, cameraMoveVideoAsset.uri);
     } else if (hasRenderableCameraMove(shot.cameraKeyframes)) {
       // Generate during packaging so keyframed moves still ship without a prior Shots export.
-      const mimeType = getSupportedCameraMoveMp4MimeType();
-      if (!mimeType) {
+      try {
+        const video = await renderShotCameraMoveMp4(project, shot, {
+          mode: 'render',
+          resolutionPreset: '1080p',
+          frameRate: 30,
+          appearance: 'clay',
+        });
+        zip.file(`${rootFolder}/inputs/viewport_clay_motion.mp4`, video.blob);
+      } catch (error) {
         throw new ShotPackageError(
-          'Camera move MP4 export is not supported in this browser. Try Chrome or Edge, or disable “Camera move MP4” in export settings.',
+          error instanceof Error
+            ? error.message
+            : 'Camera move MP4 export failed. Try Chrome or Edge, or disable “Camera move MP4” in export settings.',
         );
       }
-      const video = await renderShotCameraMoveMp4(project, shot, {
-        mimeType,
-        frameRate: 30,
-        appearance: 'clay',
-      });
-      zip.file(`${rootFolder}/inputs/viewport_clay_motion.mp4`, video.blob);
     }
   }
 
@@ -160,17 +162,13 @@ async function appendShotPackageToZip(
     && canUseProjectedAppearance(project)
     && hasRenderableCameraMove(shot.cameraKeyframes)
   ) {
-    const mimeType = getSupportedCameraMoveMp4MimeType();
-    if (!mimeType) {
-      throw new ShotPackageError(
-        'Projected camera-move MP4 export is not supported in this browser. Try Chrome or Edge, or disable projected motion in export settings.',
-      );
-    }
     try {
       const video = await renderShotCameraMoveMp4(project, shot, {
-        mimeType,
+        mode: 'render',
+        resolutionPreset: '1080p',
         frameRate: 30,
         appearance: 'projected',
+        occlusionFilter: 'fast',
       });
       zip.file(`${rootFolder}/inputs/viewport_projected_motion.mp4`, video.blob);
     } catch (error) {

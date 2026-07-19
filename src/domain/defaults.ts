@@ -58,6 +58,7 @@ export const defaultProjectedStyleSettings: ProjectedStyleSettings = {
   occlusionEnabled: true,
   occlusionBiasMeters: 0.04,
   occlusionSoftness: 1,
+  occlusionFilterMode: 'soft',
   occlusionDebugMode: 'off',
 };
 
@@ -128,6 +129,7 @@ export function normalizeProjectedStyleSettings(
     occlusionSoftness: Number.isFinite(occlusionSoftness)
       ? Math.min(2, Math.max(0, occlusionSoftness))
       : defaultProjectedStyleSettings.occlusionSoftness,
+    occlusionFilterMode: settings?.occlusionFilterMode === 'fast' ? 'fast' : 'soft',
     occlusionDebugMode: settings?.occlusionDebugMode === 'coverage' ? 'coverage' : 'off',
   };
 }
