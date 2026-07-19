@@ -9,6 +9,7 @@ import {
   writeTriangleBounds,
 } from './geometryAccess';
 import type {
+  CoverageBounds,
   CoverageExtractionProgress,
   CoverageSceneData,
   SurfaceSample,
@@ -153,6 +154,39 @@ function yieldToMainThread(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function normalizeAllowedFloorRegions(
+  regions: readonly CoverageBounds[] | undefined,
+): CoverageBounds[] | undefined {
+  const normalized = regions?.filter((region) => (
+    region.min.every(Number.isFinite)
+    && region.max.every(Number.isFinite)
+    && region.min[0] <= region.max[0]
+    && region.min[1] <= region.max[1]
+    && region.min[2] <= region.max[2]
+  )).map((region) => ({
+    min: [...region.min] as Vec3,
+    max: [...region.max] as Vec3,
+  }));
+  return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+function triangleIntersectsAllowedFloorRegion(
+  triangle: Float64Array,
+  regions: readonly CoverageBounds[],
+): boolean {
+  const minX = Math.min(triangle[0], triangle[3], triangle[6]);
+  const maxX = Math.max(triangle[0], triangle[3], triangle[6]);
+  const minY = Math.min(triangle[1], triangle[4], triangle[7]);
+  const maxY = Math.max(triangle[1], triangle[4], triangle[7]);
+  const minZ = Math.min(triangle[2], triangle[5], triangle[8]);
+  const maxZ = Math.max(triangle[2], triangle[5], triangle[8]);
+  return regions.some((region) => (
+    maxX >= region.min[0] && minX <= region.max[0]
+    && maxY >= region.min[1] && minY <= region.max[1]
+    && maxZ >= region.min[2] && minZ <= region.max[2]
+  ));
+}
+
 async function forEachProjectMesh(
   project: LocationProject,
   visit: (mesh: THREE.Mesh, explicitFloor: boolean) => Promise<void> | void,
@@ -213,6 +247,7 @@ async function copyPositionAttribute(
 export async function extractCoverageScene(
   project: LocationProject,
   onProgress?: CoverageExtractionProgress,
+  allowedFloorRegions?: readonly CoverageBounds[],
 ): Promise<CoverageSceneData> {
   let vertexCount = 0;
   let indexCount = 0;
@@ -234,6 +269,7 @@ export async function extractCoverageScene(
     throw new Error('Coverage analysis requires at least one visible solid mesh.');
   }
 
+  const normalizedAllowedFloorRegions = normalizeAllowedFloorRegions(allowedFloorRegions);
   const scene: CoverageSceneData = {
     positions: new Float32Array(vertexCount * 3),
     indices: new Uint32Array(indexCount),
@@ -241,6 +277,7 @@ export async function extractCoverageScene(
     meshMatrices: new Float32Array(meshCount * 16),
     floorTriangleIndices: new Uint32Array(0),
     floorBounds: new Float32Array(0),
+    allowedFloorRegions: normalizedAllowedFloorRegions,
     bounds: { min: toVec3(sceneBounds.min), max: toVec3(sceneBounds.max) },
     diagonal: Math.max(sceneBounds.getSize(new THREE.Vector3()).length(), 1e-3),
   };
@@ -283,20 +320,28 @@ export async function extractCoverageScene(
     meshId += 1;
   }, onProgress, 0.15, 0.7);
 
-  const selectedFloorFlags = explicitFloorSeen
+  const selectedFloorFlags = normalizedAllowedFloorRegions
     ? floorFlags
-    : filterImportedFloorComponents(scene, floorFlags);
-  const selectedFlag = explicitFloorSeen ? 2 : 1;
+    : explicitFloorSeen
+      ? floorFlags
+      : filterImportedFloorComponents(scene, floorFlags);
+  const selectedFlag = normalizedAllowedFloorRegions ? undefined : explicitFloorSeen ? 2 : 1;
+  const isSelectedFloor = (triangleIndex: number): boolean => {
+    if (selectedFlag !== undefined) return selectedFloorFlags[triangleIndex] === selectedFlag;
+    if (selectedFloorFlags[triangleIndex] === 0 || !normalizedAllowedFloorRegions) return false;
+    readWorldTriangle(scene, triangleIndex, triangleScratch);
+    return triangleIntersectsAllowedFloorRegion(triangleScratch, normalizedAllowedFloorRegions);
+  };
   let floorCount = 0;
   for (let triangleIndex = 0; triangleIndex < floorFlags.length; triangleIndex += 1) {
-    if (selectedFloorFlags[triangleIndex] === selectedFlag) floorCount += 1;
+    if (isSelectedFloor(triangleIndex)) floorCount += 1;
   }
   scene.floorTriangleIndices = new Uint32Array(floorCount);
   scene.floorBounds = new Float32Array(floorCount * 4);
   const boundsScratch = new Float32Array(6);
   let floorOffset = 0;
   for (let triangleIndex = 0; triangleIndex < floorFlags.length; triangleIndex += 1) {
-    if (selectedFloorFlags[triangleIndex] !== selectedFlag) continue;
+    if (!isSelectedFloor(triangleIndex)) continue;
     scene.floorTriangleIndices[floorOffset] = triangleIndex;
     readWorldTriangle(scene, triangleIndex, triangleScratch);
     writeTriangleBounds(triangleScratch, boundsScratch, 0);

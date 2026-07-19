@@ -20,6 +20,8 @@ export interface CoverageSceneData {
   floorTriangleIndices: Uint32Array;
   /** minX, maxX, minZ, maxZ for each floorTriangleIndices entry. */
   floorBounds: Float32Array;
+  /** Optional user-authored world-space regions that constrain legal floor positions. */
+  allowedFloorRegions?: CoverageBounds[];
   bounds: CoverageBounds;
   diagonal: number;
 }

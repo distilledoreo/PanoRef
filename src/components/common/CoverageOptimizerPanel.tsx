@@ -3,11 +3,12 @@ import type { LocationProject, PanoReference, Vec3 } from '../../domain/types';
 import {
   extractCoverageScene,
   runCoverageOptimization,
+  type CoverageBounds,
   type CoverageOptimizationMode,
   type CoverageOptimizationResult,
   type CoverageOptimizationTask,
 } from '../../engine/projectionCoverage';
-import { Field, Select } from './Field';
+import { Field, Select, TextInput, Toggle } from './Field';
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
@@ -30,6 +31,16 @@ export function CoverageOptimizerPanel({
   const [status, setStatus] = useState<'idle' | 'running' | 'complete' | 'failed'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [result, setResult] = useState<CoverageOptimizationResult>();
+  const cameraHeight = project.settings.defaultCameraHeightMeters ?? 1.6;
+  const captureOrigin = primaryPano?.origin ?? project.scene.panoOrigin;
+  const [restrictFloorRegion, setRestrictFloorRegion] = useState(false);
+  const [floorRegion, setFloorRegion] = useState<CoverageBounds>(() => ({
+    min: [captureOrigin[0] - 5, captureOrigin[1] - cameraHeight - 0.25, captureOrigin[2] - 5],
+    max: [captureOrigin[0] + 5, captureOrigin[1] - cameraHeight + 0.25, captureOrigin[2] + 5],
+  }));
+  const floorRegionIsValid = floorRegion.min.every(Number.isFinite)
+    && floorRegion.max.every(Number.isFinite)
+    && floorRegion.min.every((value, axis) => value <= floorRegion.max[axis]);
   const taskRef = useRef<CoverageOptimizationTask>();
   const analysisIdRef = useRef(0);
 
@@ -46,9 +57,13 @@ export function CoverageOptimizerPanel({
     setStatus('running');
     setStatusMessage('Preparing indexed scene geometry…');
     try {
-      const scene = await extractCoverageScene(project, (_progress, message) => {
-        if (analysisIdRef.current === analysisId) setStatusMessage(message);
-      });
+      const scene = await extractCoverageScene(
+        project,
+        (_progress, message) => {
+          if (analysisIdRef.current === analysisId) setStatusMessage(message);
+        },
+        restrictFloorRegion ? [floorRegion] : undefined,
+      );
       if (analysisIdRef.current !== analysisId) return;
       const task = runCoverageOptimization(
         {
@@ -115,10 +130,68 @@ export function CoverageOptimizerPanel({
           </Select>
         </Field>
 
+        <Field
+          label="Allowed floor region"
+          hint="Use explicit world-space bounds when a combined import contains large roofs, platforms, or prop tops that geometry alone cannot distinguish from floors."
+        >
+          <Toggle
+            checked={restrictFloorRegion}
+            onChange={(value) => {
+              setRestrictFloorRegion(value);
+              setStatus('idle');
+              setResult(undefined);
+            }}
+            label="Restrict optimizer to an allowed floor region"
+          />
+        </Field>
+
+        {restrictFloorRegion && (
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-subtle p-2" data-coverage-floor-region>
+            {(['X', 'Y', 'Z'] as const).map((axis, axisIndex) => (
+              <div key={axis} className="contents">
+                <Field label={`${axis} minimum`}>
+                  <TextInput
+                    type="number"
+                    step="0.1"
+                    value={floorRegion.min[axisIndex]}
+                    onChange={(event) => setFloorRegion((current) => {
+                      const min = [...current.min] as Vec3;
+                      min[axisIndex] = Number(event.target.value);
+                      return { ...current, min };
+                    })}
+                    data-coverage-floor-min={axis.toLowerCase()}
+                  />
+                </Field>
+                <Field label={`${axis} maximum`}>
+                  <TextInput
+                    type="number"
+                    step="0.1"
+                    value={floorRegion.max[axisIndex]}
+                    onChange={(event) => setFloorRegion((current) => {
+                      const max = [...current.max] as Vec3;
+                      max[axisIndex] = Number(event.target.value);
+                      return { ...current, max };
+                    })}
+                    data-coverage-floor-max={axis.toLowerCase()}
+                  />
+                </Field>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {restrictFloorRegion && !floorRegionIsValid && (
+          <p className="text-[11px] text-amber-800 dark:text-amber-200" data-coverage-floor-region-error>
+            Every minimum must be less than or equal to its matching maximum.
+          </p>
+        )}
+
         <button
           type="button"
           onClick={() => void analyze()}
-          disabled={status === 'running' || project.scene.objects.every((object) => !object.visible)}
+          disabled={status === 'running'
+            || project.scene.objects.every((object) => !object.visible)
+            || (restrictFloorRegion && !floorRegionIsValid)}
           className="w-full rounded-lg bg-[var(--accent)] px-3 py-2 font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-45"
           data-coverage-analyze
         >

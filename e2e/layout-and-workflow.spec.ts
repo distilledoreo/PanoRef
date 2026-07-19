@@ -528,6 +528,17 @@ test.describe('workflow path smoke', () => {
     await expect(drawer).toBeVisible();
     await page.locator('[data-coverage-optimizer] summary').click();
 
+    const floorRegionToggle = drawer.getByRole('switch', {
+      name: 'Restrict optimizer to an allowed floor region',
+    });
+    await floorRegionToggle.click();
+    await expect(drawer.locator('[data-coverage-floor-region]')).toBeVisible();
+    await drawer.locator('[data-coverage-floor-min="y"]').fill('1');
+    await drawer.locator('[data-coverage-floor-max="y"]').fill('0');
+    await expect(drawer.locator('[data-coverage-floor-region-error]')).toBeVisible();
+    await expect(drawer.locator('[data-coverage-analyze]')).toBeDisabled();
+    await floorRegionToggle.click();
+
     const layout = await drawer.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       return {

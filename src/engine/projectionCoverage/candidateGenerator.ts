@@ -3,10 +3,24 @@ import { floorHeightAt, readWorldTriangle } from './geometryAccess';
 import type { SceneAccelerationStructure } from './sceneAcceleration';
 import { buildSceneAcceleration } from './sceneAcceleration';
 import type {
+  CoverageBounds,
   CoverageOptimizationOptions,
   CoverageSceneData,
   OriginCandidate,
 } from './types';
+
+function floorPointIsAllowed(
+  regions: readonly CoverageBounds[] | undefined,
+  x: number,
+  floorY: number,
+  z: number,
+): boolean {
+  return !regions || regions.some((region) => (
+    x >= region.min[0] && x <= region.max[0]
+    && floorY >= region.min[1] && floorY <= region.max[1]
+    && z >= region.min[2] && z <= region.max[2]
+  ));
+}
 
 export function candidateClearance(
   scene: CoverageSceneData,
@@ -34,7 +48,7 @@ export function projectCandidateToFloor(
     const triangleIndex = scene.floorTriangleIndices[floorOffset];
     readWorldTriangle(scene, triangleIndex, triangleScratch);
     const floorY = floorHeightAt(triangleScratch, x, z);
-    if (floorY === undefined) continue;
+    if (floorY === undefined || !floorPointIsAllowed(scene.allowedFloorRegions, x, floorY, z)) continue;
     const difference = preferredFloorY === undefined ? -floorY : Math.abs(floorY - preferredFloorY);
     if (bestFloorY === undefined || difference < bestDifference) {
       bestFloorY = floorY;
@@ -108,7 +122,7 @@ export function generateOriginCandidates(
         const triangleIndex = scene.floorTriangleIndices[floorOffset];
         readWorldTriangle(scene, triangleIndex, triangleScratch);
         const floorY = floorHeightAt(triangleScratch, x, z);
-        if (floorY === undefined) continue;
+        if (floorY === undefined || !floorPointIsAllowed(scene.allowedFloorRegions, x, floorY, z)) continue;
         addCandidate(
           candidates,
           scene,
@@ -129,6 +143,12 @@ export function generateOriginCandidates(
       (triangleScratch[1] + triangleScratch[4] + triangleScratch[7]) / 3 + options.panoramaHeightMeters,
       (triangleScratch[2] + triangleScratch[5] + triangleScratch[8]) / 3,
     ];
+    if (!floorPointIsAllowed(
+      scene.allowedFloorRegions,
+      position[0],
+      position[1] - options.panoramaHeightMeters,
+      position[2],
+    )) continue;
     addCandidate(candidates, scene, position, spacing, options.cameraClearanceRadius, acceleration);
   }
 

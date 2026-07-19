@@ -186,6 +186,40 @@ describe('projection coverage engine', () => {
     expect(candidates.every((candidate) => candidate.position[1] < 2)).toBe(true);
   });
 
+  it('uses an explicit allowed floor region to reject a large prop top in one imported object', async () => {
+    const triangles = [...floorTriangles(0, 3), ...floorTriangles(0.8, 1.5)];
+    const positions = new Float32Array(triangles.length * 9);
+    const indices = new Uint32Array(triangles.length * 3);
+    triangles.forEach((triangle, triangleIndex) => {
+      positions.set([...triangle.a, ...triangle.b, ...triangle.c], triangleIndex * 9);
+      indices.set([triangleIndex * 3, triangleIndex * 3 + 1, triangleIndex * 3 + 2], triangleIndex * 3);
+    });
+    const asset: ProjectAsset = {
+      id: 'coverage_imported_large_top', type: 'model', name: 'large-top.panoref-mesh',
+      uri: encodePackedGrayboxMesh(positions, indices).uri, createdAt: new Date(0).toISOString(),
+    };
+    const object: SceneObject = {
+      id: 'coverage_large_top_object', name: 'Imported Floor and Large Top', type: 'imported_model',
+      transform: createTransform([0, 0, 0]), dimensions: [6, 1, 6],
+      category: 'architecture', locked: false, visible: true, modelAssetId: asset.id,
+    };
+    const project = createDefaultProject();
+    project.scene.objects = [object];
+    project.assets.assets[asset.id] = asset;
+    const scene = await extractCoverageScene(project, undefined, [{
+      min: [-3.1, -0.1, -3.1],
+      max: [3.1, 0.1, 3.1],
+    }]);
+    expect(Array.from(scene.floorTriangleIndices)).toEqual([0, 1]);
+    const candidates = generateOriginCandidates(
+      scene,
+      resolveCoverageOptions(scene, { candidateSpacing: 1, cameraClearanceRadius: 0.3 }),
+      buildSceneAcceleration(scene),
+    );
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates.every((candidate) => candidate.position[1] === 1.6)).toBe(true);
+  });
+
   it('uses one fine validation bank for reachable metrics and enforces fixed-first separation', () => {
     const scene = floorScene();
     const options = resolveCoverageOptions(scene, {
