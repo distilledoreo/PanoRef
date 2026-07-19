@@ -126,6 +126,15 @@ describe('ui revamp fidelity surfaces', () => {
     expect(coveragePanel).toContain('Existing panorama origins are never rewritten');
   });
 
+  it('guards both successful and failed coverage extraction against stale analysis identity', () => {
+    const coveragePanel = readFileSync(
+      new URL('../src/components/common/CoverageOptimizerPanel.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(coveragePanel).toMatch(/const scene = await extractCoverageScene[\s\S]*if \(analysisIdRef\.current !== analysisId\) return;/);
+    expect(coveragePanel).toMatch(/catch \(error\) \{\s+if \(analysisIdRef\.current !== analysisId\) return;/);
+  });
+
   it('pauses automatic shot frame preview renders while fly camera is active', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     expect(shots).not.toContain('flyCameraRevision');

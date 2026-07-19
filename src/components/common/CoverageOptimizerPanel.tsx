@@ -133,6 +133,7 @@ export function CoverageOptimizerPanel({
         setStatusMessage(error instanceof Error ? error.message : String(error));
       });
     } catch (error) {
+      if (analysisIdRef.current !== analysisId) return;
       setStatus('failed');
       setStatusMessage(error instanceof Error ? error.message : String(error));
     }
