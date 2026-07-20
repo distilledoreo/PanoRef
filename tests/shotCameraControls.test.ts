@@ -11,10 +11,12 @@ describe('shot camera controls wiring', () => {
     expect(viewport).toContain('event.preventDefault()');
   });
 
-  it('applies reduced precision while shift is held', () => {
+  it('applies reduced precision while shift is held on pointer or wheel input', () => {
     const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
     expect(viewport).toContain('PRECISION_INPUT_MULTIPLIER');
-    expect(viewport).toContain('event.shiftKey');
+    expect(viewport).toContain('event.shiftKey ? LOOK_SENSITIVITY * PRECISION_INPUT_MULTIPLIER');
+    expect(viewport).toContain('shiftKey: event.shiftKey');
+    expect(viewport).not.toContain('shiftHeldRef');
   });
 
   it('derives HUD focal length from framing camera FOV and aspect ratio', () => {

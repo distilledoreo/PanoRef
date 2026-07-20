@@ -270,7 +270,6 @@ export function SceneViewport({
   const wheelFovAccumRef = useRef(0);
   const wheelBatchActiveRef = useRef(false);
   const wheelBatchTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const shiftHeldRef = useRef(false);
 
   // Live geometry-occlusion cubemaps (shared across all projected objects).
   const primaryOcclusionRef = useRef<ProjectorOcclusionMap | undefined>();
@@ -546,8 +545,7 @@ export function SceneViewport({
       const length = Math.hypot(moveX, moveY, moveZ);
       if (length === 0) return;
       const sprinting = isForwardSprinting(forwardSprintRef.current);
-      const precisionScale = shiftHeldRef.current ? PRECISION_INPUT_MULTIPLIER : 1;
-      const speed = FLY_SPEED * (sprinting ? FLY_SPRINT_MULTIPLIER : 1) * precisionScale;
+      const speed = FLY_SPEED * (sprinting ? FLY_SPRINT_MULTIPLIER : 1);
       const step = (speed * deltaSeconds) / length;
       fly.position = clampFlyCameraPosition(
         [
@@ -1096,8 +1094,7 @@ export function SceneViewport({
 
       if (drag.kind === 'shot_framing' || drag.kind === 'free_camera') {
         const fly = flyRef.current;
-        const precisionActive = event.shiftKey || shiftHeldRef.current;
-        const lookScale = precisionActive ? LOOK_SENSITIVITY * PRECISION_INPUT_MULTIPLIER : LOOK_SENSITIVITY;
+        const lookScale = event.shiftKey ? LOOK_SENSITIVITY * PRECISION_INPUT_MULTIPLIER : LOOK_SENSITIVITY;
         fly.yawDegrees -= dx * lookScale;
         fly.pitchDegrees = Math.max(-89, Math.min(89, fly.pitchDegrees - dy * lookScale));
         flyDirtyRef.current = true;
@@ -1106,7 +1103,7 @@ export function SceneViewport({
       }
 
       if (drag.kind === 'orbit') {
-        const orbitScale = shiftHeldRef.current ? PRECISION_INPUT_MULTIPLIER : 1;
+        const orbitScale = event.shiftKey ? PRECISION_INPUT_MULTIPLIER : 1;
         orbitRef.current.yaw -= dx * 0.25 * orbitScale;
         orbitRef.current.pitch = Math.max(-10, Math.min(78, orbitRef.current.pitch - dy * 0.18 * orbitScale));
       }
@@ -1236,9 +1233,6 @@ export function SceneViewport({
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
-        shiftHeldRef.current = true;
-      }
       if (!shotFramingRef.current?.flyActive && !freeCameraActiveRef.current) return;
       if (event.code === 'Escape') {
         const escapeInsideDialog = Boolean((event.target as HTMLElement | null)?.closest?.('[role="dialog"]'));
@@ -1267,9 +1261,6 @@ export function SceneViewport({
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
-        shiftHeldRef.current = false;
-      }
       if (event.code === 'KeyW') {
         forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, {
           type: 'keyup',
