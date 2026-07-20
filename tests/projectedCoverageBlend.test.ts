@@ -29,7 +29,7 @@ describe('projected coverage vs quality blend contract', () => {
     expect(rgbClose(result.rgb, primaryRgb, 1e-4)).toBe(true);
   });
 
-  it('still softens into fallback when occlusion visibility is partial', () => {
+  it('keeps continuous full-strength fill when occlusion visibility is partial', () => {
     const result = computeProjectedStyleCoverageBlend({
       primaryEnabled: true,
       secondaryEnabled: false,
@@ -43,9 +43,11 @@ describe('projected coverage vs quality blend contract', () => {
       fallbackRgb,
     });
 
+    // Soft visibility still ranks projectors, but albedo fill stays continuous
+    // (no pale wash into fallback strips).
     expect(result.coverage).toBeCloseTo(0.4, 5);
-    expect(result.mixFactor).toBeCloseTo(0.4, 5);
-    expect(result.rgb[0]).toBeCloseTo(fallbackRgb[0] * 0.6 + primaryRgb[0] * 0.4, 4);
+    expect(result.mixFactor).toBeCloseTo(1, 5);
+    expect(rgbClose(result.rgb, primaryRgb, 1e-4)).toBe(true);
   });
 
   it('uses fallback when projectors are fully occluded', () => {
@@ -162,11 +164,14 @@ describe('projected coverage vs quality blend contract', () => {
     expect(materials).toContain('float primaryCoverage = primaryEnabled * primaryVisibility;');
     expect(materials).toContain('float secondaryCoverage = secondaryEnabled * secondaryVisibility;');
     expect(materials).toContain('float coverage = max(primaryCoverage, secondaryCoverage);');
+    expect(materials).toContain('float projectionFill = step(0.0001, coverage);');
     expect(materials).toContain('0.001 + pow(primaryQuality * primaryDominance, 4.0)');
     expect(materials).toContain('0.001 + pow(secondaryQuality * secondaryDominance, 4.0)');
     expect(materials).toContain('/ max(weightTotal, 0.0001)');
     expect(materials).not.toContain('float primaryScore = primaryEnabled * primaryVisibility * primaryQuality');
     expect(materials).toContain('float p = primaryCoverage;');
     expect(materials).toContain('float s = secondaryCoverage;');
+    expect(materials).toContain('generateMipmaps = false');
+    expect(materials).toContain('minFilter = THREE.LinearFilter');
   });
 });

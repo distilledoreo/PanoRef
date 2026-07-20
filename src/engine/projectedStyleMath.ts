@@ -468,7 +468,7 @@ export function computeProjectedStyleCoverageBlend(
   }
 
   const mixFactor = coverage > 1e-4
-    ? projectedOpacity * clamp(coverage, 0, 1)
+    ? projectedOpacity
     : 0;
   const rgb: Vec3 = coverage > 1e-4
     ? [

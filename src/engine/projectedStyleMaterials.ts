@@ -47,6 +47,12 @@ export async function acquireProjectedStyleTexture(imageUrl: string): Promise<TH
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.ClampToEdgeWrapping;
+        // Equirect projection onto large/grazing surfaces creates huge UV
+        // derivatives; mipmaps wash those fragments pale/gray in strips.
+        // Keep a continuous stretched sample at base resolution instead.
+        texture.generateMipmaps = false;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
         texture.needsUpdate = true;
         entry.texture = texture;
         entry.loading = undefined;
@@ -445,8 +451,9 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
   float primaryDominance = projectedBlendMode == 2 ? 1.15 : 1.0;
   float secondaryDominance = projectedBlendMode == 3 ? 1.15 : 1.0;
 
-  // Occlusion visibility owns projection coverage (opacity vs fallback).
-  // Projection quality only ranks/weights available projectors.
+  // Occlusion visibility owns whether projection fills a fragment.
+  // Soft visibility still ranks dual projectors, but any visible sample is
+  // drawn at full strength so soft occlusion cannot pale-wash into strips.
   float primaryCoverage = primaryEnabled * primaryVisibility;
   float secondaryCoverage = secondaryEnabled * secondaryVisibility;
 
@@ -457,6 +464,9 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
 
   float weightTotal = primaryWeight + secondaryWeight;
   float coverage = max(primaryCoverage, secondaryCoverage);
+  // Continuous stretch fill: visible ⇒ full projection; only fully occluded
+  // fragments fall back (distortion on soft edges is preferred over white gaps).
+  float projectionFill = step(0.0001, coverage);
 
   // --- Coverage diagnostic (four-state: red/cyan/magenta/white) ---
   // Visualize projector visibility; orange marks visible-but-poor quality.
@@ -477,9 +487,8 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
   } else {
     vec3 projectedColor = (primarySample * primaryWeight + secondarySample * secondaryWeight)
       / max(weightTotal, 0.0001);
-    // Soft occlusion visibility still softens into fallback; quality does not.
-    vec3 resultColor = coverage > 0.0001
-      ? mix(fallbackAlbedo, projectedColor, clamp(projectedOpacity, 0.0, 1.0) * clamp(coverage, 0.0, 1.0))
+    vec3 resultColor = projectionFill > 0.5
+      ? mix(fallbackAlbedo, projectedColor, clamp(projectedOpacity, 0.0, 1.0))
       : fallbackAlbedo;
     diffuseColor.rgb = resultColor;
   }
@@ -506,7 +515,7 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v6:${params.settings.fallbackMode}:`
+    `projected-style-v7:${params.settings.fallbackMode}:`
     + `${params.disposable ? 'd' : 's'}:`
     + `${useOcclusion ? 'o' : 'n'}:`
     + `${useSecondary ? 's' : 'p'}:`
