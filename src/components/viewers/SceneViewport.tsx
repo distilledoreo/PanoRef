@@ -56,7 +56,7 @@ import {
   type GizmoHit,
   type GizmoMode,
 } from '../../engine/transformGizmo';
-import { FOCAL_LENGTH_HUD_HIDE_DELAY_MS } from '../../engine/focalLength';
+import { clampShotVerticalFov, FOCAL_LENGTH_HUD_HIDE_DELAY_MS } from '../../engine/focalLength';
 import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
 import { sceneEnvelope, selectionBounds } from '../../engine/buildSelection';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
@@ -1171,7 +1171,10 @@ export function SceneViewport({
       event.preventDefault();
       const framing = shotFramingRef.current;
       if (framing) {
-        framingFovRef.current = Math.max(18, Math.min(120, framingFovRef.current + event.deltaY * 0.04));
+        framingFovRef.current = clampShotVerticalFov(
+          framingFovRef.current + event.deltaY * 0.04,
+          framing.camera.aspectRatio,
+        );
         if (cameraRef.current) {
           cameraRef.current.fov = framingFovRef.current;
           cameraRef.current.updateProjectionMatrix();
