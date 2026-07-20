@@ -20,6 +20,37 @@ describe('scene object disposal', () => {
     expect(computeBuildFogRange(200)).toEqual({ near: 90, far: 200 });
   });
 
+  it('keeps configurable Build fog when fog is enabled', () => {
+    const project = createDefaultProject();
+    const scene = buildScene(project, { showHelpers: false, fogDistance: 80 });
+    expect(scene.fog).toBeInstanceOf(THREE.Fog);
+    const fog = scene.fog as THREE.Fog;
+    expect(fog.near).toBe(36);
+    expect(fog.far).toBe(80);
+    disposeScene(scene);
+  });
+
+  it('disables fog when fog: false even if fogDistance is set', () => {
+    const project = createDefaultProject();
+    const scene = buildScene(project, {
+      showHelpers: false,
+      fog: false,
+      fogDistance: 40,
+    });
+    expect(scene.fog).toBeNull();
+    disposeScene(scene);
+  });
+
+  it('defaults to the 18–42 m fog range when fogDistance is omitted', () => {
+    const project = createDefaultProject();
+    const scene = buildScene(project, { showHelpers: false });
+    expect(scene.fog).toBeInstanceOf(THREE.Fog);
+    const fog = scene.fog as THREE.Fog;
+    expect(fog.near).toBe(18);
+    expect(fog.far).toBe(42);
+    disposeScene(scene);
+  });
+
   it('keeps shared build materials alive across scene rebuilds', () => {
     const project = createDefaultProject();
     const firstScene = buildScene(project, { showHelpers: false });

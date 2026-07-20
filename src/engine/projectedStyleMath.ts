@@ -122,7 +122,11 @@ float decodeDepthMetersGLSL(vec4 packed, float nearMeters, float farMeters) {
     return 1.0;
   }
   float firstHit = decodeDepthMetersGLSL(packedDepth, nearMeters, farMeters);
-  return fragmentDistance <= firstHit + effectiveBias ? 1.0 : 0.0;
+  // Absorb 16-bit packing + cube-face quantization so the receiving surface
+  // itself is not falsely marked occluded (stripy white acne).
+  float quantizationBias = 2.0 * max(farMeters - nearMeters, 1.0) / 65535.0;
+  float adaptiveBias = effectiveBias + quantizationBias + firstHit * 0.01;
+  return fragmentDistance <= firstHit + adaptiveBias ? 1.0 : 0.0;
 }
 
 float sampleProjectorVisibility(
@@ -141,8 +145,8 @@ float sampleProjectorVisibility(
   vec3 direction = normalize(projectorOffset);
 
   float effectiveBias = baseBias
-    + fragmentDistance * 0.0015
-    + 2.0 * fwidth(fragmentDistance);
+    + fragmentDistance * 0.01
+    + 4.0 * fwidth(fragmentDistance);
 
   // Export / Fast: one center cubemap sample (~5× fewer occlusion lookups).
   if (fastMode > 0.5) {
@@ -165,8 +169,16 @@ float sampleProjectorVisibility(
   float texelAngle = 2.0 / max(faceSize, 1.0);
   float offsetAngle = texelAngle * max(softness, 0.0);
 
-  float v = 0.0;
-  v += singleOcclusionSample(direction, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  float center = singleOcclusionSample(
+    direction,
+    worldPosition,
+    projectorOrigin,
+    occlusionCube,
+    nearMeters,
+    farMeters,
+    effectiveBias
+  );
+  float v = center;
   vec3 d1 = normalize(direction + tangent * offsetAngle);
   v += singleOcclusionSample(d1, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
   vec3 d2 = normalize(direction - tangent * offsetAngle);
@@ -175,7 +187,14 @@ float sampleProjectorVisibility(
   v += singleOcclusionSample(d3, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
   vec3 d4 = normalize(direction - bitangent * offsetAngle);
   v += singleOcclusionSample(d4, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
-  return clamp(v / 5.0, 0.0, 1.0);
+  float averaged = clamp(v / 5.0, 0.0, 1.0);
+  // Neighbor taps often graze closer geometry and falsely darken a surface that
+  // the center tap correctly sees. Keep true silhouettes soft, but never let
+  // neighbors alone paint white strips across an otherwise visible receiver.
+  if (center > 0.5) {
+    return mix(center, averaged, 0.25);
+  }
+  return averaged;
 }`,
 } as const;
 
@@ -308,8 +327,10 @@ export function sampleProjectorVisibility(params: {
   const fragmentDistance = length(subtract(params.worldPosition, params.projectorOrigin));
   const firstHit = decodeDepthMeters(params.packedDepth, params.nearMeters, params.farMeters);
   const bias = params.biasMeters ?? 0.04;
+  const quantizationBias = 2 * Math.max(params.farMeters - params.nearMeters, 1) / 65535;
+  const adaptiveBias = bias + quantizationBias + firstHit * 0.01;
   return {
-    visible: fragmentDistance <= firstHit + bias,
+    visible: fragmentDistance <= firstHit + adaptiveBias,
     firstHitMeters: firstHit,
   };
 }
@@ -409,5 +430,82 @@ export function computeProjectorBlendWeights(params: ProjectorBlendInput): Proje
     primary: primaryWeight,
     secondary: 1 - primaryWeight,
     bothOccluded: false,
+  };
+}
+
+/**
+ * Mirrors the projected-style fragment coverage/quality contract:
+ * visibility owns mix-vs-fallback coverage; quality only ranks projectors.
+ */
+export interface ProjectedStyleCoverageBlendInput {
+  primaryEnabled: boolean;
+  secondaryEnabled: boolean;
+  primaryVisibility: number;
+  secondaryVisibility: number;
+  primaryQuality: number;
+  secondaryQuality: number;
+  primaryDominance?: number;
+  secondaryDominance?: number;
+  projectedOpacity?: number;
+  primarySampleRgb: Vec3;
+  secondarySampleRgb: Vec3;
+  fallbackRgb: Vec3;
+}
+
+export interface ProjectedStyleCoverageBlendResult {
+  primaryCoverage: number;
+  secondaryCoverage: number;
+  coverage: number;
+  primaryWeight: number;
+  secondaryWeight: number;
+  mixFactor: number;
+  rgb: Vec3;
+}
+
+export function computeProjectedStyleCoverageBlend(
+  params: ProjectedStyleCoverageBlendInput,
+): ProjectedStyleCoverageBlendResult {
+  const primaryDominance = params.primaryDominance ?? 1;
+  const secondaryDominance = params.secondaryDominance ?? 1;
+  const projectedOpacity = clamp(params.projectedOpacity ?? 1, 0, 1);
+
+  const primaryCoverage = (params.primaryEnabled ? 1 : 0) * clamp(params.primaryVisibility, 0, 1);
+  const secondaryCoverage = (params.secondaryEnabled ? 1 : 0) * clamp(params.secondaryVisibility, 0, 1);
+
+  const primaryWeight = primaryCoverage
+    * (0.001 + (params.primaryQuality * primaryDominance) ** 4);
+  const secondaryWeight = secondaryCoverage
+    * (0.001 + (params.secondaryQuality * secondaryDominance) ** 4);
+  const weightTotal = primaryWeight + secondaryWeight;
+  const coverage = Math.max(primaryCoverage, secondaryCoverage);
+
+  let projectedColor: Vec3 = [...params.fallbackRgb];
+  if (weightTotal > 1e-8) {
+    projectedColor = [
+      (params.primarySampleRgb[0] * primaryWeight + params.secondarySampleRgb[0] * secondaryWeight) / weightTotal,
+      (params.primarySampleRgb[1] * primaryWeight + params.secondarySampleRgb[1] * secondaryWeight) / weightTotal,
+      (params.primarySampleRgb[2] * primaryWeight + params.secondarySampleRgb[2] * secondaryWeight) / weightTotal,
+    ];
+  }
+
+  const mixFactor = coverage > 1e-4
+    ? projectedOpacity * clamp(coverage, 0, 1)
+    : 0;
+  const rgb: Vec3 = coverage > 1e-4
+    ? [
+      params.fallbackRgb[0] * (1 - mixFactor) + projectedColor[0] * mixFactor,
+      params.fallbackRgb[1] * (1 - mixFactor) + projectedColor[1] * mixFactor,
+      params.fallbackRgb[2] * (1 - mixFactor) + projectedColor[2] * mixFactor,
+    ]
+    : [...params.fallbackRgb];
+
+  return {
+    primaryCoverage,
+    secondaryCoverage,
+    coverage,
+    primaryWeight,
+    secondaryWeight,
+    mixFactor,
+    rgb,
   };
 }

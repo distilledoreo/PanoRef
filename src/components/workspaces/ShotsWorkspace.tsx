@@ -1002,19 +1002,20 @@ export function ShotsWorkspace() {
                   const landed = isShotFramingAccepted(project, shot.id);
                   const canDelete = project.shots.length > 1;
                   return (
-                    <ShotsLibraryCard
-                      key={shot.id}
-                      project={project}
-                      shot={shot}
-                      selected={selected}
-                      landed={landed}
-                      canDelete={canDelete}
-                      sheetOpen={libraryOpen}
-                      onOpenMedia={setMediaModalShotId}
-                      onOpenShot={handleOpenShotFromLibrary}
-                      onRename={handleLibraryRename}
-                      onRequestDelete={handleRequestDeleteShot}
-                    />
+                    <React.Fragment key={shot.id}>
+                      <ShotsLibraryCard
+                        project={project}
+                        shot={shot}
+                        selected={selected}
+                        landed={landed}
+                        canDelete={canDelete}
+                        sheetOpen={libraryOpen}
+                        onOpenMedia={setMediaModalShotId}
+                        onOpenShot={handleOpenShotFromLibrary}
+                        onRename={handleLibraryRename}
+                        onRequestDelete={handleRequestDeleteShot}
+                      />
+                    </React.Fragment>
                   );
                 })}
                 <button
