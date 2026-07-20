@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { CameraData, ShotStatus } from '../../domain/types';
+import { CameraData, Shot, ShotStatus } from '../../domain/types';
 import {
   DEFAULT_CAMERA_LENS_MM,
   DEFAULT_CAMERA_HEIGHT_METERS,
@@ -30,6 +30,12 @@ import {
   setTwoPointCameraKeyframe,
   updateCameraMoveDuration,
 } from '../../engine/cameraKeyframes';
+import {
+  getCameraMoveDownloadName,
+  getProjectedCameraMoveDownloadName,
+  getProjectedStillDownloadName,
+  getViewportStillDownloadName,
+} from '../../engine/exportNaming';
 import { downloadBlob, downloadDataUrl } from '../../engine/projectIO';
 import {
   canUseRenderMp4Export,
@@ -46,15 +52,24 @@ import { getCameraMoveReferenceFrames } from '../../engine/cameraKeyframes';
 import { isShotFramingAccepted } from '../../engine/workflow';
 import { getPanoMatchQuality, resolveShotLinkedPano } from '../../engine/sync';
 import { useContinuityStore } from '../../state/useContinuityStore';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 import { Field, IconButton, Panel, Select, TextArea, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
-import { ShotThumbnail } from '../common/ShotThumbnail';
+import { ShotCameraRollThumbnail } from '../common/ShotCameraRollThumbnail';
+import { ShotMediaModal } from '../common/ShotMediaModal';
+import { ShotsLibraryCard } from '../common/ShotsLibraryCard';
 import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
 import { canUseProjectedAppearance } from '../../engine/projectedStyle';
 import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { FullBleedLayout } from './WorkspaceShell';
+import {
+  getShotPrimaryLabel,
+  hasCustomShotTitle,
+  normalizeProductionShotId,
+  normalizeShotTitle,
+} from '../../domain/shotIdentity';
 
 const statuses: ShotStatus[] = ['planned', 'exported', 'needs_fix', 'approved', 'rejected'];
 const STATUS_LABELS: Record<ShotStatus, string> = {
@@ -142,6 +157,8 @@ export function ShotsWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [shotPendingDelete, setShotPendingDelete] = useState<Shot | null>(null);
+  const [mediaModalShotId, setMediaModalShotId] = useState<string | null>(null);
   const [captureMode, setCaptureMode] = useState<CaptureMode>('still');
   const [appearance, setAppearance] = useState<'clay' | 'projected'>('clay');
   const [landFlash, setLandFlash] = useState(false);
@@ -173,10 +190,10 @@ export function ShotsWorkspace() {
   }, [getEffectiveCamera, selectedShot]);
 
   const exportFrameFileName = selectedShot
-    ? `${selectedShot.name.replace(/\s+/g, '_').toLowerCase()}_${selectedShot.exportSettings.width}x${selectedShot.exportSettings.height}.png`
+    ? getViewportStillDownloadName(selectedShot)
     : 'camera_frame.png';
   const cameraMoveFileName = selectedShot
-    ? `${selectedShot.name.replace(/\s+/g, '_').toLowerCase()}_camera_move.mp4`
+    ? getCameraMoveDownloadName(selectedShot)
     : 'camera_move.mp4';
   const cameraMoveKeyframes = useMemo(
     () => getSortedCameraKeyframes(selectedShot?.cameraKeyframes ?? []),
@@ -243,6 +260,36 @@ export function ShotsWorkspace() {
     setFramePreviewByShotId((current) => ({ ...current, [shotId]: dataUrl }));
   }, []);
 
+  const handleLibraryRename = useCallback((shotId: string, updates: { productionShotId?: string; name: string }) => {
+    const shot = project.shots.find((item) => item.id === shotId);
+    if (!shot) return;
+    updateShot(shotId, {
+      productionShotId: normalizeProductionShotId(updates.productionShotId),
+      name: normalizeShotTitle(shot, updates.name),
+    });
+  }, [project.shots, updateShot]);
+
+  const handleOpenShotFromLibrary = useCallback((shotId: string) => {
+    selectShot(shotId);
+    setLibraryOpen(false);
+  }, [selectShot]);
+
+  const handleRequestDeleteShot = useCallback((shot: Shot) => {
+    setShotPendingDelete(shot);
+  }, []);
+
+  const handleConfirmDeleteShot = useCallback(() => {
+    if (!shotPendingDelete) return;
+    removeShot(shotPendingDelete.id);
+    setShotPendingDelete(null);
+  }, [removeShot, shotPendingDelete]);
+
+  const handleOpenShotFromMedia = useCallback((shotId: string) => {
+    selectShot(shotId);
+    setMediaModalShotId(null);
+    setLibraryOpen(false);
+  }, [selectShot]);
+
   const exportCameraFrame = useCallback(async () => {
     const previewShot = getPreviewShot();
     if (!previewShot) return;
@@ -262,7 +309,9 @@ export function ShotsWorkspace() {
       if (canUseProjectedAppearance(project)) {
         try {
           const projected = await renderShotProjectedFrame(project, previewShot);
-          const projectedName = exportFrameFileName.replace(/\.png$/i, '_projected.png');
+          const projectedName = selectedShot
+            ? getProjectedStillDownloadName(selectedShot)
+            : exportFrameFileName.replace(/\.png$/i, '_projected.png');
           downloadDataUrl(projected.dataUrl, projectedName);
         } catch {
           // Soft-fail projected companion; clay already succeeded.
@@ -398,7 +447,7 @@ export function ShotsWorkspace() {
             },
           });
           if (cameraMoveAbortRef.current.cancelled) return;
-          const projectedName = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '_projected.mp4');
+          const projectedName = getProjectedCameraMoveDownloadName(selectedShot);
           downloadBlob(projectedVideo.blob, projectedName);
           // Optional still contact sheet companions (still export resolution).
           const frames = getCameraMoveReferenceFrames(selectedShot.cameraKeyframes);
@@ -529,12 +578,13 @@ export function ShotsWorkspace() {
       },
     };
     setSnapshotError(undefined);
-    const baseName = `${(shot.name ?? latestShot.name ?? 'shot').replace(/\s+/g, '_').toLowerCase()}`;
-    void renderShotFrame(latestProject, previewShot as typeof latestProject.shots[number])
+    const shotForNaming = previewShot as typeof latestProject.shots[number];
+    const viewportFileName = getViewportStillDownloadName(shotForNaming);
+    void renderShotFrame(latestProject, shotForNaming)
       .then(async (frame) => {
         setShotFramePreview(shot.id, frame.dataUrl);
         useContinuityStore.getState().attachViewportRenderToShot(shot.id, {
-          name: `${baseName}_viewport.png`,
+          name: viewportFileName,
           dataUrl: frame.dataUrl,
           width: frame.width,
           height: frame.height,
@@ -542,11 +592,11 @@ export function ShotsWorkspace() {
         // Dual download: clay control frame is attached; projected companion downloads when available.
         if (canUseProjectedAppearance(latestProject)) {
           try {
-            const projected = await renderShotProjectedFrame(
-              latestProject,
-              previewShot as typeof latestProject.shots[number],
+            const projected = await renderShotProjectedFrame(latestProject, shotForNaming);
+            downloadDataUrl(
+              projected.dataUrl,
+              getProjectedStillDownloadName(shotForNaming),
             );
-            downloadDataUrl(projected.dataUrl, `${baseName}_viewport_projected.png`);
           } catch {
             // Soft-fail projected companion.
           }
@@ -952,50 +1002,19 @@ export function ShotsWorkspace() {
                   const landed = isShotFramingAccepted(project, shot.id);
                   const canDelete = project.shots.length > 1;
                   return (
-                    <div
+                    <ShotsLibraryCard
                       key={shot.id}
-                      className={`relative shrink-0 overflow-hidden rounded-xl border transition ${
-                        selected
-                          ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]'
-                          : 'border-white/15'
-                      }`}
-                      data-shots-library-card
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          selectShot(shot.id);
-                          setLibraryOpen(false);
-                        }}
-                        className="block"
-                        aria-label={`Select shot ${shot.shotNumber}`}
-                      >
-                        <ShotThumbnail
-                          project={project}
-                          shot={shot}
-                          overrideSrc={framePreviewByShotId[shot.id]}
-                          className="h-20 w-28 object-cover"
-                        />
-                        <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                          {shot.shotNumber}{landed ? ' · ✓' : ''}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (!canDelete) return;
-                          removeShot(shot.id);
-                        }}
-                        disabled={!canDelete}
-                        className="absolute right-1 top-1 inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/65 text-white/90 backdrop-blur-sm transition hover:bg-red-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                        aria-label={canDelete ? `Delete shot ${shot.shotNumber}` : 'Cannot delete the only shot'}
-                        title={canDelete ? 'Delete shot' : 'Keep at least one shot'}
-                        data-shots-library-delete
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                      project={project}
+                      shot={shot}
+                      selected={selected}
+                      landed={landed}
+                      canDelete={canDelete}
+                      sheetOpen={libraryOpen}
+                      onOpenMedia={setMediaModalShotId}
+                      onOpenShot={handleOpenShotFromLibrary}
+                      onRename={handleLibraryRename}
+                      onRequestDelete={handleRequestDeleteShot}
+                    />
                   );
                 })}
                 <button
@@ -1013,6 +1032,32 @@ export function ShotsWorkspace() {
             </div>
           </div>
         )}
+
+        <ConfirmDialog
+          open={shotPendingDelete != null}
+          title={shotPendingDelete ? `Delete ${getShotPrimaryLabel(shotPendingDelete)}?` : 'Delete shot?'}
+          confirmLabel="Delete shot"
+          destructive
+          onCancel={() => setShotPendingDelete(null)}
+          onConfirm={handleConfirmDeleteShot}
+        >
+          {shotPendingDelete && (
+            hasCustomShotTitle(shotPendingDelete)
+              ? `"${shotPendingDelete.name.trim()}" and its saved captures will be removed from this project. This cannot be undone.`
+              : 'Its saved captures will be removed from this project. This cannot be undone.'
+          )}
+        </ConfirmDialog>
+
+        <ShotMediaModal
+          open={mediaModalShotId != null}
+          project={project}
+          shots={project.shots}
+          shotId={mediaModalShotId}
+          onClose={() => setMediaModalShotId(null)}
+          onOpenShot={handleOpenShotFromMedia}
+          onUpdateShot={updateShot}
+          onNavigateShot={setMediaModalShotId}
+        />
 
         {/* Bottom camera chrome */}
         <div
@@ -1152,10 +1197,11 @@ export function ShotsWorkspace() {
               title="Previous shots"
             >
               {libraryThumbShot ? (
-                <ShotThumbnail
+                <ShotCameraRollThumbnail
                   project={project}
                   shot={libraryThumbShot}
                   overrideSrc={framePreviewByShotId[libraryThumbShot.id]}
+                  allowLivePreview
                   className="h-full w-full object-cover"
                   compact
                 />

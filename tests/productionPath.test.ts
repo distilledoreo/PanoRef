@@ -43,7 +43,8 @@ describe('workflow guidance UI', () => {
     const shotInfoCard = readFileSync(new URL('../src/components/common/ShotInfoCard.tsx', import.meta.url), 'utf8');
     expect(shots).toContain('data-shots-camera-shell');
     expect(shots).toContain('data-shots-shutter');
-    expect(shots).toContain('ShotThumbnail');
+    expect(shots).toContain('ShotCameraRollThumbnail');
+    expect(shots).toContain('ShotsLibraryCard');
     expect(shotInfoCard).toContain('Open in 360');
     expect(shots).toContain('PrecisionDrawer');
     expect(shots).toContain('data-shots-advanced-settings');
@@ -60,7 +61,7 @@ describe('workflow guidance UI', () => {
     expect(build).toContain('Render 360 Reference');
     expect(exportWorkspace).toContain('Camera move clay frames');
     expect(exportWorkspace).toContain('Export Settings');
-    expect(exportWorkspace).toContain('aria-label={`Export Shot');
+    expect(exportWorkspace).toContain('getShotPrimaryLabel(shot)');
     expect(exportWorkspace).toContain('Handoff packages');
     expect(app).not.toContain('ReviewWorkspace');
     expect(app).not.toContain("id: 'review'");

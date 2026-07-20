@@ -1,5 +1,6 @@
 import { STYLED_PANO } from '../domain/copy';
 import { LocationProject, Shot, WarningItem } from '../domain/types';
+import { findDuplicateProductionShotIds } from './exportNaming';
 import { canUseProjectedAppearance } from './projectedStyle';
 import { getPanoMatchQuality } from './sync';
 
@@ -91,6 +92,14 @@ export function getExportSelectionWarnings(
       id: 'selection-missing-full-pano',
       severity: 'warning',
       message: 'Full pano / cubemap export is enabled for a selected shot, but no canonical or linked panorama is available.',
+    });
+  }
+
+  for (const productionId of findDuplicateProductionShotIds(shots)) {
+    warnings.push({
+      id: `duplicate-production-shot-id-${productionId}`,
+      severity: 'warning',
+      message: `Two selected shots use the production ID "${productionId}". Rename one before export.`,
     });
   }
 

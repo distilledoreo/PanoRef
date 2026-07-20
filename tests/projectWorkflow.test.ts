@@ -250,11 +250,12 @@ describe('project workflow logic', () => {
 
     const manifest = createShotPackageManifest(project, shot);
     const paths = manifest.files.map((file) => file.path);
-    expect(paths).toContain('shot_001/inputs/viewport_clay.png');
-    expect(paths).not.toContain('shot_001/inputs/continuity_control_view.png');
-    expect(paths).not.toContain('shot_001/outputs/skinned_reference_frame.png');
-    expect(paths).toContain('shot_001/inputs/global_graybox.png');
-    expect(paths).toContain('shot_001/prompts/image_gen_prompt.txt');
+    const root = manifest.rootFolder;
+    expect(paths).toContain(`${root}/inputs/viewport_clay.png`);
+    expect(paths).not.toContain(`${root}/inputs/continuity_control_view.png`);
+    expect(paths).not.toContain(`${root}/outputs/skinned_reference_frame.png`);
+    expect(paths).toContain(`${root}/inputs/global_graybox.png`);
+    expect(paths).toContain(`${root}/prompts/image_gen_prompt.txt`);
   });
 
   it('includes pano crop in the manifest only when crop settings exist', () => {
@@ -290,8 +291,9 @@ describe('project workflow logic', () => {
     });
     project.shots.push(shot);
 
+    const root = createShotPackageManifest(project, shot).rootFolder;
     expect(createShotPackageManifest(project, shot).files.map((file) => file.path))
-      .not.toContain('shot_001/inputs/pano_crop.png');
+      .not.toContain(`${root}/inputs/pano_crop.png`);
 
     shot.panoCrop = {
       panoId: pano.id,
@@ -304,7 +306,7 @@ describe('project workflow logic', () => {
       height: 1080,
     };
     expect(createShotPackageManifest(project, shot).files.map((file) => file.path))
-      .toContain('shot_001/inputs/pano_crop.png');
+      .toContain(`${root}/inputs/pano_crop.png`);
   });
 
   it('adds an imported AI result frame to the package manifest only after one exists', () => {
@@ -321,12 +323,13 @@ describe('project workflow logic', () => {
       },
     });
     project.shots.push(shot);
+    const root = createShotPackageManifest(project, shot).rootFolder;
     expect(createShotPackageManifest(project, shot).files.map((file) => file.path))
-      .not.toContain('shot_001/outputs/ai_result_frame.png');
+      .not.toContain(`${root}/outputs/ai_result_frame.png`);
 
     shot.assets.aiResultFrameAssetId = 'asset_ai_result';
     expect(createShotPackageManifest(project, shot).files.map((file) => file.path))
-      .toContain('shot_001/outputs/ai_result_frame.png');
+      .toContain(`${root}/outputs/ai_result_frame.png`);
   });
 
   it('keeps priority export output paths in capped preview lists', () => {
@@ -645,6 +648,25 @@ describe('project workflow logic', () => {
     const selection = getExportSelectionWarnings(project, [clayOnly]).map((warning) => warning.id);
     expect(selection).toContain('selection-missing-graybox-pano');
     expect(selection).toContain('selection-missing-projector');
+  });
+
+  it('warns when multiple selected shots share a production ID', () => {
+    const project = createDefaultProject();
+    const first = {
+      ...project.shots[0],
+      id: 'shot-a',
+      productionShotId: '42A',
+      name: 'Courtyard entrance',
+    };
+    const second = {
+      ...project.shots[0],
+      id: 'shot-b',
+      productionShotId: '42A',
+      name: 'Courtyard reverse',
+    };
+
+    const warnings = getExportSelectionWarnings(project, [first, second]);
+    expect(warnings.some((warning) => warning.id === 'duplicate-production-shot-id-42A')).toBe(true);
   });
 
   it('notes pano origin distance only when panorama crop export is enabled', () => {
