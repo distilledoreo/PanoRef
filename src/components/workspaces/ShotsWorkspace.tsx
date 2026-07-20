@@ -151,6 +151,7 @@ export function ShotsWorkspace() {
   const shotCameraFlyingRef = useRef(shotCameraFlying);
   shotCameraFlyingRef.current = shotCameraFlying;
   const handledRestoreGenerationRef = useRef(shotCameraHistoryRestoreGeneration);
+  const finalizeShotFovWheelBatchRef = useRef<() => void>(() => {});
   /** Transient live previews keyed by shot id — never reuse across shots. */
   const [framePreviewByShotId, setFramePreviewByShotId] = useState<Record<string, string>>({});
   const framePreviewUrl = selectedShot ? framePreviewByShotId[selectedShot.id] : undefined;
@@ -546,6 +547,16 @@ export function ShotsWorkspace() {
     setFocalLengthHudPulse((value) => value + 1);
   }, []);
 
+  const undoShotCameraWithActiveBatchFinalize = useCallback(() => {
+    finalizeShotFovWheelBatchRef.current();
+    undoShotCamera();
+  }, [undoShotCamera]);
+
+  const redoShotCameraWithActiveBatchFinalize = useCallback(() => {
+    finalizeShotFovWheelBatchRef.current();
+    redoShotCamera();
+  }, [redoShotCamera]);
+
   const commitShotCamera = useCallback((camera: CameraData, options?: { cameraHistory?: 'step' | 'batch' | 'silent' }) => {
     const shotId = selectedShot?.id;
     if (!shotId) return;
@@ -570,22 +581,22 @@ export function ShotsWorkspace() {
       if (!event.ctrlKey && !event.metaKey) return;
       if (event.key.toLowerCase() === 'z' && event.shiftKey) {
         event.preventDefault();
-        redoShotCamera();
+        redoShotCameraWithActiveBatchFinalize();
         return;
       }
       if (event.key.toLowerCase() === 'z') {
         event.preventDefault();
-        undoShotCamera();
+        undoShotCameraWithActiveBatchFinalize();
         return;
       }
       if (event.key.toLowerCase() === 'y') {
         event.preventDefault();
-        redoShotCamera();
+        redoShotCameraWithActiveBatchFinalize();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [redoShotCamera, selectedShot, undoShotCamera]);
+  }, [redoShotCameraWithActiveBatchFinalize, selectedShot, undoShotCameraWithActiveBatchFinalize]);
 
   const framePreviewKey = useMemo(() => {
     const previewShot = getPreviewShot();
@@ -1030,6 +1041,7 @@ export function ShotsWorkspace() {
             shotFraming={shotFraming}
             appearance={appearance}
             minHeightClassName="min-h-0"
+            parentFinalizeShotFovWheelBatchRef={finalizeShotFovWheelBatchRef}
             onOcclusionStatusChange={(status) => useContinuityStore.getState().setProjectedOcclusionStatus(status)}
           />
         </div>

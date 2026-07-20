@@ -12,7 +12,7 @@ import {
   applyShotFovWheelDelta,
   SHOT_FOV_WHEEL_STEP_THRESHOLD,
 } from '../src/engine/shotFovWheel';
-import { simulateShotFovWheelProgression } from '../src/engine/shotFramingViewportReseed';
+import { simulateShotFovWheelProgression, simulateUndoDuringActiveWheelBatch } from '../src/engine/shotFramingViewportReseed';
 
 const LEGACY_DEFAULT_FOV_DEGREES = 54.4;
 
@@ -89,5 +89,25 @@ describe('shot framing viewport wheel loop', () => {
     });
 
     expect(focalLengths).toEqual([25, 30, 25]);
+  });
+
+  it('keeps the undone focal length when undo follows an active wheel batch after finalizing it', () => {
+    const startFovDegrees = LEGACY_DEFAULT_FOV_DEGREES;
+    const withoutFinalize = simulateUndoDuringActiveWheelBatch({
+      startFovDegrees,
+      aspectRatio: DEFAULT_CAMERA_ASPECT_RATIO,
+      wheelTargetFocalLengthMm: 25,
+      finalizeBeforeUndo: false,
+    });
+    const withFinalize = simulateUndoDuringActiveWheelBatch({
+      startFovDegrees,
+      aspectRatio: DEFAULT_CAMERA_ASPECT_RATIO,
+      wheelTargetFocalLengthMm: 25,
+      finalizeBeforeUndo: true,
+    });
+
+    expect(withoutFinalize.storedFocalLengthMm).toBe(25);
+    expect(withFinalize.storedFocalLengthMm).toBe(20);
+    expect(withFinalize.viewportFocalLengthMm).toBe(20);
   });
 });

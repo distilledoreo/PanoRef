@@ -161,6 +161,7 @@ export function SceneViewport({
   frameObjectIds = [],
   minHeightClassName = 'min-h-[420px]',
   onOcclusionStatusChange,
+  parentFinalizeShotFovWheelBatchRef,
 }: {
   project: LocationProject;
   selectedObjectIds?: string[];
@@ -215,6 +216,8 @@ export function SceneViewport({
   frameObjectIds?: string[];
   minHeightClassName?: string;
   onOcclusionStatusChange?: (status: 'disabled' | 'generating' | 'ready' | 'failed') => void;
+  /** Optional parent ref that receives the active shot FOV wheel batch finalizer. */
+  parentFinalizeShotFovWheelBatchRef?: React.MutableRefObject<() => void>;
 }) {
   const theme = useThemeStore((state) => state.theme);
   const [mannequinRevision, setMannequinRevision] = useState(getHumanMannequinRevision);
@@ -1180,6 +1183,10 @@ export function SceneViewport({
     };
 
     const endShotFovWheelBatch = () => {
+      if (wheelBatchTimerRef.current) {
+        clearTimeout(wheelBatchTimerRef.current);
+        wheelBatchTimerRef.current = undefined;
+      }
       if (!wheelBatchActiveRef.current) return;
       wheelBatchActiveRef.current = false;
       const framing = shotFramingRef.current;
@@ -1196,6 +1203,9 @@ export function SceneViewport({
       wheelBatchShotIdRef.current = undefined;
     };
     finalizeShotFovWheelBatchRef.current = endShotFovWheelBatch;
+    if (parentFinalizeShotFovWheelBatchRef) {
+      parentFinalizeShotFovWheelBatchRef.current = endShotFovWheelBatch;
+    }
 
     const scheduleShotFovWheelBatchEnd = () => {
       if (wheelBatchTimerRef.current) clearTimeout(wheelBatchTimerRef.current);
@@ -1342,8 +1352,11 @@ export function SceneViewport({
       if (sceneRef.current) disposeScene(sceneRef.current);
       renderer.dispose();
       renderer.domElement.remove();
+      if (parentFinalizeShotFovWheelBatchRef) {
+        parentFinalizeShotFovWheelBatchRef.current = () => {};
+      }
     };
-  }, [clearTransformGizmo, disposeOcclusionMaps, emitFramingCamera, syncTransformGizmo, theme]);
+  }, [clearTransformGizmo, disposeOcclusionMaps, emitFramingCamera, parentFinalizeShotFovWheelBatchRef, syncTransformGizmo, theme]);
 
   useEffect(() => {
     const modeChanged = freeCameraModeRef.current !== freeCameraActive;

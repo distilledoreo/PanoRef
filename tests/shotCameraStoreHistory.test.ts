@@ -11,6 +11,7 @@ import {
   applyLiveShotFovWheelBatchCommit,
   shouldFinalizeShotFovWheelBatchOnShotChange,
 } from '../src/engine/shotFovWheelBatch';
+import { focalLengthToVerticalFov, verticalFovToFocalLength } from '../src/engine/focalLength';
 import { useContinuityStore } from '../src/state/useContinuityStore';
 
 function cameraWithFov(fovDegrees: number): CameraData {
@@ -147,5 +148,35 @@ describe('shot camera store history', () => {
       useContinuityStore.getState().project.shots.find((shot) => shot.id === shotA)?.camera.fovDegrees,
     ).toBe(originalShotAFov);
     expect(getShotCameraHistoryStacks(useContinuityStore.getState().shotCameraHistoryByShotId, shotB).past).toHaveLength(0);
+  });
+
+  it('restores the undone focal length when undo follows a finalized active wheel batch', () => {
+    useContinuityStore.setState({
+      project: createDefaultProject(),
+      selectedShotId: undefined,
+      shotCameraHistoryByShotId: {},
+      shotCameraHistoryBatchDepth: 0,
+      shotCameraHistoryBatchCaptured: false,
+    });
+    const shotId = useContinuityStore.getState().project.shots[0].id;
+    const originalFov = 54.4;
+    const zoomedFov = focalLengthToVerticalFov(25, 16 / 9);
+
+    useContinuityStore.getState().selectShot(shotId);
+    useContinuityStore.getState().updateShot(shotId, { camera: cameraWithFov(originalFov) });
+
+    useContinuityStore.getState().beginShotCameraHistoryBatch();
+    const stored = useContinuityStore.getState().project.shots.find((shot) => shot.id === shotId)!.camera;
+    const committed = buildShotFovWheelBatchCommit(
+      stored,
+      { ...stored, fovDegrees: zoomedFov },
+    );
+    useContinuityStore.getState().updateShot(shotId, { camera: committed }, { cameraHistory: 'batch' });
+    useContinuityStore.getState().endShotCameraHistoryBatch();
+
+    expect(useContinuityStore.getState().undoShotCamera()).toBe(true);
+    const restored = useContinuityStore.getState().project.shots.find((shot) => shot.id === shotId)!.camera;
+    expect(restored.fovDegrees).toBeCloseTo(originalFov, 5);
+    expect(Math.round(verticalFovToFocalLength(restored.fovDegrees, restored.aspectRatio))).toBe(20);
   });
 });

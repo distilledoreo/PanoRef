@@ -242,3 +242,61 @@ export function simulateShotFovWheelProgression(options: {
 
   return focalLengths;
 }
+
+export function simulateUndoDuringActiveWheelBatch(options: {
+  startFovDegrees: number;
+  aspectRatio: number;
+  wheelTargetFocalLengthMm: number;
+  finalizeBeforeUndo: boolean;
+}): {
+  storedFocalLengthMm: number;
+  viewportFocalLengthMm: number;
+} {
+  const camera: CameraData = {
+    position: [0, 1.6, 0],
+    target: [0, 1.6, 1],
+    fovDegrees: options.startFovDegrees,
+    aspectRatio: options.aspectRatio,
+    near: 0.1,
+    far: 100,
+  };
+
+  let state = createShotFramingWheelLoopState(camera);
+  const wheelOptions = { reseedOnParentCameraValueChange: false };
+
+  let guard = 0;
+  while (
+    Math.round(verticalFovToFocalLength(state.viewportFovDegrees, options.aspectRatio))
+      < options.wheelTargetFocalLengthMm
+    && guard < 8
+  ) {
+    state = dispatchWheelStep(
+      state,
+      camera,
+      -SHOT_FOV_WHEEL_STEP_THRESHOLD,
+      wheelOptions,
+    );
+    guard += 1;
+  }
+
+  if (options.finalizeBeforeUndo) {
+    state = finishWheelBatch(state, camera, wheelOptions);
+  }
+
+  state = undoLensChange(state, camera, options.startFovDegrees, wheelOptions);
+
+  if (!options.finalizeBeforeUndo) {
+    state = finishWheelBatch(state, camera, wheelOptions);
+  }
+
+  return {
+    storedFocalLengthMm: Math.round(verticalFovToFocalLength(
+      state.storedFovDegrees,
+      options.aspectRatio,
+    )),
+    viewportFocalLengthMm: Math.round(verticalFovToFocalLength(
+      state.viewportFovDegrees,
+      options.aspectRatio,
+    )),
+  };
+}
