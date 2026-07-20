@@ -20,7 +20,7 @@ import {
   DEFAULT_CAMERA_HEIGHT_METERS,
 } from '../../domain/defaults';
 import { clampShotVerticalFov, verticalFovToFocalLength } from '../../engine/focalLength';
-import { buildShotFovWheelBatchCommit } from '../../engine/shotFovWheelBatch';
+import { buildShotFovWheelBatchCommit, applyLiveShotFovWheelBatchCommit } from '../../engine/shotFovWheelBatch';
 import {
   DEFAULT_CAMERA_MOVE_DURATION_SECONDS,
   MAX_CAMERA_MOVE_DURATION_SECONDS,
@@ -141,10 +141,15 @@ export function ShotsWorkspace() {
     undoShotCamera,
     redoShotCamera,
   } = useContinuityStore();
+  const shotCameraHistoryRestoreGeneration = useContinuityStore(
+    (state) => state.shotCameraHistoryRestoreGeneration,
+  );
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
   const linkedAsset = linkedPano ? project.assets.assets[linkedPano.imageAssetId] : undefined;
   const draftCameraRef = useRef<CameraData | undefined>();
+  const shotCameraFlyingRef = useRef(shotCameraFlying);
+  shotCameraFlyingRef.current = shotCameraFlying;
   /** Transient live previews keyed by shot id — never reuse across shots. */
   const [framePreviewByShotId, setFramePreviewByShotId] = useState<Record<string, string>>({});
   const framePreviewUrl = selectedShot ? framePreviewByShotId[selectedShot.id] : undefined;
@@ -500,11 +505,24 @@ export function ShotsWorkspace() {
   useEffect(() => {
     if (!selectedShot) {
       setFramingCamera(undefined);
+      draftCameraRef.current = undefined;
       return;
     }
     draftCameraRef.current = selectedShot.camera;
     setFramingCamera(selectedShot.camera);
-  }, [selectedShot?.id, selectedShot?.camera]);
+  }, [selectedShot?.id]);
+
+  useEffect(() => {
+    if (!selectedShot || shotCameraFlyingRef.current) return;
+    draftCameraRef.current = selectedShot.camera;
+    setFramingCamera(selectedShot.camera);
+  }, [selectedShot?.camera, selectedShot?.id]);
+
+  useEffect(() => {
+    if (!selectedShot || shotCameraHistoryRestoreGeneration === 0) return;
+    draftCameraRef.current = selectedShot.camera;
+    setFramingCamera(selectedShot.camera);
+  }, [selectedShot?.camera, selectedShot?.id, shotCameraHistoryRestoreGeneration]);
 
   const pulseFocalLengthHud = useCallback(() => {
     setFocalLengthHudPulse((value) => value + 1);
@@ -603,15 +621,19 @@ export function ShotsWorkspace() {
   }, [beginShotCameraHistoryBatch]);
 
   const handleShotFovWheelBatchEnd = useCallback((shotId: string, camera: CameraData) => {
-    const state = useContinuityStore.getState();
-    const shot = state.project.shots.find((item) => item.id === shotId);
-    if (!shot) return;
-    const nextCamera = buildShotFovWheelBatchCommit(shot.camera, camera);
-    updateShot(shotId, { camera: nextCamera }, { cameraHistory: 'batch' });
-    endShotCameraHistoryBatch();
-    if (state.selectedShotId === shotId) {
-      draftCameraRef.current = nextCamera;
-      setFramingCamera(nextCamera);
+    try {
+      const state = useContinuityStore.getState();
+      const shot = state.project.shots.find((item) => item.id === shotId);
+      if (!shot) return;
+      const nextCamera = buildShotFovWheelBatchCommit(shot.camera, camera);
+      updateShot(shotId, { camera: nextCamera }, { cameraHistory: 'batch' });
+      if (state.selectedShotId === shotId) {
+        const liveFraming = applyLiveShotFovWheelBatchCommit(camera, nextCamera);
+        draftCameraRef.current = liveFraming;
+        setFramingCamera(liveFraming);
+      }
+    } finally {
+      endShotCameraHistoryBatch();
     }
   }, [endShotCameraHistoryBatch, updateShot]);
 
@@ -623,9 +645,10 @@ export function ShotsWorkspace() {
     // Seed from the stored shot only when entering fly — never clobber a live draft pose.
     if (selectedShot && !shotCameraFlying) {
       draftCameraRef.current = selectedShot.camera;
+      setFramingCamera(selectedShot.camera);
     }
     setShotCameraFlying(true, options);
-  }, [selectedShot?.camera, setShotCameraFlying, shotCameraFlying]);
+  }, [selectedShot, setShotCameraFlying, shotCameraFlying]);
 
   const snapshotPreview = useCallback((shot: { id: string; name?: string; exportSettings: { width: number; height: number }; camera: CameraData }, camera: CameraData) => {
     // Use latest project from the store so freshly created shots are not missing

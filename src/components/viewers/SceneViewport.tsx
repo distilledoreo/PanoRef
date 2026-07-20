@@ -1288,6 +1288,7 @@ export function SceneViewport({
       flyKeysRef.current.clear();
       flyAxesRef.current = { forward: 0, strafe: 0, vertical: 0 };
       forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, { type: 'reset' });
+      altHeldRef.current = false;
     };
     const onVisibilityChange = () => { if (document.hidden) clearFlyInput(); };
 

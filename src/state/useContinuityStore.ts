@@ -127,6 +127,8 @@ interface ContinuityStore {
   shotCameraHistoryByShotId: ShotCameraHistoryByShotId;
   shotCameraHistoryBatchDepth: number;
   shotCameraHistoryBatchCaptured: boolean;
+  /** Bumps on undo/redo so live framing can reseed from the restored stored pose. */
+  shotCameraHistoryRestoreGeneration: number;
   setWorkspace: (workspace: Workspace) => void;
   setProject: (project: LocationProject) => void;
   updateProjectInfo: (updates: Pick<LocationProject, 'name'> | Partial<Pick<LocationProject, 'name' | 'description'>>) => void;
@@ -272,6 +274,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   shotCameraHistoryByShotId: {},
   shotCameraHistoryBatchDepth: 0,
   shotCameraHistoryBatchCaptured: false,
+  shotCameraHistoryRestoreGeneration: 0,
   dismissedWorkflowAdvanceKeys: [],
   seenObjectiveWorkspaces: [],
   objectiveModalRequest: 0,
@@ -372,6 +375,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         shot.id,
         result.stacks,
       ),
+      shotCameraHistoryRestoreGeneration: state.shotCameraHistoryRestoreGeneration + 1,
     });
     return true;
   },
@@ -391,6 +395,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
         shot.id,
         result.stacks,
       ),
+      shotCameraHistoryRestoreGeneration: state.shotCameraHistoryRestoreGeneration + 1,
     });
     return true;
   },
@@ -472,6 +477,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       shotCameraHistoryByShotId: clearAllShotCameraHistory(),
       shotCameraHistoryBatchDepth: 0,
       shotCameraHistoryBatchCaptured: false,
+      shotCameraHistoryRestoreGeneration: 0,
     });
   },
   updateProjectInfo: (updates) => set((state) => ({

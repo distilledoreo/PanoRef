@@ -25,3 +25,13 @@ export function buildShotFovWheelBatchCommit(
     fovDegrees: liveCamera.fovDegrees,
   };
 }
+
+/** Keep the live draft pose while applying a store-only FOV commit from a wheel batch. */
+export function applyLiveShotFovWheelBatchCommit(
+  currentFramingCamera: CameraData | undefined,
+  committedCamera: CameraData,
+): CameraData {
+  return currentFramingCamera
+    ? { ...currentFramingCamera, fovDegrees: committedCamera.fovDegrees }
+    : committedCamera;
+}

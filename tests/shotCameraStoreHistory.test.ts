@@ -7,6 +7,7 @@ import {
 import {
   beginShotFovWheelBatch,
   buildShotFovWheelBatchCommit,
+  applyLiveShotFovWheelBatchCommit,
   shouldFinalizeShotFovWheelBatchOnShotChange,
 } from '../src/engine/shotFovWheelBatch';
 import { useContinuityStore } from '../src/state/useContinuityStore';
@@ -35,6 +36,24 @@ describe('shot fov wheel batch', () => {
     const committed = buildShotFovWheelBatchCommit(stored, live);
     expect(committed.fovDegrees).toBe(40);
     expect(committed.position).toEqual(stored.position);
+  });
+
+  it('preserves the live draft pose when a wheel batch commits FOV while flying', () => {
+    const stored = cameraWithFov(35);
+    const live = {
+      ...stored,
+      fovDegrees: 40,
+      position: [1, 2, 3] as CameraData['position'],
+      target: [1, 2, 4] as CameraData['target'],
+    };
+    const committed = buildShotFovWheelBatchCommit(stored, live);
+    const framingAfter = applyLiveShotFovWheelBatchCommit(live, committed);
+
+    expect(committed.position).toEqual(stored.position);
+    expect(committed.target).toEqual(stored.target);
+    expect(framingAfter.position).toEqual(live.position);
+    expect(framingAfter.target).toEqual(live.target);
+    expect(framingAfter.fovDegrees).toBe(40);
   });
 });
 
