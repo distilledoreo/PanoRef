@@ -1094,7 +1094,7 @@ export function SceneViewport({
 
       if (drag.kind === 'shot_framing' || drag.kind === 'free_camera') {
         const fly = flyRef.current;
-        const lookScale = event.shiftKey ? LOOK_SENSITIVITY * PRECISION_INPUT_MULTIPLIER : LOOK_SENSITIVITY;
+        const lookScale = event.altKey ? LOOK_SENSITIVITY * PRECISION_INPUT_MULTIPLIER : LOOK_SENSITIVITY;
         fly.yawDegrees -= dx * lookScale;
         fly.pitchDegrees = Math.max(-89, Math.min(89, fly.pitchDegrees - dy * lookScale));
         flyDirtyRef.current = true;
@@ -1103,7 +1103,7 @@ export function SceneViewport({
       }
 
       if (drag.kind === 'orbit') {
-        const orbitScale = event.shiftKey ? PRECISION_INPUT_MULTIPLIER : 1;
+        const orbitScale = event.altKey ? PRECISION_INPUT_MULTIPLIER : 1;
         orbitRef.current.yaw -= dx * 0.25 * orbitScale;
         orbitRef.current.pitch = Math.max(-10, Math.min(78, orbitRef.current.pitch - dy * 0.18 * orbitScale));
       }
@@ -1200,7 +1200,7 @@ export function SceneViewport({
           currentFovDegrees: framingFovRef.current,
           aspectRatio: framing.camera.aspectRatio,
           deltaY: event.deltaY,
-          shiftKey: event.shiftKey,
+          altKey: event.altKey,
           accumulatedDeltaY: wheelFovAccumRef.current,
         });
         wheelFovAccumRef.current = wheelResult.nextAccumulatedDeltaY;
@@ -1222,7 +1222,7 @@ export function SceneViewport({
         return;
       }
       if (freeCameraActiveRef.current) return;
-      const dollyScale = event.shiftKey ? PRECISION_INPUT_MULTIPLIER : 1;
+      const dollyScale = event.altKey ? PRECISION_INPUT_MULTIPLIER : 1;
       orbitRef.current.distance = Math.max(
         3,
         Math.min(

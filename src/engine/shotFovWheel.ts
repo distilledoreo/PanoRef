@@ -31,7 +31,7 @@ export function applyShotFovWheelDelta(options: {
   currentFovDegrees: number;
   aspectRatio: number;
   deltaY: number;
-  shiftKey: boolean;
+  altKey: boolean;
   accumulatedDeltaY: number;
 }): {
   nextFovDegrees: number;
@@ -39,7 +39,7 @@ export function applyShotFovWheelDelta(options: {
   stepsApplied: number;
 } {
   let accumulated = options.accumulatedDeltaY + options.deltaY;
-  const stepMm = options.shiftKey ? 1 : 5;
+  const stepMm = options.altKey ? 1 : 5;
   let currentFov = options.currentFovDegrees;
   let stepsApplied = 0;
 

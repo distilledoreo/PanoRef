@@ -58,7 +58,7 @@ describe('applyShotFovWheelDelta', () => {
       currentFovDegrees: startFov,
       aspectRatio,
       deltaY: SHOT_FOV_WHEEL_STEP_THRESHOLD / 2,
-      shiftKey: false,
+      altKey: false,
       accumulatedDeltaY: 0,
     });
     expect(first.stepsApplied).toBe(0);
@@ -67,20 +67,20 @@ describe('applyShotFovWheelDelta', () => {
       currentFovDegrees: startFov,
       aspectRatio,
       deltaY: SHOT_FOV_WHEEL_STEP_THRESHOLD / 2,
-      shiftKey: false,
+      altKey: false,
       accumulatedDeltaY: first.nextAccumulatedDeltaY,
     });
     expect(second.stepsApplied).toBe(1);
     expect(verticalFovToFocalLength(second.nextFovDegrees, aspectRatio)).toBeCloseTo(35, 5);
   });
 
-  it('uses 1 mm precision when shift is held', () => {
+  it('uses 1 mm precision when Alt is held during wheel input', () => {
     const startFov = focalLengthToVerticalFov(37.4, aspectRatio);
     const result = applyShotFovWheelDelta({
       currentFovDegrees: startFov,
       aspectRatio,
       deltaY: -SHOT_FOV_WHEEL_STEP_THRESHOLD,
-      shiftKey: true,
+      altKey: true,
       accumulatedDeltaY: 0,
     });
     expect(result.stepsApplied).toBe(1);
@@ -93,7 +93,7 @@ describe('applyShotFovWheelDelta', () => {
       currentFovDegrees: startFov,
       aspectRatio,
       deltaY: SHOT_FOV_WHEEL_STEP_THRESHOLD,
-      shiftKey: false,
+      altKey: false,
       accumulatedDeltaY: 0,
     });
     expect(result.stepsApplied).toBe(1);
