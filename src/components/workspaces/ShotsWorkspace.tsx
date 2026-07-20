@@ -20,6 +20,7 @@ import {
   DEFAULT_CAMERA_HEIGHT_METERS,
 } from '../../domain/defaults';
 import { clampShotVerticalFov, verticalFovToFocalLength } from '../../engine/focalLength';
+import { buildShotFovWheelBatchCommit } from '../../engine/shotFovWheelBatch';
 import {
   DEFAULT_CAMERA_MOVE_DURATION_SECONDS,
   MAX_CAMERA_MOVE_DURATION_SECONDS,
@@ -510,11 +511,12 @@ export function ShotsWorkspace() {
   }, []);
 
   const commitShotCamera = useCallback((camera: CameraData, options?: { cameraHistory?: 'step' | 'batch' | 'silent' }) => {
-    if (!selectedShot) return;
+    const shotId = selectedShot?.id;
+    if (!shotId) return;
     draftCameraRef.current = camera;
     setFramingCamera(camera);
-    updateShot(selectedShot.id, { camera }, options);
-  }, [selectedShot, updateShot]);
+    updateShot(shotId, { camera }, options);
+  }, [selectedShot?.id, updateShot]);
 
   useEffect(() => {
     setCameraMovePreviewUrl(cameraMoveAsset?.uri);
@@ -596,21 +598,22 @@ export function ShotsWorkspace() {
     updateShot(selectedShot.id, { camera });
   }, [selectedShot?.id, shotCameraFlying, updateShot]);
 
-  const handleShotFovWheelBatchStart = useCallback(() => {
+  const handleShotFovWheelBatchStart = useCallback((_shotId: string) => {
     beginShotCameraHistoryBatch();
   }, [beginShotCameraHistoryBatch]);
 
-  const handleShotFovWheelBatchEnd = useCallback((camera: CameraData) => {
-    if (!selectedShot) return;
-    commitShotCamera(
-      {
-        ...selectedShot.camera,
-        fovDegrees: camera.fovDegrees,
-      },
-      { cameraHistory: 'batch' },
-    );
+  const handleShotFovWheelBatchEnd = useCallback((shotId: string, camera: CameraData) => {
+    const state = useContinuityStore.getState();
+    const shot = state.project.shots.find((item) => item.id === shotId);
+    if (!shot) return;
+    const nextCamera = buildShotFovWheelBatchCommit(shot.camera, camera);
+    updateShot(shotId, { camera: nextCamera }, { cameraHistory: 'batch' });
     endShotCameraHistoryBatch();
-  }, [commitShotCamera, endShotCameraHistoryBatch, selectedShot]);
+    if (state.selectedShotId === shotId) {
+      draftCameraRef.current = nextCamera;
+      setFramingCamera(nextCamera);
+    }
+  }, [endShotCameraHistoryBatch, updateShot]);
 
   const handleFocalLengthHudPulse = useCallback(() => {
     pulseFocalLengthHud();
@@ -849,6 +852,7 @@ export function ShotsWorkspace() {
   const shotFraming = useMemo(() => (
     selectedShot
       ? {
+        shotId: selectedShot.id,
         camera: framingCamera ?? selectedShot.camera,
         frameAspectRatio: selectedShot.exportSettings.width / selectedShot.exportSettings.height,
         frameResolutionLabel: `${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height}`,
@@ -872,6 +876,7 @@ export function ShotsWorkspace() {
     handleFramingCameraChange,
     handleShotFovWheelBatchEnd,
     handleShotFovWheelBatchStart,
+    selectedShot?.id,
     selectedShot?.camera,
     selectedShot?.exportSettings.height,
     selectedShot?.exportSettings.width,

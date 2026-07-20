@@ -7,6 +7,8 @@ export interface ShotCameraHistoryStacks {
   future: CameraData[];
 }
 
+export type ShotCameraHistoryByShotId = Record<string, ShotCameraHistoryStacks>;
+
 export function cloneCameraData(camera: CameraData): CameraData {
   return {
     ...camera,
@@ -17,6 +19,29 @@ export function cloneCameraData(camera: CameraData): CameraData {
 
 export function cameraDataEqual(a: CameraData, b: CameraData): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+export function clearShotCameraHistory(): ShotCameraHistoryStacks {
+  return { past: [], future: [] };
+}
+
+export function clearAllShotCameraHistory(): ShotCameraHistoryByShotId {
+  return {};
+}
+
+export function getShotCameraHistoryStacks(
+  byShotId: ShotCameraHistoryByShotId,
+  shotId: string,
+): ShotCameraHistoryStacks {
+  return byShotId[shotId] ?? clearShotCameraHistory();
+}
+
+export function withShotCameraHistoryStacks(
+  byShotId: ShotCameraHistoryByShotId,
+  shotId: string,
+  stacks: ShotCameraHistoryStacks,
+): ShotCameraHistoryByShotId {
+  return { ...byShotId, [shotId]: stacks };
 }
 
 export function pushShotCameraHistoryPast(
@@ -54,7 +79,7 @@ export function redoShotCameraHistory(
 ): { stacks: ShotCameraHistoryStacks; restored: CameraData } | undefined {
   if (stacks.future.length === 0) return undefined;
   const future = [...stacks.future];
-  const restored = future.pop()!;
+  const restored = future.shift()!;
   return {
     stacks: {
       past: [...stacks.past, cloneCameraData(current)],
@@ -62,8 +87,4 @@ export function redoShotCameraHistory(
     },
     restored: cloneCameraData(restored),
   };
-}
-
-export function clearShotCameraHistory(): ShotCameraHistoryStacks {
-  return { past: [], future: [] };
 }

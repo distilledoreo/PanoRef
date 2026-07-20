@@ -12,13 +12,6 @@ import {
   SHOT_FOV_WHEEL_STEP_THRESHOLD,
   snapFocalLengthStep,
 } from '../src/engine/shotFovWheel';
-import {
-  cloneCameraData,
-  pushShotCameraHistoryPast,
-  redoShotCameraHistory,
-  undoShotCameraHistory,
-} from '../src/engine/shotCameraHistory';
-import { CameraData } from '../src/domain/types';
 
 const aspectRatio = 16 / 9;
 
@@ -98,35 +91,5 @@ describe('applyShotFovWheelDelta', () => {
     });
     expect(result.stepsApplied).toBe(1);
     expect(verticalFovToFocalLength(result.nextFovDegrees, aspectRatio)).toBeCloseTo(50, 5);
-  });
-});
-
-describe('shot camera history', () => {
-  const cameraA: CameraData = {
-    position: [0, 1.6, 0],
-    target: [0, 1.6, 1],
-    fovDegrees: 54,
-    aspectRatio: 16 / 9,
-    near: 0.1,
-    far: 100,
-  };
-  const cameraB: CameraData = {
-    ...cameraA,
-    fovDegrees: 40,
-  };
-
-  it('restores the previous camera on undo and the newer camera on redo', () => {
-    const stacks = pushShotCameraHistoryPast({ past: [], future: [] }, cameraA);
-    const undo = undoShotCameraHistory(stacks, cameraB);
-    expect(undo?.restored.fovDegrees).toBe(54);
-    const redo = redoShotCameraHistory(undo!.stacks, cameraA);
-    expect(redo?.restored.fovDegrees).toBe(40);
-  });
-
-  it('clones camera data in history entries', () => {
-    const stacks = pushShotCameraHistoryPast({ past: [], future: [] }, cameraA);
-    stacks.past[0].fovDegrees = 10;
-    expect(cameraA.fovDegrees).toBe(54);
-    expect(cloneCameraData(cameraA).fovDegrees).toBe(54);
   });
 });

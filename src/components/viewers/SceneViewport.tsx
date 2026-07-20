@@ -62,6 +62,7 @@ import {
   SHOT_FOV_WHEEL_BATCH_IDLE_MS,
 } from '../../engine/shotFovWheel';
 import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
+import { shotFlySpeedMultiplier } from '../../engine/shotFlyMovement';
 import { sceneEnvelope, selectionBounds } from '../../engine/buildSelection';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
 import {
@@ -176,6 +177,7 @@ export function SceneViewport({
   appearance?: ViewportAppearanceMode;
   onFreeCameraActiveChange?: (active: boolean) => void;
   shotFraming?: {
+    shotId: string;
     camera: CameraData;
     frameAspectRatio: number;
     frameResolutionLabel: string;
@@ -184,8 +186,8 @@ export function SceneViewport({
     onCameraChange: (camera: CameraData) => void;
     onLockCamera?: () => void;
     onFocalLengthHudPulse?: () => void;
-    onShotFovWheelBatchStart?: () => void;
-    onShotFovWheelBatchEnd?: (camera: CameraData) => void;
+    onShotFovWheelBatchStart?: (shotId: string) => void;
+    onShotFovWheelBatchEnd?: (shotId: string, camera: CameraData) => void;
   };
   onSelectObject?: (id?: string, mode?: 'replace' | 'toggle') => void;
   onPlaceObject?: (type: SceneObjectType, point: Vec3) => void;
@@ -269,7 +271,10 @@ export function SceneViewport({
   const [secondaryLoadError, setSecondaryLoadError] = useState(false);
   const wheelFovAccumRef = useRef(0);
   const wheelBatchActiveRef = useRef(false);
+  const wheelBatchShotIdRef = useRef<string | undefined>();
   const wheelBatchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const finalizeShotFovWheelBatchRef = useRef<() => void>(() => {});
+  const altHeldRef = useRef(false);
 
   // Live geometry-occlusion cubemaps (shared across all projected objects).
   const primaryOcclusionRef = useRef<ProjectorOcclusionMap | undefined>();
@@ -545,7 +550,7 @@ export function SceneViewport({
       const length = Math.hypot(moveX, moveY, moveZ);
       if (length === 0) return;
       const sprinting = isForwardSprinting(forwardSprintRef.current);
-      const speed = FLY_SPEED * (sprinting ? FLY_SPRINT_MULTIPLIER : 1);
+      const speed = FLY_SPEED * shotFlySpeedMultiplier({ altHeld: altHeldRef.current, sprinting });
       const step = (speed * deltaSeconds) / length;
       fly.position = clampFlyCameraPosition(
         [
@@ -1173,7 +1178,8 @@ export function SceneViewport({
       if (!wheelBatchActiveRef.current) return;
       wheelBatchActiveRef.current = false;
       const framing = shotFramingRef.current;
-      if (!framing) return;
+      const shotId = wheelBatchShotIdRef.current;
+      if (!framing || !shotId) return;
       const camera = cameraFromFlyState(
         flyRef.current,
         framingFovRef.current,
@@ -1181,8 +1187,10 @@ export function SceneViewport({
         framing.camera.near,
         framing.camera.far,
       );
-      framing.onShotFovWheelBatchEnd?.(camera);
+      framing.onShotFovWheelBatchEnd?.(shotId, camera);
+      wheelBatchShotIdRef.current = undefined;
     };
+    finalizeShotFovWheelBatchRef.current = endShotFovWheelBatch;
 
     const scheduleShotFovWheelBatchEnd = () => {
       if (wheelBatchTimerRef.current) clearTimeout(wheelBatchTimerRef.current);
@@ -1208,7 +1216,8 @@ export function SceneViewport({
 
         if (!wheelBatchActiveRef.current) {
           wheelBatchActiveRef.current = true;
-          framing.onShotFovWheelBatchStart?.();
+          wheelBatchShotIdRef.current = framing.shotId;
+          framing.onShotFovWheelBatchStart?.(framing.shotId);
         }
 
         framingFovRef.current = wheelResult.nextFovDegrees;
@@ -1233,6 +1242,9 @@ export function SceneViewport({
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === 'AltLeft' || event.code === 'AltRight') {
+        altHeldRef.current = true;
+      }
       if (!shotFramingRef.current?.flyActive && !freeCameraActiveRef.current) return;
       if (event.code === 'Escape') {
         const escapeInsideDialog = Boolean((event.target as HTMLElement | null)?.closest?.('[role="dialog"]'));
@@ -1261,6 +1273,9 @@ export function SceneViewport({
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'AltLeft' || event.code === 'AltRight') {
+        altHeldRef.current = false;
+      }
       if (event.code === 'KeyW') {
         forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, {
           type: 'keyup',
@@ -1397,6 +1412,12 @@ export function SceneViewport({
       forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, { type: 'reset' });
     }
   }, [freeCameraActive, shotFraming?.flyActive]);
+
+  useEffect(() => {
+    return () => {
+      finalizeShotFovWheelBatchRef.current();
+    };
+  }, [shotFraming?.shotId]);
 
   const setFlyAxes = useCallback((axes: { forward: number; strafe: number; vertical?: number }) => {
     flyAxesRef.current = {

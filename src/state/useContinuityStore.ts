@@ -59,10 +59,13 @@ import {
 } from '../engine/buildHistory';
 import {
   cameraDataEqual,
-  cloneCameraData,
+  clearAllShotCameraHistory,
+  getShotCameraHistoryStacks,
   pushShotCameraHistoryPast,
   redoShotCameraHistory,
   undoShotCameraHistory,
+  withShotCameraHistoryStacks,
+  type ShotCameraHistoryByShotId,
 } from '../engine/shotCameraHistory';
 
 import { useThemeStore } from './useThemeStore';
@@ -121,8 +124,7 @@ interface ContinuityStore {
   buildHistoryBatchCaptured: boolean;
   buildHistoryCoalesceActive: boolean;
   buildTransformPivot?: Vec3;
-  shotCameraHistoryPast: CameraData[];
-  shotCameraHistoryFuture: CameraData[];
+  shotCameraHistoryByShotId: ShotCameraHistoryByShotId;
   shotCameraHistoryBatchDepth: number;
   shotCameraHistoryBatchCaptured: boolean;
   setWorkspace: (workspace: Workspace) => void;
@@ -267,8 +269,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   buildHistoryBatchCaptured: false,
   buildHistoryCoalesceActive: false,
   buildTransformPivot: undefined,
-  shotCameraHistoryPast: [],
-  shotCameraHistoryFuture: [],
+  shotCameraHistoryByShotId: {},
   shotCameraHistoryBatchDepth: 0,
   shotCameraHistoryBatchCaptured: false,
   dismissedWorkflowAdvanceKeys: [],
@@ -345,23 +346,32 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       shotCameraHistoryBatchCaptured: nextDepth === 0 ? false : state.shotCameraHistoryBatchCaptured,
     };
   }),
-  canUndoShotCamera: () => get().shotCameraHistoryPast.length > 0,
-  canRedoShotCamera: () => get().shotCameraHistoryFuture.length > 0,
+  canUndoShotCamera: () => {
+    const state = get();
+    if (!state.selectedShotId) return false;
+    return getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, state.selectedShotId).past.length > 0;
+  },
+  canRedoShotCamera: () => {
+    const state = get();
+    if (!state.selectedShotId) return false;
+    return getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, state.selectedShotId).future.length > 0;
+  },
   undoShotCamera: () => {
     const state = get();
     const shot = state.project.shots.find((item) => item.id === state.selectedShotId);
     if (!shot) return false;
-    const result = undoShotCameraHistory(
-      { past: state.shotCameraHistoryPast, future: state.shotCameraHistoryFuture },
-      shot.camera,
-    );
+    const currentStacks = getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, shot.id);
+    const result = undoShotCameraHistory(currentStacks, shot.camera);
     if (!result) return false;
     shotCameraHistoryRestoring = true;
     get().updateShot(shot.id, { camera: result.restored }, { cameraHistory: 'silent' });
     shotCameraHistoryRestoring = false;
     set({
-      shotCameraHistoryPast: result.stacks.past,
-      shotCameraHistoryFuture: result.stacks.future,
+      shotCameraHistoryByShotId: withShotCameraHistoryStacks(
+        state.shotCameraHistoryByShotId,
+        shot.id,
+        result.stacks,
+      ),
     });
     return true;
   },
@@ -369,17 +379,18 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const state = get();
     const shot = state.project.shots.find((item) => item.id === state.selectedShotId);
     if (!shot) return false;
-    const result = redoShotCameraHistory(
-      { past: state.shotCameraHistoryPast, future: state.shotCameraHistoryFuture },
-      shot.camera,
-    );
+    const currentStacks = getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, shot.id);
+    const result = redoShotCameraHistory(currentStacks, shot.camera);
     if (!result) return false;
     shotCameraHistoryRestoring = true;
     get().updateShot(shot.id, { camera: result.restored }, { cameraHistory: 'silent' });
     shotCameraHistoryRestoring = false;
     set({
-      shotCameraHistoryPast: result.stacks.past,
-      shotCameraHistoryFuture: result.stacks.future,
+      shotCameraHistoryByShotId: withShotCameraHistoryStacks(
+        state.shotCameraHistoryByShotId,
+        shot.id,
+        result.stacks,
+      ),
     });
     return true;
   },
@@ -458,6 +469,9 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       alignmentRetryModalRequest: 0,
       seenAlignmentIntroForPanoId: undefined,
       pendingSecondCapturePlan: undefined,
+      shotCameraHistoryByShotId: clearAllShotCameraHistory(),
+      shotCameraHistoryBatchDepth: 0,
+      shotCameraHistoryBatchCaptured: false,
     });
   },
   updateProjectInfo: (updates) => set((state) => ({
@@ -1198,7 +1212,7 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const cameraChanged = updates.camera !== undefined && !cameraDataEqual(shot.camera, nextCamera);
     let historyPatch: Partial<Pick<
       ContinuityStore,
-      'shotCameraHistoryPast' | 'shotCameraHistoryFuture' | 'shotCameraHistoryBatchCaptured'
+      'shotCameraHistoryByShotId' | 'shotCameraHistoryBatchCaptured'
     >> = {};
 
     if (cameraChanged && !shotCameraHistoryRestoring) {
@@ -1206,13 +1220,14 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       if (mode !== 'silent') {
         const effectiveMode: ShotCameraHistoryMode = state.shotCameraHistoryBatchDepth > 0 ? 'batch' : mode;
         if (effectiveMode !== 'batch' || !state.shotCameraHistoryBatchCaptured) {
-          const stacks = pushShotCameraHistoryPast(
-            { past: state.shotCameraHistoryPast, future: state.shotCameraHistoryFuture },
-            shot.camera,
-          );
+          const currentStacks = getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, id);
+          const stacks = pushShotCameraHistoryPast(currentStacks, shot.camera);
           historyPatch = {
-            shotCameraHistoryPast: stacks.past,
-            shotCameraHistoryFuture: stacks.future,
+            shotCameraHistoryByShotId: withShotCameraHistoryStacks(
+              state.shotCameraHistoryByShotId,
+              id,
+              stacks,
+            ),
             shotCameraHistoryBatchCaptured: effectiveMode === 'batch'
               ? true
               : state.shotCameraHistoryBatchCaptured,
