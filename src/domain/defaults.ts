@@ -17,6 +17,7 @@ import {
   Vec3,
 } from './types';
 import { createId } from '../utils/ids';
+import { focalLengthToVerticalFov } from '../engine/focalLength';
 
 const nowIso = () => new Date().toISOString();
 
@@ -37,9 +38,12 @@ const primitiveDefaults: Record<SceneObjectType, { dimensions: Vec3; category: S
 };
 
 export const DEFAULT_CAMERA_LENS_MM = 35;
-export const DEFAULT_CAMERA_FOV_DEGREES = 54.4;
-export const DEFAULT_CAMERA_HEIGHT_METERS = 1.65;
 export const DEFAULT_CAMERA_ASPECT_RATIO = 16 / 9;
+export const DEFAULT_CAMERA_FOV_DEGREES = focalLengthToVerticalFov(
+  DEFAULT_CAMERA_LENS_MM,
+  DEFAULT_CAMERA_ASPECT_RATIO,
+);
+export const DEFAULT_CAMERA_HEIGHT_METERS = 1.65;
 /** 4K equirectangular (2:1) — graybox / canonical 360 panoramas. */
 export const DEFAULT_GRAYBOX_PANO_WIDTH = 4096;
 export const DEFAULT_GRAYBOX_PANO_HEIGHT = 2048;

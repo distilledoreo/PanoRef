@@ -57,6 +57,16 @@ import {
   undoBuildHistory,
   vec3NearlyEqual,
 } from '../engine/buildHistory';
+import {
+  cameraDataEqual,
+  clearAllShotCameraHistory,
+  getShotCameraHistoryStacks,
+  pushShotCameraHistoryPast,
+  redoShotCameraHistory,
+  undoShotCameraHistory,
+  withShotCameraHistoryStacks,
+  type ShotCameraHistoryByShotId,
+} from '../engine/shotCameraHistory';
 
 import { useThemeStore } from './useThemeStore';
 import { createPlacedSceneObject, duplicateSceneObject, getGroundPlacementPosition, snapBuildPoint } from '../engine/sandbox';
@@ -78,10 +88,12 @@ import {
 
 export type BuildMode = 'select' | 'place' | 'pano_origin';
 export type { BuildHistoryMode };
+export type ShotCameraHistoryMode = 'step' | 'batch' | 'silent';
 
 /** Only the coalesce timer stays outside the store (cannot serialize Timeout handles cleanly). */
 let buildHistoryCoalesceTimer: ReturnType<typeof setTimeout> | undefined;
 let buildHistoryRestoring = false;
+let shotCameraHistoryRestoring = false;
 
 function clearBuildHistoryCoalesceTimer() {
   if (buildHistoryCoalesceTimer) {
@@ -112,6 +124,11 @@ interface ContinuityStore {
   buildHistoryBatchCaptured: boolean;
   buildHistoryCoalesceActive: boolean;
   buildTransformPivot?: Vec3;
+  shotCameraHistoryByShotId: ShotCameraHistoryByShotId;
+  shotCameraHistoryBatchDepth: number;
+  shotCameraHistoryBatchCaptured: boolean;
+  /** Bumps on undo/redo so live framing can reseed from the restored stored pose. */
+  shotCameraHistoryRestoreGeneration: number;
   setWorkspace: (workspace: Workspace) => void;
   setProject: (project: LocationProject) => void;
   updateProjectInfo: (updates: Pick<LocationProject, 'name'> | Partial<Pick<LocationProject, 'name' | 'description'>>) => void;
@@ -125,6 +142,12 @@ interface ContinuityStore {
   redoBuild: () => boolean;
   canUndoBuild: () => boolean;
   canRedoBuild: () => boolean;
+  beginShotCameraHistoryBatch: () => void;
+  endShotCameraHistoryBatch: () => void;
+  canUndoShotCamera: () => boolean;
+  canRedoShotCamera: () => boolean;
+  undoShotCamera: () => boolean;
+  redoShotCamera: () => boolean;
   addObject: (type: SceneObjectType) => void;
   addImportedModel: (result: { asset: ProjectAsset; object: SceneObject }) => SceneObject;
   addImportedModels: (results: Array<{ asset: ProjectAsset; object: SceneObject }>) => SceneObject[];
@@ -175,7 +198,7 @@ interface ContinuityStore {
   /** Commit framing: exit fly mode and mark shot framing accepted. */
   /** Commit camera + framing acceptance. By default exits fly; pass keepFlying for continuous capture. */
   landShotFraming: (shotId: string, camera?: CameraData, options?: { keepFlying?: boolean }) => void;
-  updateShot: (id: string, updates: Partial<Shot>) => void;
+  updateShot: (id: string, updates: Partial<Shot>, options?: { cameraHistory?: ShotCameraHistoryMode }) => void;
   removeShot: (id: string) => void;
   attachCameraMoveVideoToShot: (shotId: string, params: {
     name: string;
@@ -248,6 +271,10 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
   buildHistoryBatchCaptured: false,
   buildHistoryCoalesceActive: false,
   buildTransformPivot: undefined,
+  shotCameraHistoryByShotId: {},
+  shotCameraHistoryBatchDepth: 0,
+  shotCameraHistoryBatchCaptured: false,
+  shotCameraHistoryRestoreGeneration: 0,
   dismissedWorkflowAdvanceKeys: [],
   seenObjectiveWorkspaces: [],
   objectiveModalRequest: 0,
@@ -303,6 +330,73 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     );
     if (!result) return false;
     applyBuildSnapshot(result.restored, result.stacks.past, result.stacks.future);
+    return true;
+  },
+  beginShotCameraHistoryBatch: () => set((state) => {
+    const nextDepth = state.shotCameraHistoryBatchDepth + 1;
+    if (nextDepth === 1) {
+      return {
+        shotCameraHistoryBatchDepth: nextDepth,
+        shotCameraHistoryBatchCaptured: false,
+      };
+    }
+    return { shotCameraHistoryBatchDepth: nextDepth };
+  }),
+  endShotCameraHistoryBatch: () => set((state) => {
+    const nextDepth = Math.max(0, state.shotCameraHistoryBatchDepth - 1);
+    return {
+      shotCameraHistoryBatchDepth: nextDepth,
+      shotCameraHistoryBatchCaptured: nextDepth === 0 ? false : state.shotCameraHistoryBatchCaptured,
+    };
+  }),
+  canUndoShotCamera: () => {
+    const state = get();
+    if (!state.selectedShotId) return false;
+    return getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, state.selectedShotId).past.length > 0;
+  },
+  canRedoShotCamera: () => {
+    const state = get();
+    if (!state.selectedShotId) return false;
+    return getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, state.selectedShotId).future.length > 0;
+  },
+  undoShotCamera: () => {
+    const state = get();
+    const shot = state.project.shots.find((item) => item.id === state.selectedShotId);
+    if (!shot) return false;
+    const currentStacks = getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, shot.id);
+    const result = undoShotCameraHistory(currentStacks, shot.camera);
+    if (!result) return false;
+    shotCameraHistoryRestoring = true;
+    get().updateShot(shot.id, { camera: result.restored }, { cameraHistory: 'silent' });
+    shotCameraHistoryRestoring = false;
+    set({
+      shotCameraHistoryByShotId: withShotCameraHistoryStacks(
+        state.shotCameraHistoryByShotId,
+        shot.id,
+        result.stacks,
+      ),
+      shotCameraHistoryRestoreGeneration: state.shotCameraHistoryRestoreGeneration + 1,
+    });
+    return true;
+  },
+  redoShotCamera: () => {
+    const state = get();
+    const shot = state.project.shots.find((item) => item.id === state.selectedShotId);
+    if (!shot) return false;
+    const currentStacks = getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, shot.id);
+    const result = redoShotCameraHistory(currentStacks, shot.camera);
+    if (!result) return false;
+    shotCameraHistoryRestoring = true;
+    get().updateShot(shot.id, { camera: result.restored }, { cameraHistory: 'silent' });
+    shotCameraHistoryRestoring = false;
+    set({
+      shotCameraHistoryByShotId: withShotCameraHistoryStacks(
+        state.shotCameraHistoryByShotId,
+        shot.id,
+        result.stacks,
+      ),
+      shotCameraHistoryRestoreGeneration: state.shotCameraHistoryRestoreGeneration + 1,
+    });
     return true;
   },
 
@@ -380,6 +474,10 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       alignmentRetryModalRequest: 0,
       seenAlignmentIntroForPanoId: undefined,
       pendingSecondCapturePlan: undefined,
+      shotCameraHistoryByShotId: clearAllShotCameraHistory(),
+      shotCameraHistoryBatchDepth: 0,
+      shotCameraHistoryBatchCaptured: false,
+      shotCameraHistoryRestoreGeneration: 0,
     });
   },
   updateProjectInfo: (updates) => set((state) => ({
@@ -1101,16 +1199,61 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       };
     });
   },
-  updateShot: (id, updates) => set((state) => ({
-    project: touchProject({
-      ...state.project,
-      shots: state.project.shots.map((shot) => {
-        if (shot.id !== id) return shot;
-        const updated = { ...shot, ...updates, updatedAt: new Date().toISOString() };
-        return withShotPanoLink(state.project, updated);
+  updateShot: (id, updates, options) => set((state) => {
+    const shot = state.project.shots.find((item) => item.id === id);
+    if (!shot) {
+      return {
+        project: touchProject({
+          ...state.project,
+          shots: state.project.shots.map((current) => {
+            if (current.id !== id) return current;
+            const updated = { ...current, ...updates, updatedAt: new Date().toISOString() };
+            return withShotPanoLink(state.project, updated);
+          }),
+        }),
+      };
+    }
+
+    const nextCamera = updates.camera ?? shot.camera;
+    const cameraChanged = updates.camera !== undefined && !cameraDataEqual(shot.camera, nextCamera);
+    let historyPatch: Partial<Pick<
+      ContinuityStore,
+      'shotCameraHistoryByShotId' | 'shotCameraHistoryBatchCaptured'
+    >> = {};
+
+    if (cameraChanged && !shotCameraHistoryRestoring) {
+      const mode = options?.cameraHistory ?? 'step';
+      if (mode !== 'silent') {
+        const effectiveMode: ShotCameraHistoryMode = state.shotCameraHistoryBatchDepth > 0 ? 'batch' : mode;
+        if (effectiveMode !== 'batch' || !state.shotCameraHistoryBatchCaptured) {
+          const currentStacks = getShotCameraHistoryStacks(state.shotCameraHistoryByShotId, id);
+          const stacks = pushShotCameraHistoryPast(currentStacks, shot.camera);
+          historyPatch = {
+            shotCameraHistoryByShotId: withShotCameraHistoryStacks(
+              state.shotCameraHistoryByShotId,
+              id,
+              stacks,
+            ),
+            shotCameraHistoryBatchCaptured: effectiveMode === 'batch'
+              ? true
+              : state.shotCameraHistoryBatchCaptured,
+          };
+        }
+      }
+    }
+
+    return {
+      ...historyPatch,
+      project: touchProject({
+        ...state.project,
+        shots: state.project.shots.map((current) => {
+          if (current.id !== id) return current;
+          const updated = { ...current, ...updates, updatedAt: new Date().toISOString() };
+          return withShotPanoLink(state.project, updated);
+        }),
       }),
-    }),
-  })),
+    };
+  }),
   removeShot: (id) => set((state) => {
     if (state.project.shots.length <= 1) return state;
     const shots = state.project.shots.filter((shot) => shot.id !== id);

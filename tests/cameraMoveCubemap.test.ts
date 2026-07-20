@@ -74,6 +74,10 @@ describe('camera move cubemap references', () => {
     project.panoRefs.push(pano);
     const shot = project.shots[0];
     shot.linkedPanoId = pano.id;
+    shot.camera = {
+      ...shot.camera,
+      fovDegrees: 54.4,
+    };
     shot.cameraKeyframes = setTwoPointCameraKeyframe({
       keyframes: setTwoPointCameraKeyframe({
         keyframes: [],

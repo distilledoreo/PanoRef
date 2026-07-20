@@ -1,23 +1,37 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Camera } from 'lucide-react';
 import { computeExportFrameLayout, type ExportFrameLayout } from '../../engine/sync';
+import {
+  FOCAL_LENGTH_HUD_FADE_MS,
+  FOCAL_LENGTH_HUD_HIDE_DELAY_MS,
+  verticalFovToFocalLength,
+} from '../../engine/focalLength';
 import { useThemeStore } from '../../state/useThemeStore';
 
 export function ShotViewfinderOverlay({
   containerRef,
   aspectRatio,
+  cameraAspectRatio,
   fovDegrees,
   resolutionLabel,
+  focalLengthHudPulse = 0,
   variant = 'full',
 }: {
   containerRef: React.RefObject<HTMLElement | null>;
   aspectRatio: number;
+  cameraAspectRatio: number;
   fovDegrees: number;
   resolutionLabel: string;
+  focalLengthHudPulse?: number;
   variant?: 'full' | 'compact';
 }) {
   const theme = useThemeStore((state) => state.theme);
   const [frameBox, setFrameBox] = useState<ExportFrameLayout>({ left: 0, top: 0, width: 0, height: 0 });
+  const [hudPhase, setHudPhase] = useState<'hidden' | 'visible' | 'fading'>(
+    () => (focalLengthHudPulse > 0 ? 'visible' : 'hidden'),
+  );
+  const fadeCompleteTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     const container = containerRef.current;
@@ -35,7 +49,39 @@ export function ShotViewfinderOverlay({
     return () => resizeObserver.disconnect();
   }, [aspectRatio, containerRef]);
 
+  useEffect(() => {
+    if (focalLengthHudPulse <= 0) return;
+
+    if (fadeCompleteTimerRef.current) {
+      clearTimeout(fadeCompleteTimerRef.current);
+      fadeCompleteTimerRef.current = undefined;
+    }
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = undefined;
+    }
+
+    setHudPhase('visible');
+    hideTimerRef.current = setTimeout(() => {
+      setHudPhase((phase) => {
+        if (phase !== 'visible') return phase;
+        fadeCompleteTimerRef.current = setTimeout(() => {
+          setHudPhase('hidden');
+          fadeCompleteTimerRef.current = undefined;
+        }, FOCAL_LENGTH_HUD_FADE_MS);
+        return 'fading';
+      });
+      hideTimerRef.current = undefined;
+    }, FOCAL_LENGTH_HUD_HIDE_DELAY_MS);
+  }, [focalLengthHudPulse]);
+
+  useEffect(() => () => {
+    if (fadeCompleteTimerRef.current) clearTimeout(fadeCompleteTimerRef.current);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  }, []);
+
   const dimColor = theme === 'dark' ? 'rgba(8, 12, 18, 0.62)' : 'rgba(28, 25, 23, 0.28)';
+  const focalLengthLabel = `${Math.round(verticalFovToFocalLength(fovDegrees, cameraAspectRatio))} mm`;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10" data-shot-viewfinder={variant}>
@@ -60,6 +106,19 @@ export function ShotViewfinderOverlay({
           <span className="absolute right-0 top-1/2 h-px w-5 -translate-y-1/2 bg-white/90 shadow-sm" />
           <span className="absolute bottom-0 left-1/2 h-5 w-px -translate-x-1/2 bg-white/90 shadow-sm" />
         </div>
+
+        {hudPhase !== 'hidden' && (
+          <div
+            className="absolute right-3 top-3 text-right transition-opacity duration-300"
+            data-focal-length-hud
+            style={{ opacity: hudPhase === 'visible' ? 1 : 0 }}
+          >
+            <div className="rounded-lg border border-white/25 bg-surface-overlay/80 px-2.5 py-1.5 shadow-card backdrop-blur">
+              <div className="text-[10px] font-medium text-primary">{focalLengthLabel}</div>
+              <div className="text-[9px] text-muted">Full-frame equivalent</div>
+            </div>
+          </div>
+        )}
 
         {variant === 'compact' ? (
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2">
