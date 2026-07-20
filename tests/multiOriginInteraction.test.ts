@@ -288,6 +288,8 @@ describe('blend formula parity', () => {
     expect(materials).toContain('projectedQualityAt');
     expect(materials).toContain('projectedBlendMode == 2 ? 1.15 : 1.0');
     expect(materials).toContain('projectedBlendMode == 3 ? 1.15 : 1.0');
+    expect(materials).toContain('primaryCoverage');
+    expect(materials).toContain('secondaryCoverage');
     expect(materials).not.toContain('projectedConfidence');
   });
 });

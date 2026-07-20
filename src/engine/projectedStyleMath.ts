@@ -411,3 +411,80 @@ export function computeProjectorBlendWeights(params: ProjectorBlendInput): Proje
     bothOccluded: false,
   };
 }
+
+/**
+ * Mirrors the projected-style fragment coverage/quality contract:
+ * visibility owns mix-vs-fallback coverage; quality only ranks projectors.
+ */
+export interface ProjectedStyleCoverageBlendInput {
+  primaryEnabled: boolean;
+  secondaryEnabled: boolean;
+  primaryVisibility: number;
+  secondaryVisibility: number;
+  primaryQuality: number;
+  secondaryQuality: number;
+  primaryDominance?: number;
+  secondaryDominance?: number;
+  projectedOpacity?: number;
+  primarySampleRgb: Vec3;
+  secondarySampleRgb: Vec3;
+  fallbackRgb: Vec3;
+}
+
+export interface ProjectedStyleCoverageBlendResult {
+  primaryCoverage: number;
+  secondaryCoverage: number;
+  coverage: number;
+  primaryWeight: number;
+  secondaryWeight: number;
+  mixFactor: number;
+  rgb: Vec3;
+}
+
+export function computeProjectedStyleCoverageBlend(
+  params: ProjectedStyleCoverageBlendInput,
+): ProjectedStyleCoverageBlendResult {
+  const primaryDominance = params.primaryDominance ?? 1;
+  const secondaryDominance = params.secondaryDominance ?? 1;
+  const projectedOpacity = clamp(params.projectedOpacity ?? 1, 0, 1);
+
+  const primaryCoverage = (params.primaryEnabled ? 1 : 0) * clamp(params.primaryVisibility, 0, 1);
+  const secondaryCoverage = (params.secondaryEnabled ? 1 : 0) * clamp(params.secondaryVisibility, 0, 1);
+
+  const primaryWeight = primaryCoverage
+    * (0.001 + (params.primaryQuality * primaryDominance) ** 4);
+  const secondaryWeight = secondaryCoverage
+    * (0.001 + (params.secondaryQuality * secondaryDominance) ** 4);
+  const weightTotal = primaryWeight + secondaryWeight;
+  const coverage = Math.max(primaryCoverage, secondaryCoverage);
+
+  let projectedColor: Vec3 = [...params.fallbackRgb];
+  if (weightTotal > 1e-8) {
+    projectedColor = [
+      (params.primarySampleRgb[0] * primaryWeight + params.secondarySampleRgb[0] * secondaryWeight) / weightTotal,
+      (params.primarySampleRgb[1] * primaryWeight + params.secondarySampleRgb[1] * secondaryWeight) / weightTotal,
+      (params.primarySampleRgb[2] * primaryWeight + params.secondarySampleRgb[2] * secondaryWeight) / weightTotal,
+    ];
+  }
+
+  const mixFactor = coverage > 1e-4
+    ? projectedOpacity * clamp(coverage, 0, 1)
+    : 0;
+  const rgb: Vec3 = coverage > 1e-4
+    ? [
+      params.fallbackRgb[0] * (1 - mixFactor) + projectedColor[0] * mixFactor,
+      params.fallbackRgb[1] * (1 - mixFactor) + projectedColor[1] * mixFactor,
+      params.fallbackRgb[2] * (1 - mixFactor) + projectedColor[2] * mixFactor,
+    ]
+    : [...params.fallbackRgb];
+
+  return {
+    primaryCoverage,
+    secondaryCoverage,
+    coverage,
+    primaryWeight,
+    secondaryWeight,
+    mixFactor,
+    rgb,
+  };
+}

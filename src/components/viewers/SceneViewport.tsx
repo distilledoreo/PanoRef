@@ -1596,6 +1596,7 @@ export function SceneViewport({
       showPanoOrigin: shotFraming ? false : (showSceneGuides || originPlacementActive),
       showHelpers: shotFraming ? false : showSceneGuides,
       theme,
+      fog: !shotFraming,
       fogDistance: shotFraming ? undefined : renderDistance,
       appearance: projectedActive ? 'projected' : 'clay',
       projected: projectedActive && projectedTexture && projectedPano

@@ -444,27 +444,30 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
 
   float primaryDominance = projectedBlendMode == 2 ? 1.15 : 1.0;
   float secondaryDominance = projectedBlendMode == 3 ? 1.15 : 1.0;
-  float primaryScore = primaryEnabled * primaryVisibility * primaryQuality * primaryDominance;
-  float secondaryScore = secondaryEnabled * secondaryVisibility * secondaryQuality * secondaryDominance;
-  // Winner-takes-most weighting follows the optimizer's max-quality objective
-  // while retaining a narrow transition when qualities are nearly equal.
-  float primaryWeight = pow(primaryScore, 4.0);
-  float secondaryWeight = pow(secondaryScore, 4.0);
-  float scoreTotal = primaryWeight + secondaryWeight;
 
-  float coverage = max(
-    primaryScore,
-    secondaryScore
-  );
+  // Occlusion visibility owns projection coverage (opacity vs fallback).
+  // Projection quality only ranks/weights available projectors.
+  float primaryCoverage = primaryEnabled * primaryVisibility;
+  float secondaryCoverage = secondaryEnabled * secondaryVisibility;
+
+  float primaryWeight = primaryCoverage
+    * (0.001 + pow(primaryQuality * primaryDominance, 4.0));
+  float secondaryWeight = secondaryCoverage
+    * (0.001 + pow(secondaryQuality * secondaryDominance, 4.0));
+
+  float weightTotal = primaryWeight + secondaryWeight;
+  float coverage = max(primaryCoverage, secondaryCoverage);
 
   // --- Coverage diagnostic (four-state: red/cyan/magenta/white) ---
+  // Visualize projector visibility; orange marks visible-but-poor quality.
   if (projectedDebugCoverage == 1) {
-    float p = primaryScore;
-    float s = secondaryScore;
-    float visibleButPoor = max(
-      primaryEnabled * primaryVisibility,
-      secondaryEnabled * secondaryVisibility
-    ) * (1.0 - step(0.001, max(p, s)));
+    float p = primaryCoverage;
+    float s = secondaryCoverage;
+    float qualityMax = max(
+      primaryCoverage * primaryQuality,
+      secondaryCoverage * secondaryQuality
+    );
+    float visibleButPoor = max(p, s) * (1.0 - step(0.001, qualityMax));
     vec3 cov =
         vec3(1.0, 0.0, 0.0) * (1.0 - p) * (1.0 - s) // red: neither
       + vec3(0.0, 1.0, 1.0) * p * (1.0 - s)         // cyan: primary only
@@ -473,8 +476,8 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
     diffuseColor.rgb = mix(cov, vec3(1.0, 0.55, 0.0), visibleButPoor); // orange: poor quality
   } else {
     vec3 projectedColor = (primarySample * primaryWeight + secondarySample * secondaryWeight)
-      / max(scoreTotal, 0.0001);
-    // When fully occluded (no score), keep the fallback albedo.
+      / max(weightTotal, 0.0001);
+    // Soft occlusion visibility still softens into fallback; quality does not.
     vec3 resultColor = coverage > 0.0001
       ? mix(fallbackAlbedo, projectedColor, clamp(projectedOpacity, 0.0, 1.0) * clamp(coverage, 0.0, 1.0))
       : fallbackAlbedo;
@@ -503,7 +506,7 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v5:${params.settings.fallbackMode}:`
+    `projected-style-v6:${params.settings.fallbackMode}:`
     + `${params.disposable ? 'd' : 's'}:`
     + `${useOcclusion ? 'o' : 'n'}:`
     + `${useSecondary ? 's' : 'p'}:`
