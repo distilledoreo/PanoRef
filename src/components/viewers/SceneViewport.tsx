@@ -56,6 +56,7 @@ import {
   type GizmoHit,
   type GizmoMode,
 } from '../../engine/transformGizmo';
+import { FOCAL_LENGTH_HUD_HIDE_DELAY_MS } from '../../engine/focalLength';
 import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
 import { sceneEnvelope, selectionBounds } from '../../engine/buildSelection';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
@@ -257,6 +258,8 @@ export function SceneViewport({
   const [projectedTextureReadyUrl, setProjectedTextureReadyUrl] = useState<string | undefined>();
   const [projectedSecondaryReadyUrl, setProjectedSecondaryReadyUrl] = useState<string | undefined>();
   const [secondaryLoadError, setSecondaryLoadError] = useState(false);
+  const [focalLengthHudFov, setFocalLengthHudFov] = useState<number | null>(null);
+  const focalLengthHudHideTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   // Live geometry-occlusion cubemaps (shared across all projected objects).
   const primaryOcclusionRef = useRef<ProjectorOcclusionMap | undefined>();
@@ -307,6 +310,16 @@ export function SceneViewport({
   renderDistanceRef.current = clampBuildRenderDistance(renderDistance);
   placementTypeRef.current = placementType;
   shotFramingRef.current = shotFraming;
+  const showFocalLengthHud = useCallback((fovDegrees: number) => {
+    setFocalLengthHudFov(fovDegrees);
+    if (focalLengthHudHideTimerRef.current) clearTimeout(focalLengthHudHideTimerRef.current);
+    focalLengthHudHideTimerRef.current = setTimeout(() => {
+      setFocalLengthHudFov(null);
+      focalLengthHudHideTimerRef.current = undefined;
+    }, FOCAL_LENGTH_HUD_HIDE_DELAY_MS);
+  }, []);
+  const showFocalLengthHudRef = useRef(showFocalLengthHud);
+  showFocalLengthHudRef.current = showFocalLengthHud;
   showSceneGuidesRef.current = showSceneGuides;
   showTransformGizmoRef.current = showTransformGizmo;
   gizmoModeRef.current = gizmoMode;
@@ -1163,6 +1176,7 @@ export function SceneViewport({
           cameraRef.current.fov = framingFovRef.current;
           cameraRef.current.updateProjectionMatrix();
         }
+        showFocalLengthHudRef.current(framingFovRef.current);
         emitFramingCamera();
         return;
       }
@@ -1333,6 +1347,19 @@ export function SceneViewport({
       forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, { type: 'reset' });
     }
   }, [freeCameraActive, shotFraming?.flyActive]);
+
+  useEffect(() => {
+    if (shotFraming) return;
+    setFocalLengthHudFov(null);
+    if (focalLengthHudHideTimerRef.current) {
+      clearTimeout(focalLengthHudHideTimerRef.current);
+      focalLengthHudHideTimerRef.current = undefined;
+    }
+  }, [shotFraming]);
+
+  useEffect(() => () => {
+    if (focalLengthHudHideTimerRef.current) clearTimeout(focalLengthHudHideTimerRef.current);
+  }, []);
 
   const setFlyAxes = useCallback((axes: { forward: number; strafe: number; vertical?: number }) => {
     flyAxesRef.current = {
@@ -1709,7 +1736,9 @@ export function SceneViewport({
         <ShotViewfinderOverlay
           containerRef={containerRef}
           aspectRatio={shotFraming.frameAspectRatio}
+          cameraAspectRatio={shotFraming.camera.aspectRatio}
           fovDegrees={shotFraming.camera.fovDegrees}
+          focalLengthHudFov={focalLengthHudFov}
           resolutionLabel={shotFraming.frameResolutionLabel}
           variant="full"
         />
