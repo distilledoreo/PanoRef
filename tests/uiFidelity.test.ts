@@ -343,8 +343,10 @@ describe('ui revamp fidelity surfaces', () => {
     const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
     expect(viewport).toContain('fog: !shotFraming');
     expect(viewport).toContain('fogDistance: shotFraming ? undefined : renderDistance');
-    // Passing only fogDistance: undefined would still enable default Build fog.
-    expect(viewport).not.toMatch(/buildScene\([\s\S]*fogDistance: shotFraming \? undefined : renderDistance[\s\S]*\}\)(?![\s\S]*fog:\s*!shotFraming)/);
+    // Both must be present in the same buildScene options object.
+    expect(viewport).toMatch(
+      /buildScene\(\s*project,\s*\{[\s\S]*?fog:\s*!shotFraming[\s\S]*?fogDistance:\s*shotFraming \? undefined : renderDistance/,
+    );
   });
 
   it('isolates build placement to explicit SceneViewport props instead of global build mode', () => {
