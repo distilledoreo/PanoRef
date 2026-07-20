@@ -3,6 +3,7 @@ import { createDefaultProject } from '../src/domain/defaults';
 import { CameraData } from '../src/domain/types';
 import {
   getShotCameraHistoryStacks,
+  shouldApplyShotCameraHistoryRestore,
 } from '../src/engine/shotCameraHistory';
 import {
   beginShotFovWheelBatch,
@@ -54,6 +55,51 @@ describe('shot fov wheel batch', () => {
     expect(framingAfter.position).toEqual(live.position);
     expect(framingAfter.target).toEqual(live.target);
     expect(framingAfter.fovDegrees).toBe(40);
+  });
+
+  it('preserves live pose after undo, live move, and a second lens batch', () => {
+    let handledRestoreGeneration = 0;
+    let restoreGeneration = 0;
+    let storedCamera = cameraWithFov(35);
+    let framingCamera = { ...storedCamera };
+
+    const applyRestoreIfNewGeneration = () => {
+      if (!shouldApplyShotCameraHistoryRestore(restoreGeneration, handledRestoreGeneration)) {
+        return;
+      }
+      handledRestoreGeneration = restoreGeneration;
+      framingCamera = {
+        ...storedCamera,
+        position: [...storedCamera.position] as CameraData['position'],
+        target: [...storedCamera.target] as CameraData['target'],
+      };
+    };
+
+    const finishWheelBatch = (liveCamera: CameraData) => {
+      storedCamera = buildShotFovWheelBatchCommit(storedCamera, liveCamera);
+      applyRestoreIfNewGeneration();
+      framingCamera = applyLiveShotFovWheelBatchCommit(liveCamera, storedCamera);
+    };
+
+    finishWheelBatch({ ...framingCamera, fovDegrees: 40 });
+
+    restoreGeneration += 1;
+    storedCamera = cameraWithFov(35);
+    applyRestoreIfNewGeneration();
+
+    const movedLive = {
+      ...framingCamera,
+      position: [1, 2, 3] as CameraData['position'],
+      target: [1, 2, 4] as CameraData['target'],
+    };
+    framingCamera = movedLive;
+
+    finishWheelBatch({ ...movedLive, fovDegrees: 45 });
+
+    expect(framingCamera.position).toEqual(movedLive.position);
+    expect(framingCamera.target).toEqual(movedLive.target);
+    expect(framingCamera.fovDegrees).toBe(45);
+    expect(storedCamera.position).toEqual(cameraWithFov(35).position);
   });
 });
 

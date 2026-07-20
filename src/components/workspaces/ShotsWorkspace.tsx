@@ -150,6 +150,7 @@ export function ShotsWorkspace() {
   const draftCameraRef = useRef<CameraData | undefined>();
   const shotCameraFlyingRef = useRef(shotCameraFlying);
   shotCameraFlyingRef.current = shotCameraFlying;
+  const handledRestoreGenerationRef = useRef(shotCameraHistoryRestoreGeneration);
   /** Transient live previews keyed by shot id — never reuse across shots. */
   const [framePreviewByShotId, setFramePreviewByShotId] = useState<Record<string, string>>({});
   const framePreviewUrl = selectedShot ? framePreviewByShotId[selectedShot.id] : undefined;
@@ -519,10 +520,20 @@ export function ShotsWorkspace() {
   }, [selectedShot?.camera, selectedShot?.id]);
 
   useEffect(() => {
-    if (!selectedShot || shotCameraHistoryRestoreGeneration === 0) return;
+    if (
+      shotCameraHistoryRestoreGeneration
+      === handledRestoreGenerationRef.current
+    ) {
+      return;
+    }
+
+    handledRestoreGenerationRef.current = shotCameraHistoryRestoreGeneration;
+
+    if (!selectedShot) return;
+
     draftCameraRef.current = selectedShot.camera;
     setFramingCamera(selectedShot.camera);
-  }, [selectedShot?.camera, selectedShot?.id, shotCameraHistoryRestoreGeneration]);
+  }, [shotCameraHistoryRestoreGeneration, selectedShot?.id]);
 
   const pulseFocalLengthHud = useCallback(() => {
     setFocalLengthHudPulse((value) => value + 1);

@@ -88,3 +88,11 @@ export function redoShotCameraHistory(
     restored: cloneCameraData(restored),
   };
 }
+
+/** True when a new undo/redo restore generation should reseed the live framing camera. */
+export function shouldApplyShotCameraHistoryRestore(
+  restoreGeneration: number,
+  lastHandledRestoreGeneration: number,
+): boolean {
+  return restoreGeneration !== lastHandledRestoreGeneration;
+}
