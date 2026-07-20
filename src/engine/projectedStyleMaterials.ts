@@ -451,9 +451,8 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
   float primaryDominance = projectedBlendMode == 2 ? 1.15 : 1.0;
   float secondaryDominance = projectedBlendMode == 3 ? 1.15 : 1.0;
 
-  // Occlusion visibility owns whether projection fills a fragment.
-  // Soft visibility still ranks dual projectors, but any visible sample is
-  // drawn at full strength so soft occlusion cannot pale-wash into strips.
+  // Occlusion visibility owns projection coverage (opacity vs fallback).
+  // Projection quality only ranks/weights available projectors.
   float primaryCoverage = primaryEnabled * primaryVisibility;
   float secondaryCoverage = secondaryEnabled * secondaryVisibility;
 
@@ -464,9 +463,6 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
 
   float weightTotal = primaryWeight + secondaryWeight;
   float coverage = max(primaryCoverage, secondaryCoverage);
-  // Continuous stretch fill: visible ⇒ full projection; only fully occluded
-  // fragments fall back (distortion on soft edges is preferred over white gaps).
-  float projectionFill = step(0.0001, coverage);
 
   // --- Coverage diagnostic (four-state: red/cyan/magenta/white) ---
   // Visualize projector visibility; orange marks visible-but-poor quality.
@@ -487,8 +483,10 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
   } else {
     vec3 projectedColor = (primarySample * primaryWeight + secondarySample * secondaryWeight)
       / max(weightTotal, 0.0001);
-    vec3 resultColor = projectionFill > 0.5
-      ? mix(fallbackAlbedo, projectedColor, clamp(projectedOpacity, 0.0, 1.0))
+    // Soft occlusion silhouettes still blend; fully occluded → fallback.
+    // False self-occlusion strips are prevented in sampleProjectorVisibility.
+    vec3 resultColor = coverage > 0.0001
+      ? mix(fallbackAlbedo, projectedColor, clamp(projectedOpacity, 0.0, 1.0) * clamp(coverage, 0.0, 1.0))
       : fallbackAlbedo;
     diffuseColor.rgb = resultColor;
   }
@@ -515,7 +513,7 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v7:${params.settings.fallbackMode}:`
+    `projected-style-v8:${params.settings.fallbackMode}:`
     + `${params.disposable ? 'd' : 's'}:`
     + `${useOcclusion ? 'o' : 'n'}:`
     + `${useSecondary ? 's' : 'p'}:`

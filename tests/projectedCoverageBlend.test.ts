@@ -29,7 +29,7 @@ describe('projected coverage vs quality blend contract', () => {
     expect(rgbClose(result.rgb, primaryRgb, 1e-4)).toBe(true);
   });
 
-  it('keeps continuous full-strength fill when occlusion visibility is partial', () => {
+  it('softens into fallback on true soft occlusion silhouettes', () => {
     const result = computeProjectedStyleCoverageBlend({
       primaryEnabled: true,
       secondaryEnabled: false,
@@ -43,11 +43,9 @@ describe('projected coverage vs quality blend contract', () => {
       fallbackRgb,
     });
 
-    // Soft visibility still ranks projectors, but albedo fill stays continuous
-    // (no pale wash into fallback strips).
     expect(result.coverage).toBeCloseTo(0.4, 5);
-    expect(result.mixFactor).toBeCloseTo(1, 5);
-    expect(rgbClose(result.rgb, primaryRgb, 1e-4)).toBe(true);
+    expect(result.mixFactor).toBeCloseTo(0.4, 5);
+    expect(result.rgb[0]).toBeCloseTo(fallbackRgb[0] * 0.6 + primaryRgb[0] * 0.4, 4);
   });
 
   it('uses fallback when projectors are fully occluded', () => {
@@ -161,10 +159,13 @@ describe('projected coverage vs quality blend contract', () => {
       new URL('../src/engine/projectedStyleMaterials.ts', import.meta.url),
       'utf8',
     );
+    const math = readFileSync(
+      new URL('../src/engine/projectedStyleMath.ts', import.meta.url),
+      'utf8',
+    );
     expect(materials).toContain('float primaryCoverage = primaryEnabled * primaryVisibility;');
     expect(materials).toContain('float secondaryCoverage = secondaryEnabled * secondaryVisibility;');
     expect(materials).toContain('float coverage = max(primaryCoverage, secondaryCoverage);');
-    expect(materials).toContain('float projectionFill = step(0.0001, coverage);');
     expect(materials).toContain('0.001 + pow(primaryQuality * primaryDominance, 4.0)');
     expect(materials).toContain('0.001 + pow(secondaryQuality * secondaryDominance, 4.0)');
     expect(materials).toContain('/ max(weightTotal, 0.0001)');
@@ -173,5 +174,10 @@ describe('projected coverage vs quality blend contract', () => {
     expect(materials).toContain('float s = secondaryCoverage;');
     expect(materials).toContain('generateMipmaps = false');
     expect(materials).toContain('minFilter = THREE.LinearFilter');
+    // Non-occluded strip prevention: adaptive bias + trust visible center taps.
+    expect(math).toContain('quantizationBias');
+    expect(math).toContain('firstHit * 0.01');
+    expect(math).toContain('if (center > 0.5)');
+    expect(math).toContain('mix(center, averaged, 0.25)');
   });
 });

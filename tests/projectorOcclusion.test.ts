@@ -96,6 +96,18 @@ describe('sampleProjectorVisibility', () => {
     }).visible).toBe(true);
   });
 
+  it('absorbs packing/self-hit error beyond the raw bias (no false occlusion strips)', () => {
+    const packed = ((): [number, number, number, number] => {
+      const [h, l] = packDepth16((10 - near) / (far - near));
+      return [h, l, 1, 1];
+    })();
+    // 8 cm behind the recorded hit exceeds the 4 cm raw bias, but stays within
+    // the adaptive relative+quantization bias used to prevent stripy acne.
+    expect(sampleProjectorVisibility({
+      worldPosition: [10.08, 0, 0], projectorOrigin: [...origin], packedDepth: packed, nearMeters: near, farMeters: far, biasMeters: 0.04,
+    }).visible).toBe(true);
+  });
+
   it('fragment clearly behind is occluded', () => {
     const packed = ((): [number, number, number, number] => {
       const [h, l] = packDepth16((10 - near) / (far - near));

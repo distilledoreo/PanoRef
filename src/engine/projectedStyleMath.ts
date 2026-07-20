@@ -122,7 +122,11 @@ float decodeDepthMetersGLSL(vec4 packed, float nearMeters, float farMeters) {
     return 1.0;
   }
   float firstHit = decodeDepthMetersGLSL(packedDepth, nearMeters, farMeters);
-  return fragmentDistance <= firstHit + effectiveBias ? 1.0 : 0.0;
+  // Absorb 16-bit packing + cube-face quantization so the receiving surface
+  // itself is not falsely marked occluded (stripy white acne).
+  float quantizationBias = 2.0 * max(farMeters - nearMeters, 1.0) / 65535.0;
+  float adaptiveBias = effectiveBias + quantizationBias + firstHit * 0.01;
+  return fragmentDistance <= firstHit + adaptiveBias ? 1.0 : 0.0;
 }
 
 float sampleProjectorVisibility(
@@ -141,8 +145,8 @@ float sampleProjectorVisibility(
   vec3 direction = normalize(projectorOffset);
 
   float effectiveBias = baseBias
-    + fragmentDistance * 0.0015
-    + 2.0 * fwidth(fragmentDistance);
+    + fragmentDistance * 0.01
+    + 4.0 * fwidth(fragmentDistance);
 
   // Export / Fast: one center cubemap sample (~5× fewer occlusion lookups).
   if (fastMode > 0.5) {
@@ -165,8 +169,16 @@ float sampleProjectorVisibility(
   float texelAngle = 2.0 / max(faceSize, 1.0);
   float offsetAngle = texelAngle * max(softness, 0.0);
 
-  float v = 0.0;
-  v += singleOcclusionSample(direction, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
+  float center = singleOcclusionSample(
+    direction,
+    worldPosition,
+    projectorOrigin,
+    occlusionCube,
+    nearMeters,
+    farMeters,
+    effectiveBias
+  );
+  float v = center;
   vec3 d1 = normalize(direction + tangent * offsetAngle);
   v += singleOcclusionSample(d1, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
   vec3 d2 = normalize(direction - tangent * offsetAngle);
@@ -175,7 +187,14 @@ float sampleProjectorVisibility(
   v += singleOcclusionSample(d3, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
   vec3 d4 = normalize(direction - bitangent * offsetAngle);
   v += singleOcclusionSample(d4, worldPosition, projectorOrigin, occlusionCube, nearMeters, farMeters, effectiveBias);
-  return clamp(v / 5.0, 0.0, 1.0);
+  float averaged = clamp(v / 5.0, 0.0, 1.0);
+  // Neighbor taps often graze closer geometry and falsely darken a surface that
+  // the center tap correctly sees. Keep true silhouettes soft, but never let
+  // neighbors alone paint white strips across an otherwise visible receiver.
+  if (center > 0.5) {
+    return mix(center, averaged, 0.25);
+  }
+  return averaged;
 }`,
 } as const;
 
@@ -308,8 +327,10 @@ export function sampleProjectorVisibility(params: {
   const fragmentDistance = length(subtract(params.worldPosition, params.projectorOrigin));
   const firstHit = decodeDepthMeters(params.packedDepth, params.nearMeters, params.farMeters);
   const bias = params.biasMeters ?? 0.04;
+  const quantizationBias = 2 * Math.max(params.farMeters - params.nearMeters, 1) / 65535;
+  const adaptiveBias = bias + quantizationBias + firstHit * 0.01;
   return {
-    visible: fragmentDistance <= firstHit + bias,
+    visible: fragmentDistance <= firstHit + adaptiveBias,
     firstHitMeters: firstHit,
   };
 }
@@ -468,7 +489,7 @@ export function computeProjectedStyleCoverageBlend(
   }
 
   const mixFactor = coverage > 1e-4
-    ? projectedOpacity
+    ? projectedOpacity * clamp(coverage, 0, 1)
     : 0;
   const rgb: Vec3 = coverage > 1e-4
     ? [
