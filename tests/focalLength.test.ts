@@ -1,79 +1,132 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  clampFocalLengthMm,
   clampShotVerticalFov,
-  FOCAL_LENGTH_HUD_FADE_MS,
-  FOCAL_LENGTH_HUD_HIDE_DELAY_MS,
-  focalLengthFromVerticalFov,
+  focalLengthToVerticalFov,
   MAX_SHOT_FOCAL_LENGTH_MM,
-  MAX_SHOT_VERTICAL_FOV_DEGREES,
-  verticalFovFromFocalLength,
+  MIN_SHOT_FOCAL_LENGTH_MM,
+  verticalFovToFocalLength,
 } from '../src/engine/focalLength';
+import {
+  applyShotFovWheelDelta,
+  SHOT_FOV_WHEEL_STEP_THRESHOLD,
+  snapFocalLengthStep,
+} from '../src/engine/shotFovWheel';
+import {
+  cloneCameraData,
+  pushShotCameraHistoryPast,
+  redoShotCameraHistory,
+  undoShotCameraHistory,
+} from '../src/engine/shotCameraHistory';
+import { CameraData } from '../src/domain/types';
 
-describe('focalLengthFromVerticalFov', () => {
-  it('computes full-frame equivalent focal length from vertical FOV and aspect ratio', () => {
-    const aspectRatio = 3 / 2;
-    const verticalFovDegrees = 2 * (Math.atan((36 / aspectRatio) / (2 * 35)) * 180 / Math.PI);
-    expect(focalLengthFromVerticalFov(verticalFovDegrees, aspectRatio)).toBeCloseTo(35, 5);
+const aspectRatio = 16 / 9;
+
+describe('focal length conversions', () => {
+  it('round-trips vertical FOV and focal length', () => {
+    const verticalFovDegrees = 42.5;
+    const focalLengthMm = verticalFovToFocalLength(verticalFovDegrees, aspectRatio);
+    expect(focalLengthToVerticalFov(focalLengthMm, aspectRatio)).toBeCloseTo(verticalFovDegrees, 5);
   });
 
-  it('returns a shorter focal length for a wider vertical FOV', () => {
-    const aspectRatio = 16 / 9;
-    const narrow = focalLengthFromVerticalFov(35, aspectRatio);
-    const wide = focalLengthFromVerticalFov(70, aspectRatio);
-    expect(wide).toBeLessThan(narrow);
-  });
-
-  it('returns an unrounded focal length from the conversion helper', () => {
-    const aspectRatio = 16 / 9;
-    const focalLength = focalLengthFromVerticalFov(54.4, aspectRatio);
-    expect(Number.isInteger(focalLength)).toBe(false);
-  });
-});
-
-describe('verticalFovFromFocalLength', () => {
-  it('inverts the focal-length conversion for a 200 mm full-frame equivalent lens', () => {
-    const aspectRatio = 16 / 9;
-    const verticalFovDegrees = verticalFovFromFocalLength(200, aspectRatio);
-    expect(focalLengthFromVerticalFov(verticalFovDegrees, aspectRatio)).toBeCloseTo(200, 5);
-  });
-});
-
-describe('clampShotVerticalFov', () => {
-  it('allows vertical FOV down to a 200 mm full-frame equivalent', () => {
-    const aspectRatio = 3 / 2;
-    const minFov = verticalFovFromFocalLength(MAX_SHOT_FOCAL_LENGTH_MM, aspectRatio);
-    expect(clampShotVerticalFov(minFov - 1, aspectRatio)).toBeCloseTo(minFov, 5);
-    expect(focalLengthFromVerticalFov(clampShotVerticalFov(minFov, aspectRatio), aspectRatio))
-      .toBeCloseTo(MAX_SHOT_FOCAL_LENGTH_MM, 5);
-  });
-
-  it('still caps the wide-angle end at 120 degrees', () => {
-    const aspectRatio = 16 / 9;
-    expect(clampShotVerticalFov(MAX_SHOT_VERTICAL_FOV_DEGREES + 10, aspectRatio))
-      .toBe(MAX_SHOT_VERTICAL_FOV_DEGREES);
+  it('supports the 5–300 mm lens range', () => {
+    expect(clampFocalLengthMm(2)).toBe(MIN_SHOT_FOCAL_LENGTH_MM);
+    expect(clampFocalLengthMm(400)).toBe(MAX_SHOT_FOCAL_LENGTH_MM);
+    expect(clampShotVerticalFov(180, aspectRatio)).toBeCloseTo(
+      focalLengthToVerticalFov(MIN_SHOT_FOCAL_LENGTH_MM, aspectRatio),
+      5,
+    );
   });
 });
 
-describe('focal length HUD timing constants', () => {
-  it('hides the HUD about one second after scrolling stops', () => {
-    expect(FOCAL_LENGTH_HUD_HIDE_DELAY_MS).toBe(1000);
+describe('snapFocalLengthStep', () => {
+  it('snaps 37 mm to 40 mm when zooming in and 35 mm when zooming out', () => {
+    expect(snapFocalLengthStep(37, 'in', 5)).toBe(40);
+    expect(snapFocalLengthStep(37, 'out', 5)).toBe(35);
   });
 
-  it('fades the HUD out over a short transition', () => {
-    expect(FOCAL_LENGTH_HUD_FADE_MS).toBeGreaterThan(0);
-    expect(FOCAL_LENGTH_HUD_FADE_MS).toBeLessThan(FOCAL_LENGTH_HUD_HIDE_DELAY_MS);
+  it('steps by exactly 5 mm from aligned values', () => {
+    expect(snapFocalLengthStep(35, 'in', 5)).toBe(40);
+    expect(snapFocalLengthStep(40, 'out', 5)).toBe(35);
   });
 });
 
-describe('shot framing focal length HUD wiring', () => {
-  it('shows the HUD from scroll-wheel FOV changes without altering stored camera data', () => {
-    const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
-    expect(viewport).toContain('showFocalLengthHudRef.current(framingFovRef.current)');
-    expect(viewport).toContain('focalLengthHudFov={focalLengthHudFov}');
-    expect(viewport).toContain('FOCAL_LENGTH_HUD_HIDE_DELAY_MS');
-    expect(viewport).toContain('clampShotVerticalFov(');
-    expect(viewport).toContain('framing.camera.aspectRatio');
-    expect(viewport).toContain('emitFramingCamera()');
+describe('applyShotFovWheelDelta', () => {
+  it('applies one 5 mm step after enough wheel delta accumulates', () => {
+    const startFov = focalLengthToVerticalFov(37, aspectRatio);
+    const first = applyShotFovWheelDelta({
+      currentFovDegrees: startFov,
+      aspectRatio,
+      deltaY: SHOT_FOV_WHEEL_STEP_THRESHOLD / 2,
+      shiftKey: false,
+      accumulatedDeltaY: 0,
+    });
+    expect(first.stepsApplied).toBe(0);
+
+    const second = applyShotFovWheelDelta({
+      currentFovDegrees: startFov,
+      aspectRatio,
+      deltaY: SHOT_FOV_WHEEL_STEP_THRESHOLD / 2,
+      shiftKey: false,
+      accumulatedDeltaY: first.nextAccumulatedDeltaY,
+    });
+    expect(second.stepsApplied).toBe(1);
+    expect(verticalFovToFocalLength(second.nextFovDegrees, aspectRatio)).toBeCloseTo(35, 5);
+  });
+
+  it('uses 1 mm precision when shift is held', () => {
+    const startFov = focalLengthToVerticalFov(37.4, aspectRatio);
+    const result = applyShotFovWheelDelta({
+      currentFovDegrees: startFov,
+      aspectRatio,
+      deltaY: -SHOT_FOV_WHEEL_STEP_THRESHOLD,
+      shiftKey: true,
+      accumulatedDeltaY: 0,
+    });
+    expect(result.stepsApplied).toBe(1);
+    expect(verticalFovToFocalLength(result.nextFovDegrees, aspectRatio)).toBeCloseTo(38, 5);
+  });
+
+  it('preserves scroll direction (positive deltaY zooms out)', () => {
+    const startFov = focalLengthToVerticalFov(55, aspectRatio);
+    const result = applyShotFovWheelDelta({
+      currentFovDegrees: startFov,
+      aspectRatio,
+      deltaY: SHOT_FOV_WHEEL_STEP_THRESHOLD,
+      shiftKey: false,
+      accumulatedDeltaY: 0,
+    });
+    expect(result.stepsApplied).toBe(1);
+    expect(verticalFovToFocalLength(result.nextFovDegrees, aspectRatio)).toBeCloseTo(50, 5);
+  });
+});
+
+describe('shot camera history', () => {
+  const cameraA: CameraData = {
+    position: [0, 1.6, 0],
+    target: [0, 1.6, 1],
+    fovDegrees: 54,
+    aspectRatio: 16 / 9,
+    near: 0.1,
+    far: 100,
+  };
+  const cameraB: CameraData = {
+    ...cameraA,
+    fovDegrees: 40,
+  };
+
+  it('restores the previous camera on undo and the newer camera on redo', () => {
+    const stacks = pushShotCameraHistoryPast({ past: [], future: [] }, cameraA);
+    const undo = undoShotCameraHistory(stacks, cameraB);
+    expect(undo?.restored.fovDegrees).toBe(54);
+    const redo = redoShotCameraHistory(undo!.stacks, cameraA);
+    expect(redo?.restored.fovDegrees).toBe(40);
+  });
+
+  it('clones camera data in history entries', () => {
+    const stacks = pushShotCameraHistoryPast({ past: [], future: [] }, cameraA);
+    stacks.past[0].fovDegrees = 10;
+    expect(cameraA.fovDegrees).toBe(54);
+    expect(cloneCameraData(cameraA).fovDegrees).toBe(54);
   });
 });

@@ -19,6 +19,7 @@ import {
   DEFAULT_CAMERA_LENS_MM,
   DEFAULT_CAMERA_HEIGHT_METERS,
 } from '../../domain/defaults';
+import { clampShotVerticalFov, verticalFovToFocalLength } from '../../engine/focalLength';
 import {
   DEFAULT_CAMERA_MOVE_DURATION_SECONDS,
   MAX_CAMERA_MOVE_DURATION_SECONDS,
@@ -134,6 +135,10 @@ export function ShotsWorkspace() {
     attachViewportRenderToShot,
     setWorkspace,
     setActivePano,
+    beginShotCameraHistoryBatch,
+    endShotCameraHistoryBatch,
+    undoShotCamera,
+    redoShotCamera,
   } = useContinuityStore();
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
@@ -169,6 +174,8 @@ export function ShotsWorkspace() {
    * can stay live without trapping the shutter after stop.
    */
   const [videoPhase, setVideoPhase] = useState<VideoShutterPhase>('record');
+  const [framingCamera, setFramingCamera] = useState<CameraData | undefined>();
+  const [focalLengthHudPulse, setFocalLengthHudPulse] = useState(0);
 
   const getEffectiveCamera = useCallback((): CameraData | undefined => {
     if (!selectedShot) return undefined;
@@ -490,9 +497,24 @@ export function ShotsWorkspace() {
   ]);
 
   useEffect(() => {
-    if (!selectedShot) return;
+    if (!selectedShot) {
+      setFramingCamera(undefined);
+      return;
+    }
     draftCameraRef.current = selectedShot.camera;
-  }, [selectedShot?.id, selectedShot?.camera, shotCameraFlying]);
+    setFramingCamera(selectedShot.camera);
+  }, [selectedShot?.id, selectedShot?.camera]);
+
+  const pulseFocalLengthHud = useCallback(() => {
+    setFocalLengthHudPulse((value) => value + 1);
+  }, []);
+
+  const commitShotCamera = useCallback((camera: CameraData, options?: { cameraHistory?: 'step' | 'batch' | 'silent' }) => {
+    if (!selectedShot) return;
+    draftCameraRef.current = camera;
+    setFramingCamera(camera);
+    updateShot(selectedShot.id, { camera }, options);
+  }, [selectedShot, updateShot]);
 
   useEffect(() => {
     setCameraMovePreviewUrl(cameraMoveAsset?.uri);
@@ -503,11 +525,28 @@ export function ShotsWorkspace() {
       if (event.key.toLowerCase() === 'i' && selectedShot && !isEditableTarget(event.target)) {
         event.preventDefault();
         setSettingsOpen((open) => !open);
+        return;
+      }
+      if (isEditableTarget(event.target)) return;
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (event.key.toLowerCase() === 'z' && event.shiftKey) {
+        event.preventDefault();
+        redoShotCamera();
+        return;
+      }
+      if (event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        undoShotCamera();
+        return;
+      }
+      if (event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        redoShotCamera();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedShot]);
+  }, [redoShotCamera, selectedShot, undoShotCamera]);
 
   const framePreviewKey = useMemo(() => {
     const previewShot = getPreviewShot();
@@ -552,9 +591,30 @@ export function ShotsWorkspace() {
   const handleFramingCameraChange = useCallback((camera: CameraData) => {
     if (!selectedShot) return;
     draftCameraRef.current = camera;
+    setFramingCamera(camera);
     if (shotCameraFlying) return;
     updateShot(selectedShot.id, { camera });
   }, [selectedShot?.id, shotCameraFlying, updateShot]);
+
+  const handleShotFovWheelBatchStart = useCallback(() => {
+    beginShotCameraHistoryBatch();
+  }, [beginShotCameraHistoryBatch]);
+
+  const handleShotFovWheelBatchEnd = useCallback((camera: CameraData) => {
+    if (!selectedShot) return;
+    commitShotCamera(
+      {
+        ...selectedShot.camera,
+        fovDegrees: camera.fovDegrees,
+      },
+      { cameraHistory: 'batch' },
+    );
+    endShotCameraHistoryBatch();
+  }, [commitShotCamera, endShotCameraHistoryBatch, selectedShot]);
+
+  const handleFocalLengthHudPulse = useCallback(() => {
+    pulseFocalLengthHud();
+  }, [pulseFocalLengthHud]);
 
   const startFlyCamera = useCallback((options?: { clearFramingAcceptance?: boolean }) => {
     // Seed from the stored shot only when entering fly — never clobber a live draft pose.
@@ -789,11 +849,15 @@ export function ShotsWorkspace() {
   const shotFraming = useMemo(() => (
     selectedShot
       ? {
-        camera: selectedShot.camera,
+        camera: framingCamera ?? selectedShot.camera,
         frameAspectRatio: selectedShot.exportSettings.width / selectedShot.exportSettings.height,
         frameResolutionLabel: `${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height}`,
         flyActive: shotCameraFlying,
+        focalLengthHudPulse,
         onCameraChange: handleFramingCameraChange,
+        onFocalLengthHudPulse: handleFocalLengthHudPulse,
+        onShotFovWheelBatchStart: handleShotFovWheelBatchStart,
+        onShotFovWheelBatchEnd: handleShotFovWheelBatchEnd,
         onLockCamera: captureMode === 'video'
           ? (videoPhase === 'record' ? setCameraMoveStart : videoPhase === 'stop' ? setCameraMoveEnd : undefined)
           : captureStill,
@@ -802,7 +866,12 @@ export function ShotsWorkspace() {
   ), [
     captureMode,
     captureStill,
+    focalLengthHudPulse,
+    framingCamera,
+    handleFocalLengthHudPulse,
     handleFramingCameraChange,
+    handleShotFovWheelBatchEnd,
+    handleShotFovWheelBatchStart,
     selectedShot?.camera,
     selectedShot?.exportSettings.height,
     selectedShot?.exportSettings.width,
@@ -813,7 +882,10 @@ export function ShotsWorkspace() {
   ]);
 
   const framingAccepted = selectedShot ? isShotFramingAccepted(project, selectedShot.id) : false;
-  const lensMm = project.settings.defaultCameraLensMm ?? DEFAULT_CAMERA_LENS_MM;
+  const activeFramingCamera = framingCamera ?? selectedShot?.camera;
+  const lensMm = activeFramingCamera
+    ? Math.round(verticalFovToFocalLength(activeFramingCamera.fovDegrees, activeFramingCamera.aspectRatio))
+    : (project.settings.defaultCameraLensMm ?? DEFAULT_CAMERA_LENS_MM);
   const cameraHeight = selectedShot?.camera.position[1] ?? DEFAULT_CAMERA_HEIGHT_METERS;
 
   useEffect(() => {
@@ -1325,23 +1397,31 @@ export function ShotsWorkspace() {
             </div>
             <Field label="Camera Position">
               <Vec3Input
+                step={0.01}
                 value={selectedShot.camera.position}
-                onChange={(position) => updateShot(selectedShot.id, { camera: { ...selectedShot.camera, position } })}
+                onChange={(position) => commitShotCamera({ ...selectedShot.camera, position })}
               />
             </Field>
             <Field label="Camera Target">
               <Vec3Input
+                step={0.01}
                 value={selectedShot.camera.target}
-                onChange={(target) => updateShot(selectedShot.id, { camera: { ...selectedShot.camera, target } })}
+                onChange={(target) => commitShotCamera({ ...selectedShot.camera, target })}
               />
             </Field>
             <Field label="FOV">
               <TextInput
                 type="number"
+                step={0.1}
                 value={selectedShot.camera.fovDegrees}
-                onChange={(event) => updateShot(selectedShot.id, {
-                  camera: { ...selectedShot.camera, fovDegrees: Number(event.target.value) },
-                })}
+                onChange={(event) => {
+                  const fovDegrees = clampShotVerticalFov(
+                    Number(event.target.value),
+                    selectedShot.camera.aspectRatio,
+                  );
+                  commitShotCamera({ ...selectedShot.camera, fovDegrees });
+                  pulseFocalLengthHud();
+                }}
               />
             </Field>
             <Field label="Resolution">

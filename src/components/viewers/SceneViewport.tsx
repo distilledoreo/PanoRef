@@ -56,7 +56,11 @@ import {
   type GizmoHit,
   type GizmoMode,
 } from '../../engine/transformGizmo';
-import { clampShotVerticalFov, FOCAL_LENGTH_HUD_HIDE_DELAY_MS } from '../../engine/focalLength';
+import { clampShotVerticalFov } from '../../engine/focalLength';
+import {
+  applyShotFovWheelDelta,
+  SHOT_FOV_WHEEL_BATCH_IDLE_MS,
+} from '../../engine/shotFovWheel';
 import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
 import { sceneEnvelope, selectionBounds } from '../../engine/buildSelection';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
@@ -92,6 +96,7 @@ type DragKind =
 const FLY_SPEED = 6;
 const FLY_SPRINT_MULTIPLIER = 2.4;
 const LOOK_SENSITIVITY = 0.12;
+const PRECISION_INPUT_MULTIPLIER = 0.2;
 const MAX_INTERACTIVE_PIXEL_RATIO = 1.5;
 
 function sceneBoundingRadius(project: LocationProject): number {
@@ -175,8 +180,12 @@ export function SceneViewport({
     frameAspectRatio: number;
     frameResolutionLabel: string;
     flyActive: boolean;
+    focalLengthHudPulse?: number;
     onCameraChange: (camera: CameraData) => void;
     onLockCamera?: () => void;
+    onFocalLengthHudPulse?: () => void;
+    onShotFovWheelBatchStart?: () => void;
+    onShotFovWheelBatchEnd?: (camera: CameraData) => void;
   };
   onSelectObject?: (id?: string, mode?: 'replace' | 'toggle') => void;
   onPlaceObject?: (type: SceneObjectType, point: Vec3) => void;
@@ -258,8 +267,10 @@ export function SceneViewport({
   const [projectedTextureReadyUrl, setProjectedTextureReadyUrl] = useState<string | undefined>();
   const [projectedSecondaryReadyUrl, setProjectedSecondaryReadyUrl] = useState<string | undefined>();
   const [secondaryLoadError, setSecondaryLoadError] = useState(false);
-  const [focalLengthHudFov, setFocalLengthHudFov] = useState<number | null>(null);
-  const focalLengthHudHideTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const wheelFovAccumRef = useRef(0);
+  const wheelBatchActiveRef = useRef(false);
+  const wheelBatchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const shiftHeldRef = useRef(false);
 
   // Live geometry-occlusion cubemaps (shared across all projected objects).
   const primaryOcclusionRef = useRef<ProjectorOcclusionMap | undefined>();
@@ -310,16 +321,6 @@ export function SceneViewport({
   renderDistanceRef.current = clampBuildRenderDistance(renderDistance);
   placementTypeRef.current = placementType;
   shotFramingRef.current = shotFraming;
-  const showFocalLengthHud = useCallback((fovDegrees: number) => {
-    setFocalLengthHudFov(fovDegrees);
-    if (focalLengthHudHideTimerRef.current) clearTimeout(focalLengthHudHideTimerRef.current);
-    focalLengthHudHideTimerRef.current = setTimeout(() => {
-      setFocalLengthHudFov(null);
-      focalLengthHudHideTimerRef.current = undefined;
-    }, FOCAL_LENGTH_HUD_HIDE_DELAY_MS);
-  }, []);
-  const showFocalLengthHudRef = useRef(showFocalLengthHud);
-  showFocalLengthHudRef.current = showFocalLengthHud;
   showSceneGuidesRef.current = showSceneGuides;
   showTransformGizmoRef.current = showTransformGizmo;
   gizmoModeRef.current = gizmoMode;
@@ -545,7 +546,8 @@ export function SceneViewport({
       const length = Math.hypot(moveX, moveY, moveZ);
       if (length === 0) return;
       const sprinting = isForwardSprinting(forwardSprintRef.current);
-      const speed = FLY_SPEED * (sprinting ? FLY_SPRINT_MULTIPLIER : 1);
+      const precisionScale = shiftHeldRef.current ? PRECISION_INPUT_MULTIPLIER : 1;
+      const speed = FLY_SPEED * (sprinting ? FLY_SPRINT_MULTIPLIER : 1) * precisionScale;
       const step = (speed * deltaSeconds) / length;
       fly.position = clampFlyCameraPosition(
         [
@@ -1094,16 +1096,19 @@ export function SceneViewport({
 
       if (drag.kind === 'shot_framing' || drag.kind === 'free_camera') {
         const fly = flyRef.current;
-        fly.yawDegrees -= dx * LOOK_SENSITIVITY;
-        fly.pitchDegrees = Math.max(-89, Math.min(89, fly.pitchDegrees - dy * LOOK_SENSITIVITY));
+        const precisionActive = event.shiftKey || shiftHeldRef.current;
+        const lookScale = precisionActive ? LOOK_SENSITIVITY * PRECISION_INPUT_MULTIPLIER : LOOK_SENSITIVITY;
+        fly.yawDegrees -= dx * lookScale;
+        fly.pitchDegrees = Math.max(-89, Math.min(89, fly.pitchDegrees - dy * lookScale));
         flyDirtyRef.current = true;
         if (drag.kind === 'shot_framing') emitFramingCamera();
         return;
       }
 
       if (drag.kind === 'orbit') {
-        orbitRef.current.yaw -= dx * 0.25;
-        orbitRef.current.pitch = Math.max(-10, Math.min(78, orbitRef.current.pitch - dy * 0.18));
+        const orbitScale = shiftHeldRef.current ? PRECISION_INPUT_MULTIPLIER : 1;
+        orbitRef.current.yaw -= dx * 0.25 * orbitScale;
+        orbitRef.current.pitch = Math.max(-10, Math.min(78, orbitRef.current.pitch - dy * 0.18 * orbitScale));
       }
     };
 
@@ -1167,27 +1172,73 @@ export function SceneViewport({
       if (dragRef.current.kind === 'idle') clearPreviewMesh();
     };
 
+    const endShotFovWheelBatch = () => {
+      if (!wheelBatchActiveRef.current) return;
+      wheelBatchActiveRef.current = false;
+      const framing = shotFramingRef.current;
+      if (!framing) return;
+      const camera = cameraFromFlyState(
+        flyRef.current,
+        framingFovRef.current,
+        framing.camera.aspectRatio,
+        framing.camera.near,
+        framing.camera.far,
+      );
+      framing.onShotFovWheelBatchEnd?.(camera);
+    };
+
+    const scheduleShotFovWheelBatchEnd = () => {
+      if (wheelBatchTimerRef.current) clearTimeout(wheelBatchTimerRef.current);
+      wheelBatchTimerRef.current = setTimeout(() => {
+        wheelBatchTimerRef.current = undefined;
+        endShotFovWheelBatch();
+      }, SHOT_FOV_WHEEL_BATCH_IDLE_MS);
+    };
+
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       const framing = shotFramingRef.current;
       if (framing) {
-        framingFovRef.current = clampShotVerticalFov(
-          framingFovRef.current + event.deltaY * 0.04,
-          framing.camera.aspectRatio,
-        );
+        const wheelResult = applyShotFovWheelDelta({
+          currentFovDegrees: framingFovRef.current,
+          aspectRatio: framing.camera.aspectRatio,
+          deltaY: event.deltaY,
+          shiftKey: event.shiftKey,
+          accumulatedDeltaY: wheelFovAccumRef.current,
+        });
+        wheelFovAccumRef.current = wheelResult.nextAccumulatedDeltaY;
+        if (wheelResult.stepsApplied === 0) return;
+
+        if (!wheelBatchActiveRef.current) {
+          wheelBatchActiveRef.current = true;
+          framing.onShotFovWheelBatchStart?.();
+        }
+
+        framingFovRef.current = wheelResult.nextFovDegrees;
         if (cameraRef.current) {
           cameraRef.current.fov = framingFovRef.current;
           cameraRef.current.updateProjectionMatrix();
         }
-        showFocalLengthHudRef.current(framingFovRef.current);
+        framing.onFocalLengthHudPulse?.();
         emitFramingCamera();
+        scheduleShotFovWheelBatchEnd();
         return;
       }
       if (freeCameraActiveRef.current) return;
-      orbitRef.current.distance = Math.max(3, Math.min(sceneBoundingRadius(projectRef.current) * 4, orbitRef.current.distance + event.deltaY * 0.01));
+      const dollyScale = event.shiftKey ? PRECISION_INPUT_MULTIPLIER : 1;
+      orbitRef.current.distance = Math.max(
+        3,
+        Math.min(
+          sceneBoundingRadius(projectRef.current) * 4,
+          orbitRef.current.distance + event.deltaY * 0.01 * dollyScale,
+        ),
+      );
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
+        shiftHeldRef.current = true;
+      }
       if (!shotFramingRef.current?.flyActive && !freeCameraActiveRef.current) return;
       if (event.code === 'Escape') {
         const escapeInsideDialog = Boolean((event.target as HTMLElement | null)?.closest?.('[role="dialog"]'));
@@ -1216,6 +1267,9 @@ export function SceneViewport({
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
+        shiftHeldRef.current = false;
+      }
       if (event.code === 'KeyW') {
         forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, {
           type: 'keyup',
@@ -1264,6 +1318,8 @@ export function SceneViewport({
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', clearFlyInput);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (wheelBatchTimerRef.current) clearTimeout(wheelBatchTimerRef.current);
+      endShotFovWheelBatch();
       flyKeysRef.current.clear();
       resizeObserver.disconnect();
       window.removeEventListener('resize', syncViewportSize);
@@ -1350,19 +1406,6 @@ export function SceneViewport({
       forwardSprintRef.current = reduceForwardSprint(forwardSprintRef.current, { type: 'reset' });
     }
   }, [freeCameraActive, shotFraming?.flyActive]);
-
-  useEffect(() => {
-    if (shotFraming) return;
-    setFocalLengthHudFov(null);
-    if (focalLengthHudHideTimerRef.current) {
-      clearTimeout(focalLengthHudHideTimerRef.current);
-      focalLengthHudHideTimerRef.current = undefined;
-    }
-  }, [shotFraming]);
-
-  useEffect(() => () => {
-    if (focalLengthHudHideTimerRef.current) clearTimeout(focalLengthHudHideTimerRef.current);
-  }, []);
 
   const setFlyAxes = useCallback((axes: { forward: number; strafe: number; vertical?: number }) => {
     flyAxesRef.current = {
@@ -1469,7 +1512,11 @@ export function SceneViewport({
     // Do not depend on the whole shotFraming object — video shutter phase and
     // other chrome churn recreate that object and must not yank the live camera.
     flyRef.current = flyCameraFromCamera(shotFraming.camera);
-    framingFovRef.current = shotFraming.camera.fovDegrees;
+    framingFovRef.current = clampShotVerticalFov(
+      shotFraming.camera.fovDegrees,
+      shotFraming.camera.aspectRatio,
+    );
+    wheelFovAccumRef.current = 0;
     if (cameraRef.current) {
       applyFlyCameraToPerspectiveCamera(
         cameraRef.current,
@@ -1741,7 +1788,7 @@ export function SceneViewport({
           aspectRatio={shotFraming.frameAspectRatio}
           cameraAspectRatio={shotFraming.camera.aspectRatio}
           fovDegrees={shotFraming.camera.fovDegrees}
-          focalLengthHudFov={focalLengthHudFov}
+          focalLengthHudPulse={shotFraming.focalLengthHudPulse}
           resolutionLabel={shotFraming.frameResolutionLabel}
           variant="full"
         />
