@@ -18,13 +18,24 @@ export function snapFocalLengthStep(
   direction: FocalLengthZoomDirection,
   stepMm: number,
 ): number {
+  const epsilon = 1e-3;
+  const nearestStep = Math.round(currentFocalLengthMm / stepMm) * stepMm;
+  const onNearestStep = Math.abs(currentFocalLengthMm - nearestStep) <= epsilon
+    || Math.round(currentFocalLengthMm) === nearestStep;
+
   if (direction === 'in') {
-    const boundary = Math.ceil((currentFocalLengthMm - 1e-9) / stepMm) * stepMm;
-    return boundary <= currentFocalLengthMm ? boundary + stepMm : boundary;
+    if (onNearestStep) {
+      return nearestStep + stepMm;
+    }
+    const boundary = Math.ceil((currentFocalLengthMm - epsilon) / stepMm) * stepMm;
+    return boundary <= currentFocalLengthMm + epsilon ? boundary + stepMm : boundary;
   }
 
-  const boundary = Math.floor((currentFocalLengthMm + 1e-9) / stepMm) * stepMm;
-  return boundary >= currentFocalLengthMm ? boundary - stepMm : boundary;
+  if (onNearestStep) {
+    return nearestStep - stepMm;
+  }
+  const boundary = Math.floor((currentFocalLengthMm + epsilon) / stepMm) * stepMm;
+  return boundary >= currentFocalLengthMm - epsilon ? boundary - stepMm : boundary;
 }
 
 export function applyShotFovWheelDelta(options: {

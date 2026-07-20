@@ -56,7 +56,10 @@ import {
   type GizmoHit,
   type GizmoMode,
 } from '../../engine/transformGizmo';
-import { clampShotVerticalFov } from '../../engine/focalLength';
+import {
+  applyShotFramingViewportReseed,
+  shouldReseedShotFramingViewport,
+} from '../../engine/shotFramingViewportReseed';
 import {
   applyShotFovWheelDelta,
   SHOT_FOV_WHEEL_BATCH_IDLE_MS,
@@ -182,6 +185,7 @@ export function SceneViewport({
     frameAspectRatio: number;
     frameResolutionLabel: string;
     flyActive: boolean;
+    cameraReseedGeneration?: number;
     focalLengthHudPulse?: number;
     onCameraChange: (camera: CameraData) => void;
     onLockCamera?: () => void;
@@ -274,6 +278,7 @@ export function SceneViewport({
   const wheelBatchShotIdRef = useRef<string | undefined>();
   const wheelBatchTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const finalizeShotFovWheelBatchRef = useRef<() => void>(() => {});
+  const handledCameraReseedRef = useRef(shotFraming?.cameraReseedGeneration ?? 0);
   const altHeldRef = useRef(false);
 
   // Live geometry-occlusion cubemaps (shared across all projected objects).
@@ -1520,16 +1525,27 @@ export function SceneViewport({
   }, []);
 
   useEffect(() => {
-    if (!shotFraming || dragRef.current.kind === 'shot_framing') return;
-    // Re-seed fly pose only when the shot or stored camera pose changes.
-    // Do not depend on the whole shotFraming object — video shutter phase and
-    // other chrome churn recreate that object and must not yank the live camera.
+    if (!shotFraming) return;
+    if (
+      !shouldReseedShotFramingViewport({
+        reseedGeneration: shotFraming.cameraReseedGeneration ?? 0,
+        lastHandledReseedGeneration: handledCameraReseedRef.current,
+        wheelBatchActive: wheelBatchActiveRef.current,
+        dragKind: dragRef.current.kind,
+        hasShotFraming: true,
+      })
+    ) {
+      return;
+    }
+
+    const reseeded = applyShotFramingViewportReseed({
+      camera: shotFraming.camera,
+      reseedGeneration: shotFraming.cameraReseedGeneration ?? 0,
+    });
+    handledCameraReseedRef.current = reseeded.lastHandledReseedGeneration;
     flyRef.current = flyCameraFromCamera(shotFraming.camera);
-    framingFovRef.current = clampShotVerticalFov(
-      shotFraming.camera.fovDegrees,
-      shotFraming.camera.aspectRatio,
-    );
-    wheelFovAccumRef.current = 0;
+    framingFovRef.current = reseeded.framingFovDegrees;
+    wheelFovAccumRef.current = reseeded.wheelAccumulatedDeltaY;
     if (cameraRef.current) {
       applyFlyCameraToPerspectiveCamera(
         cameraRef.current,
@@ -1538,19 +1554,7 @@ export function SceneViewport({
         shotFraming.frameAspectRatio,
       );
     }
-  }, [
-    selectedShotId,
-    shotFraming?.camera.position[0],
-    shotFraming?.camera.position[1],
-    shotFraming?.camera.position[2],
-    shotFraming?.camera.target[0],
-    shotFraming?.camera.target[1],
-    shotFraming?.camera.target[2],
-    shotFraming?.camera.fovDegrees,
-    shotFraming?.frameAspectRatio,
-    // Presence toggle: enter/leave shot framing mode.
-    Boolean(shotFraming),
-  ]);
+  }, [shotFraming?.cameraReseedGeneration, Boolean(shotFraming)]);
 
   const projectedSettings = projectedProjectors?.settings
     ?? normalizeProjectedStyleSettings(project.settings.projectedStyle);

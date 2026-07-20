@@ -183,6 +183,10 @@ export function ShotsWorkspace() {
   const [videoPhase, setVideoPhase] = useState<VideoShutterPhase>('record');
   const [framingCamera, setFramingCamera] = useState<CameraData | undefined>();
   const [focalLengthHudPulse, setFocalLengthHudPulse] = useState(0);
+  const [cameraReseedGeneration, setCameraReseedGeneration] = useState(0);
+  const bumpCameraReseed = useCallback(() => {
+    setCameraReseedGeneration((value) => value + 1);
+  }, []);
 
   const getEffectiveCamera = useCallback((): CameraData | undefined => {
     if (!selectedShot) return undefined;
@@ -511,13 +515,15 @@ export function ShotsWorkspace() {
     }
     draftCameraRef.current = selectedShot.camera;
     setFramingCamera(selectedShot.camera);
-  }, [selectedShot?.id]);
+    bumpCameraReseed();
+  }, [bumpCameraReseed, selectedShot?.id]);
 
   useEffect(() => {
     if (!selectedShot || shotCameraFlyingRef.current) return;
     draftCameraRef.current = selectedShot.camera;
     setFramingCamera(selectedShot.camera);
-  }, [selectedShot?.camera, selectedShot?.id]);
+    bumpCameraReseed();
+  }, [bumpCameraReseed, selectedShot?.camera, selectedShot?.id]);
 
   useEffect(() => {
     if (
@@ -533,7 +539,8 @@ export function ShotsWorkspace() {
 
     draftCameraRef.current = selectedShot.camera;
     setFramingCamera(selectedShot.camera);
-  }, [shotCameraHistoryRestoreGeneration, selectedShot?.id]);
+    bumpCameraReseed();
+  }, [bumpCameraReseed, shotCameraHistoryRestoreGeneration, selectedShot?.id]);
 
   const pulseFocalLengthHud = useCallback(() => {
     setFocalLengthHudPulse((value) => value + 1);
@@ -544,8 +551,9 @@ export function ShotsWorkspace() {
     if (!shotId) return;
     draftCameraRef.current = camera;
     setFramingCamera(camera);
+    bumpCameraReseed();
     updateShot(shotId, { camera }, options);
-  }, [selectedShot?.id, updateShot]);
+  }, [bumpCameraReseed, selectedShot?.id, updateShot]);
 
   useEffect(() => {
     setCameraMovePreviewUrl(cameraMoveAsset?.uri);
@@ -657,9 +665,10 @@ export function ShotsWorkspace() {
     if (selectedShot && !shotCameraFlying) {
       draftCameraRef.current = selectedShot.camera;
       setFramingCamera(selectedShot.camera);
+      bumpCameraReseed();
     }
     setShotCameraFlying(true, options);
-  }, [selectedShot, setShotCameraFlying, shotCameraFlying]);
+  }, [bumpCameraReseed, selectedShot, setShotCameraFlying, shotCameraFlying]);
 
   const snapshotPreview = useCallback((shot: { id: string; name?: string; exportSettings: { width: number; height: number }; camera: CameraData }, camera: CameraData) => {
     // Use latest project from the store so freshly created shots are not missing
@@ -891,6 +900,7 @@ export function ShotsWorkspace() {
         frameAspectRatio: selectedShot.exportSettings.width / selectedShot.exportSettings.height,
         frameResolutionLabel: `${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height}`,
         flyActive: shotCameraFlying,
+        cameraReseedGeneration,
         focalLengthHudPulse,
         onCameraChange: handleFramingCameraChange,
         onFocalLengthHudPulse: handleFocalLengthHudPulse,
@@ -904,6 +914,7 @@ export function ShotsWorkspace() {
   ), [
     captureMode,
     captureStill,
+    cameraReseedGeneration,
     focalLengthHudPulse,
     framingCamera,
     handleFocalLengthHudPulse,

@@ -62,7 +62,7 @@ describe('camera keyframes', () => {
     expect(halfway.position[0]).toBeCloseTo(2);
     expect(halfway.position[1]).toBeCloseTo(1.825);
     expect(halfway.target[2]).toBeCloseTo(6);
-    expect(halfway.fovDegrees).toBeCloseTo(44.7);
+    expect(halfway.fovDegrees).toBeCloseTo((shot.camera.fovDegrees + endCamera.fovDegrees) / 2);
   });
 
   it('samples start, mid, and end reference frames from a camera move', () => {

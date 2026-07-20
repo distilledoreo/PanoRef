@@ -3,7 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { ShotViewfinderOverlay } from '../src/components/viewers/ShotViewfinderOverlay';
 import { shotFlySpeedMultiplier } from '../src/engine/shotFlyMovement';
-import { applyShotFovWheelDelta, SHOT_FOV_WHEEL_STEP_THRESHOLD } from '../src/engine/shotFovWheel';
+import {
+  applyShotFovWheelDelta,
+  SHOT_FOV_WHEEL_STEP_THRESHOLD,
+  snapFocalLengthStep,
+} from '../src/engine/shotFovWheel';
 import { focalLengthToVerticalFov, verticalFovToFocalLength } from '../src/engine/focalLength';
 
 describe('shot fly movement precision', () => {
@@ -14,6 +18,11 @@ describe('shot fly movement precision', () => {
 });
 
 describe('shot focal-length wheel behavior', () => {
+  it('advances from a snapped 25 mm lens despite focal-length round-trip drift', () => {
+    expect(snapFocalLengthStep(24.999999999999996, 'in', 5)).toBe(30);
+    expect(snapFocalLengthStep(19.7, 'in', 5)).toBe(25);
+  });
+
   it('requires accumulated delta before applying a step', () => {
     const aspectRatio = 16 / 9;
     const startFov = focalLengthToVerticalFov(50, aspectRatio);

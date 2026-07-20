@@ -332,6 +332,7 @@ describe('ui revamp fidelity surfaces', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
     expect(shots).toContain('shotFraming={shotFraming}');
+    expect(shots).toContain('cameraReseedGeneration');
     expect(shots).not.toContain('selectedObjectId');
     expect(shots).not.toContain('onSelectObject');
     expect(viewport).toContain('if (!scene || shotFramingRef.current');
@@ -487,10 +488,11 @@ describe('ui revamp fidelity surfaces', () => {
     // Record must keep the live fly pose (persist pose + never seed draft over an active fly).
     expect(shots).toMatch(/setCameraMoveStart[\s\S]*updateShot\(selectedShot\.id, \{[\s\S]*camera: pose/);
     expect(shots).toMatch(/startFlyCamera[\s\S]*if \(selectedShot && !shotCameraFlying\)/);
-    // Fly re-seed must key off pose scalars, not the whole shotFraming object (phase churn).
-    expect(viewport).toContain('shotFraming?.camera.position[0]');
-    expect(viewport).toContain('Boolean(shotFraming)');
-    expect(viewport).not.toMatch(/flyCameraFromCamera\(shotFraming\.camera\);[\s\S]*shotFraming,\s*\n\s*\]/);
+    // Fly re-seed is driven by an explicit camera reseed token, not live camera churn.
+    expect(viewport).toContain('cameraReseedGeneration');
+    expect(viewport).toContain('shouldReseedShotFramingViewport');
+    expect(viewport).toContain('shotFraming?.cameraReseedGeneration');
+    expect(viewport).not.toMatch(/useEffect\([\s\S]*shotFraming\?\.camera\.fovDegrees[\s\S]*\],\s*\)/);
     // Export must not be gated on !shotCameraFlying.
     expect(shots).not.toMatch(/if \(shotCameraFlying \|\| !cameraMoveReady\)/);
     expect(shots).toMatch(/if \(videoPhase === 'record'\)/);
