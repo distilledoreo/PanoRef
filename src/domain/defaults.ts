@@ -17,6 +17,7 @@ import {
   Vec3,
 } from './types';
 import { createId } from '../utils/ids';
+import { DEFAULT_SHOT_NEAR_CLIP_METERS } from '../engine/cameraClipping';
 import { focalLengthToVerticalFov } from '../engine/focalLength';
 
 const nowIso = () => new Date().toISOString();
@@ -228,7 +229,7 @@ export function createCameraData(position: Vec3, target: Vec3, fovDegrees = 55):
     target,
     fovDegrees,
     aspectRatio: 16 / 9,
-    near: 0.1,
+    near: DEFAULT_SHOT_NEAR_CLIP_METERS,
     far: 100,
   };
 }

@@ -37,6 +37,10 @@ import {
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 import { computeGrayboxPanoFarPlane } from './sceneBounds';
 import { createFinalRenderSceneOptions } from './finalRenderProfile';
+import {
+  clampShotNearClip,
+  DEFAULT_SHOT_NEAR_CLIP_METERS,
+} from './cameraClipping';
 import { computeCameraMoveClippingRange } from './exportClipping';
 import {
   canUseDeterministicMp4Export,
@@ -427,9 +431,15 @@ async function renderShotCameraMoveMp4Deterministic(
       projected: projectedResources?.options,
     });
 
+    const nearMeters = Math.max(
+      ...keyframes.map((keyframe) =>
+        clampShotNearClip(keyframe.camera.near, keyframe.camera.far),
+      ),
+    );
     const clipping = computeCameraMoveClippingRange({
       scene,
       keyframeCameras: keyframes.map((keyframe) => keyframe.camera),
+      nearMeters,
     });
 
     const camera = new THREE.PerspectiveCamera(
@@ -564,9 +574,15 @@ async function renderShotCameraMoveMp4QuickPreview(
     projected: projectedResources?.options,
   });
 
+  const nearMeters = Math.max(
+    ...keyframes.map((keyframe) =>
+      clampShotNearClip(keyframe.camera.near, keyframe.camera.far),
+    ),
+  );
   const clipping = computeCameraMoveClippingRange({
     scene,
     keyframeCameras: keyframes.map((keyframe) => keyframe.camera),
+    nearMeters,
   });
 
   const camera = new THREE.PerspectiveCamera(
@@ -711,7 +727,7 @@ export function applyFlyCameraToPerspectiveCamera(
   fly: FlyCameraState,
   fovDegrees: number,
   aspect: number,
-  near = 0.1,
+  near = DEFAULT_SHOT_NEAR_CLIP_METERS,
   far = 200,
 ) {
   camera.fov = fovDegrees;
@@ -734,16 +750,17 @@ function renderCameraMoveFrame(
   timeSeconds: number,
   width: number,
   height: number,
-  clipping?: { near: number; far: number },
+  clipping: { near: number; far: number },
 ) {
   const cameraData = interpolateCameraKeyframes(keyframes, timeSeconds);
+  // Always use the fixed move clipping range — never interpolated cameraData.near/far.
   applyFlyCameraToPerspectiveCamera(
     camera,
     flyCameraFromCamera(cameraData),
     cameraData.fovDegrees,
     width / height,
-    clipping?.near ?? cameraData.near,
-    clipping?.far ?? cameraData.far,
+    clipping.near,
+    clipping.far,
   );
   renderer.render(scene, camera);
 }
@@ -760,6 +777,7 @@ export async function renderViewportClay(
   const clipping = computeCameraMoveClippingRange({
     scene,
     keyframeCameras: [cameraData],
+    nearMeters: cameraData.near,
   });
   const camera = new THREE.PerspectiveCamera(
     cameraData.fovDegrees,
@@ -966,6 +984,7 @@ export async function renderViewportProjected(
   const clipping = computeCameraMoveClippingRange({
     scene,
     keyframeCameras: [cameraData],
+    nearMeters: cameraData.near,
   });
   const camera = new THREE.PerspectiveCamera(
     cameraData.fovDegrees,
