@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { createDefaultProject } from '../src/domain/defaults';
 import type { SceneObject } from '../src/domain/types';
@@ -74,5 +75,20 @@ describe('human projection occlusion', () => {
     ];
 
     expect(computeProjectorOcclusionKey(project, [0, 1.6, 0])).not.toBe(before);
+  });
+});
+
+
+describe('one-shot object focus', () => {
+  it('clears a frame request after the viewport consumes it', () => {
+    const source = readFileSync(
+      new URL('../src/components/workspaces/BuildWorkspace.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain('Framing is a one-shot camera command');
+    expect(source).toContain('window.requestAnimationFrame(() => {');
+    expect(source).toContain(
+      'setFrameRequest((current) => (current === frameRequest ? 0 : current))',
+    );
   });
 });
