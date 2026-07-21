@@ -326,6 +326,17 @@ export function BuildWorkspace() {
     setFrameRequest((request) => request + 1);
   }, []);
 
+// Framing is a one-shot camera command, not an ongoing attachment to the
+// selected objects. Clear the request after the viewport has consumed the
+// committed render so later object edits cannot recenter the orbit target.
+useEffect(() => {
+  if (!frameRequest) return;
+  const animationFrame = window.requestAnimationFrame(() => {
+    setFrameRequest((current) => (current === frameRequest ? 0 : current));
+  });
+  return () => window.cancelAnimationFrame(animationFrame);
+}, [frameRequest]);
+
   useEffect(() => {
     if (!clipboardStatus) return;
     const timeout = window.setTimeout(() => setClipboardStatus(undefined), 2600);

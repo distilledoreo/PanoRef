@@ -372,21 +372,35 @@ export function intersectAxisDragPlane(
   axisDirection: THREE.Vector3,
   camera: THREE.PerspectiveCamera,
 ): THREE.Vector3 | undefined {
-  const cameraDirection = new THREE.Vector3();
-  camera.getWorldDirection(cameraDirection);
-  let planeNormal = new THREE.Vector3().crossVectors(axisDirection, cameraDirection);
+  const axis = axisDirection.clone().normalize();
+
+  // Build a camera-facing plane that still contains the translation axis.
+  // The previous cross(axis, cameraDirection) normal made the plane contain the
+  // camera-to-focus ray, so a focused camera produced a coplanar ray and no drag.
+  const cameraOffset = camera.position.clone().sub(axisOrigin);
+  let planeNormal = cameraOffset.addScaledVector(axis, -cameraOffset.dot(axis));
+
   if (planeNormal.lengthSq() < 1e-6) {
-    planeNormal = new THREE.Vector3().crossVectors(axisDirection, new THREE.Vector3(0, 0, 1));
+    const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    planeNormal = cameraUp.addScaledVector(axis, -cameraUp.dot(axis));
   }
   if (planeNormal.lengthSq() < 1e-6) {
-    planeNormal = new THREE.Vector3().crossVectors(axisDirection, new THREE.Vector3(1, 0, 0));
+    const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    planeNormal = cameraRight.addScaledVector(axis, -cameraRight.dot(axis));
   }
+  if (planeNormal.lengthSq() < 1e-6) {
+    const fallback = Math.abs(axis.y) < 0.9
+      ? new THREE.Vector3(0, 1, 0)
+      : new THREE.Vector3(1, 0, 0);
+    planeNormal = fallback.addScaledVector(axis, -fallback.dot(axis));
+  }
+
   planeNormal.normalize();
   const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, axisOrigin);
   const intersection = new THREE.Vector3();
   if (!raycaster.ray.intersectPlane(plane, intersection)) return undefined;
   const delta = intersection.clone().sub(axisOrigin);
-  const projected = axisDirection.clone().multiplyScalar(delta.dot(axisDirection));
+  const projected = axis.clone().multiplyScalar(delta.dot(axis));
   return axisOrigin.clone().add(projected);
 }
 
