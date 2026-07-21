@@ -1,3 +1,4 @@
+# Temporary self-removing verification workflow.
 name: Verify one-shot object focus
 
 on:
