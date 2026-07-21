@@ -21,6 +21,7 @@ import {
 } from '../../domain/defaults';
 import {
   clampShotNearClip,
+  MAX_SHOT_NEAR_CLIP_METERS,
   MIN_SHOT_NEAR_CLIP_METERS,
 } from '../../engine/cameraClipping';
 import { clampShotVerticalFov, verticalFovToFocalLength } from '../../engine/focalLength';
@@ -1497,7 +1498,10 @@ export function ShotsWorkspace() {
               <TextInput
                 type="number"
                 min={MIN_SHOT_NEAR_CLIP_METERS}
-                max={selectedShot.camera.far - 0.01}
+                max={Math.min(
+                  MAX_SHOT_NEAR_CLIP_METERS,
+                  selectedShot.camera.far - 0.01,
+                )}
                 step={0.01}
                 value={selectedShot.camera.near}
                 onChange={(event) => {

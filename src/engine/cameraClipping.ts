@@ -14,8 +14,13 @@ export const DEFAULT_SHOT_NEAR_CLIP_METERS = 0.1;
 export function clampShotNearClip(near: number, far: number): number {
   if (!Number.isFinite(near)) return DEFAULT_SHOT_NEAR_CLIP_METERS;
 
+  const maximum = Math.min(
+    MAX_SHOT_NEAR_CLIP_METERS,
+    far - 0.01,
+  );
+
   return Math.min(
-    Math.max(MIN_SHOT_NEAR_CLIP_METERS, far - 0.01),
+    Math.max(MIN_SHOT_NEAR_CLIP_METERS, maximum),
     Math.max(MIN_SHOT_NEAR_CLIP_METERS, near),
   );
 }

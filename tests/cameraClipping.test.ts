@@ -41,6 +41,7 @@ describe('clampShotNearClip', () => {
   it('accepts intentional foreground clipping within the soft max', () => {
     expect(clampShotNearClip(2.5, 100)).toBe(2.5);
     expect(clampShotNearClip(MAX_SHOT_NEAR_CLIP_METERS, 100)).toBe(MAX_SHOT_NEAR_CLIP_METERS);
+    expect(clampShotNearClip(50, 100)).toBe(MAX_SHOT_NEAR_CLIP_METERS);
   });
 });
 

@@ -3,7 +3,6 @@ import type { CameraData, Vec3 } from '../domain/types';
 import {
   clampShotNearClip,
   DEFAULT_SHOT_NEAR_CLIP_METERS,
-  MAX_SHOT_NEAR_CLIP_METERS,
 } from './cameraClipping';
 import {
   FINAL_RENDER_FAR_SAFETY_MARGIN_METERS,
@@ -69,11 +68,12 @@ export function computeOriginToSceneFarPlane(
 }
 
 /**
- * Allow intentional foreground clipping up to MAX_SHOT_NEAR_CLIP_METERS.
+ * Normalize export near through the shared shot clamp.
  * Far is derived from scene bounds separately and kept above near.
  */
 function clampExportNear(value: number): number {
-  return clampShotNearClip(value, MAX_SHOT_NEAR_CLIP_METERS + 0.01);
+  // Far is unused for the soft max here; MAX_SHOT_NEAR_CLIP_METERS is authoritative.
+  return clampShotNearClip(value, Number.POSITIVE_INFINITY);
 }
 
 function boxCorners(bounds: THREE.Box3): THREE.Vector3[] {
