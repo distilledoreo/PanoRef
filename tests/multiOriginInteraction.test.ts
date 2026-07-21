@@ -280,18 +280,19 @@ describe('blend formula parity', () => {
     expect(w.wSecondary).toBe(1);
   });
 
-  it('projected blend GLSL uses quality conflict resolution with modest dominance bias', () => {
+  it('projected blend GLSL uses unsaturated log-density conflict resolution', () => {
     const materials = readFileSync(
       new URL('../src/engine/projectedStyleMaterials.ts', import.meta.url),
       'utf8',
     );
-    expect(materials).toContain('projectedQualityAt');
+    expect(materials).toContain('projectedLogQualityAt');
     expect(materials).toContain('const float DOMINANCE_BIAS = 1.04;');
     expect(materials).toContain('projectedBlendMode == 2 ? DOMINANCE_BIAS : 1.0');
     expect(materials).toContain('projectedBlendMode == 3 ? DOMINANCE_BIAS : 1.0');
     expect(materials).toContain('primaryCoverage');
     expect(materials).toContain('secondaryCoverage');
-    expect(materials).toContain('qualityRatio = log2(');
+    expect(materials).toContain('qualityDelta =');
+    expect(materials).not.toContain('smoothstep(128.0, 1024.0, texelDensity)');
     expect(materials).not.toContain('projectedConfidence');
     expect(materials).not.toContain('? 1.15 : 1.0');
   });

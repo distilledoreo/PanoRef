@@ -19,7 +19,7 @@ describe('projected style WebGL compile gate', () => {
     );
     expect(materials).not.toMatch(/material\.specularIntensity\s*\*=/);
     expect(materials).not.toMatch(/#include\s*<lights_physical_fragment>/);
-    expect(materials).toContain('projected-style-v9');
+    expect(materials).toContain('projected-style-v10');
     expect(materials).toContain('#include <aomap_fragment>');
     expect(materials).toContain('#include <color_fragment>');
   });
