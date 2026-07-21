@@ -1,9 +1,13 @@
 name: Apply one-shot object focus fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/focused-translate-and-human-projection
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
