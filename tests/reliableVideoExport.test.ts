@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { readFileSync } from 'node:fs';
 import { createDefaultProject, createCameraData } from '../src/domain/defaults';
+import { DEFAULT_SHOT_NEAR_CLIP_METERS } from '../src/engine/cameraClipping';
 import { computeCameraMoveClippingRange } from '../src/engine/exportClipping';
 import { createFinalRenderSceneOptions } from '../src/engine/finalRenderProfile';
 import {
@@ -48,8 +49,7 @@ describe('reliable video export foundations', () => {
       keyframeCameras: [start, end],
     });
 
-    expect(clipping.near).toBeGreaterThanOrEqual(0.05);
-    expect(clipping.near).toBeLessThanOrEqual(0.1);
+    expect(clipping.near).toBe(DEFAULT_SHOT_NEAR_CLIP_METERS);
     expect(clipping.far).toBeGreaterThan(100);
     expect(clipping.far).toBeGreaterThan(clipping.near + 1);
 

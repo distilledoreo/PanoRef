@@ -67,6 +67,7 @@ import {
 import { clampFlyCameraPosition, computeSceneFlyBounds } from '../../engine/flyCameraBounds';
 import { shotFlySpeedMultiplier } from '../../engine/shotFlyMovement';
 import { sceneEnvelope, selectionBounds } from '../../engine/buildSelection';
+import { DEFAULT_SHOT_NEAR_CLIP_METERS } from '../../engine/cameraClipping';
 import { applyFlyCameraToPerspectiveCamera } from '../../engine/renderers';
 import {
   cameraFromOrbit,
@@ -595,7 +596,7 @@ export function SceneViewport({
           flyRef.current,
           framingFovRef.current,
           framing?.frameAspectRatio ?? cssWidth / cssHeight,
-          0.1,
+          framing?.camera.near ?? DEFAULT_SHOT_NEAR_CLIP_METERS,
           framing?.camera.far ?? renderDistanceRef.current,
         );
 

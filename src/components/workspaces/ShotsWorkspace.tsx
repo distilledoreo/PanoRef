@@ -19,6 +19,11 @@ import {
   DEFAULT_CAMERA_LENS_MM,
   DEFAULT_CAMERA_HEIGHT_METERS,
 } from '../../domain/defaults';
+import {
+  clampShotNearClip,
+  MAX_SHOT_NEAR_CLIP_METERS,
+  MIN_SHOT_NEAR_CLIP_METERS,
+} from '../../engine/cameraClipping';
 import { clampShotVerticalFov, verticalFovToFocalLength } from '../../engine/focalLength';
 import { buildShotFovWheelBatchCommit, applyLiveShotFovWheelBatchCommit } from '../../engine/shotFovWheelBatch';
 import {
@@ -1483,6 +1488,31 @@ export function ShotsWorkspace() {
                   );
                   commitShotCamera({ ...selectedShot.camera, fovDegrees });
                   pulseFocalLengthHud();
+                }}
+              />
+            </Field>
+            <Field
+              label="Near Clip (m)"
+              hint="Hides geometry closer than this distance from the camera."
+            >
+              <TextInput
+                type="number"
+                min={MIN_SHOT_NEAR_CLIP_METERS}
+                max={Math.min(
+                  MAX_SHOT_NEAR_CLIP_METERS,
+                  selectedShot.camera.far - 0.01,
+                )}
+                step={0.01}
+                value={selectedShot.camera.near}
+                onChange={(event) => {
+                  const near = clampShotNearClip(
+                    Number(event.target.value),
+                    selectedShot.camera.far,
+                  );
+                  commitShotCamera({
+                    ...selectedShot.camera,
+                    near,
+                  });
                 }}
               />
             </Field>

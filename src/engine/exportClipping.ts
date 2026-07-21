@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import type { CameraData, Vec3 } from '../domain/types';
 import {
+  clampShotNearClip,
+  DEFAULT_SHOT_NEAR_CLIP_METERS,
+} from './cameraClipping';
+import {
   FINAL_RENDER_FAR_SAFETY_MARGIN_METERS,
-  FINAL_RENDER_NEAR_METERS,
   FINAL_RENDER_NEAR_SAFE_METERS,
 } from './finalRenderProfile';
 
@@ -22,7 +25,7 @@ export function computeCameraMoveClippingRange(params: {
   nearMeters?: number;
   farSafetyMarginMeters?: number;
 }): ExportClippingRange {
-  const near = clampNear(params.nearMeters ?? FINAL_RENDER_NEAR_METERS);
+  const near = clampExportNear(params.nearMeters ?? DEFAULT_SHOT_NEAR_CLIP_METERS);
   const margin = params.farSafetyMarginMeters ?? FINAL_RENDER_FAR_SAFETY_MARGIN_METERS;
   const bounds = new THREE.Box3().setFromObject(params.scene);
 
@@ -64,9 +67,13 @@ export function computeOriginToSceneFarPlane(
   return Math.max(near + 1, farthest + margin);
 }
 
-function clampNear(value: number): number {
-  if (!Number.isFinite(value)) return FINAL_RENDER_NEAR_METERS;
-  return Math.min(FINAL_RENDER_NEAR_SAFE_METERS, Math.max(FINAL_RENDER_NEAR_METERS, value));
+/**
+ * Normalize export near through the shared shot clamp.
+ * Far is derived from scene bounds separately and kept above near.
+ */
+function clampExportNear(value: number): number {
+  // Far is unused for the soft max here; MAX_SHOT_NEAR_CLIP_METERS is authoritative.
+  return clampShotNearClip(value, Number.POSITIVE_INFINITY);
 }
 
 function boxCorners(bounds: THREE.Box3): THREE.Vector3[] {
