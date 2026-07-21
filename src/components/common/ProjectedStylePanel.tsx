@@ -146,7 +146,7 @@ export function ProjectedStylePanel({
             <>
               <Field
                 label="Multi-origin blend"
-                hint="Dominant modes fill weak regions using distance from each origin."
+                hint="Preference only nudges near-equal seams; clearer quality always wins."
               >
                 <Select
                   value={settings.blendMode ?? 'primary_only'}
@@ -215,14 +215,14 @@ export function ProjectedStylePanel({
               </div>
 
               <div className="mt-2">
-                <Field label="Coverage preview">
+                <Field label="Ownership preview">
                   <Toggle
                     checked={settings.occlusionDebugMode === 'coverage'}
                     onChange={(value) => update({ occlusionDebugMode: value ? 'coverage' : 'off' })}
                   />
                 </Field>
                 <p className="mt-1 text-[11px] leading-snug text-secondary">
-                  Cyan: primary only · Magenta: secondary only · White: both · Red: neither.
+                  Cyan: primary-owned · Magenta: secondary-owned · White: feathered seam · Red: neither visible.
                 </p>
               </div>
 

@@ -448,41 +448,86 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
     ? projectedQualityAt(vProjectedWorldPos, projectedSecondaryOrigin, projectedSecondaryTexelConstant)
     : 0.0;
 
-  float primaryDominance = projectedBlendMode == 2 ? 1.15 : 1.0;
-  float secondaryDominance = projectedBlendMode == 3 ? 1.15 : 1.0;
+  // Keep named and mirrored with projectedStyleMath.ts (DOMINANCE_BIAS = 1.04).
+  const float DOMINANCE_BIAS = 1.04;
+  const float SEAM_FEATHER_LOG2 = 0.30;
+  const float SCORE_EPSILON = 1e-6;
+  const float VISIBILITY_EPSILON = 0.001;
 
-  // Occlusion visibility owns projection coverage (opacity vs fallback).
-  // Projection quality only ranks/weights available projectors.
+  float primaryBias = projectedBlendMode == 2 ? DOMINANCE_BIAS : 1.0;
+  float secondaryBias = projectedBlendMode == 3 ? DOMINANCE_BIAS : 1.0;
+
+  // Occlusion visibility owns mix-vs-fallback coverage.
+  // Biased quality decides which panorama supplies color (winner-takes-most).
   float primaryCoverage = primaryEnabled * primaryVisibility;
   float secondaryCoverage = secondaryEnabled * secondaryVisibility;
-
-  float primaryWeight = primaryCoverage
-    * (0.001 + pow(primaryQuality * primaryDominance, 4.0));
-  float secondaryWeight = secondaryCoverage
-    * (0.001 + pow(secondaryQuality * secondaryDominance, 4.0));
-
-  float weightTotal = primaryWeight + secondaryWeight;
   float coverage = max(primaryCoverage, secondaryCoverage);
 
-  // --- Coverage diagnostic (four-state: red/cyan/magenta/white) ---
-  // Visualize projector visibility; orange marks visible-but-poor quality.
+  float primaryVisible = step(VISIBILITY_EPSILON, primaryCoverage);
+  float secondaryVisible = step(VISIBILITY_EPSILON, secondaryCoverage);
+
+  float primaryWeight = 0.0;
+  float secondaryWeight = 0.0;
+  float primaryScore = 0.0;
+  float secondaryScore = 0.0;
+
+  if (primaryVisible > 0.5 && secondaryVisible < 0.5) {
+    primaryWeight = 1.0;
+  } else if (primaryVisible < 0.5 && secondaryVisible > 0.5) {
+    secondaryWeight = 1.0;
+  } else if (primaryVisible > 0.5 && secondaryVisible > 0.5) {
+    primaryScore = primaryCoverage
+      * pow(clamp(primaryQuality * primaryBias, 0.0, 1.0), 4.0);
+    secondaryScore = secondaryCoverage
+      * pow(clamp(secondaryQuality * secondaryBias, 0.0, 1.0), 4.0);
+
+    if (primaryScore <= SCORE_EPSILON && secondaryScore <= SCORE_EPSILON) {
+      // Near-zero quality: higher raw quality wins; exact tie uses dominance.
+      if (primaryQuality > secondaryQuality) {
+        primaryWeight = 1.0;
+      } else if (secondaryQuality > primaryQuality) {
+        secondaryWeight = 1.0;
+      } else if (primaryBias > secondaryBias) {
+        primaryWeight = 1.0;
+      } else if (secondaryBias > primaryBias) {
+        secondaryWeight = 1.0;
+      } else {
+        primaryWeight = 0.5;
+        secondaryWeight = 0.5;
+      }
+    } else {
+      float qualityRatio = log2(
+        (primaryScore + SCORE_EPSILON) / (secondaryScore + SCORE_EPSILON)
+      );
+      float primaryOwnership = smoothstep(
+        -SEAM_FEATHER_LOG2,
+        SEAM_FEATHER_LOG2,
+        qualityRatio
+      );
+      primaryWeight = primaryOwnership;
+      secondaryWeight = 1.0 - primaryOwnership;
+    }
+  }
+
+  float weightTotal = primaryWeight + secondaryWeight;
+
+  // Ownership diagnostic: cyan primary / magenta secondary / white feather / red none.
   if (projectedDebugCoverage == 1) {
-    float p = primaryCoverage;
-    float s = secondaryCoverage;
-    float qualityMax = max(
-      primaryCoverage * primaryQuality,
-      secondaryCoverage * secondaryQuality
-    );
-    float visibleButPoor = max(p, s) * (1.0 - step(0.001, qualityMax));
-    vec3 cov =
-        vec3(1.0, 0.0, 0.0) * (1.0 - p) * (1.0 - s) // red: neither
-      + vec3(0.0, 1.0, 1.0) * p * (1.0 - s)         // cyan: primary only
-      + vec3(1.0, 0.0, 1.0) * (1.0 - p) * s          // magenta: secondary only
-      + vec3(1.0) * p * s;                           // white: both
-    diffuseColor.rgb = mix(cov, vec3(1.0, 0.55, 0.0), visibleButPoor); // orange: poor quality
+    if (coverage <= VISIBILITY_EPSILON) {
+      diffuseColor.rgb = vec3(1.0, 0.0, 0.0);
+    } else if (weightTotal <= SCORE_EPSILON) {
+      diffuseColor.rgb = vec3(1.0, 0.0, 0.0);
+    } else {
+      float ownership = primaryWeight / max(weightTotal, SCORE_EPSILON);
+      float feather = 1.0 - smoothstep(0.05, 0.45, abs(ownership - 0.5));
+      vec3 owned = mix(vec3(1.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), ownership);
+      diffuseColor.rgb = mix(owned, vec3(1.0), feather);
+    }
   } else {
-    vec3 projectedColor = (primarySample * primaryWeight + secondarySample * secondaryWeight)
-      / max(weightTotal, 0.0001);
+    vec3 projectedColor = weightTotal > SCORE_EPSILON
+      ? (primarySample * primaryWeight + secondarySample * secondaryWeight)
+        / max(weightTotal, SCORE_EPSILON)
+      : fallbackAlbedo;
     // Soft occlusion silhouettes still blend; fully occluded → fallback.
     // False self-occlusion strips are prevented in sampleProjectorVisibility.
     vec3 resultColor = coverage > 0.0001
@@ -513,7 +558,7 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v8:${params.settings.fallbackMode}:`
+    `projected-style-v9:${params.settings.fallbackMode}:`
     + `${params.disposable ? 'd' : 's'}:`
     + `${useOcclusion ? 'o' : 'n'}:`
     + `${useSecondary ? 's' : 'p'}:`

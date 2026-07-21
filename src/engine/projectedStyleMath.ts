@@ -335,6 +335,110 @@ export function sampleProjectorVisibility(params: {
   };
 }
 
+// --- Quality-based dual-projector conflict resolution -----------------------
+// Keep these constants mirrored in projectedStyleMaterials.ts GLSL.
+
+/** Modest tie-breaker when qualities are nearly equal (not a broad dominance). */
+export const DOMINANCE_BIAS = 1.04;
+/** Half-width of the log2 quality-ratio feather (≈±0.3 → short seam). */
+export const SEAM_FEATHER_LOG2 = 0.30;
+/** Avoids log(0) and marks effectively-zero quality scores. */
+export const SCORE_EPSILON = 1e-6;
+/** Soft visibility below this is treated as unavailable (not the old 0.5 cutoff). */
+export const VISIBILITY_EPSILON = 0.001;
+/** Quality exponent applied after bias clamp. */
+export const QUALITY_SCORE_EXPONENT = 4;
+
+/** GLSL-compatible smoothstep for CPU parity with the shader. */
+export function smoothstep(edge0: number, edge1: number, x: number): number {
+  if (edge0 === edge1) return x < edge0 ? 0 : 1;
+  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+export function dominanceBiasForBlendMode(mode: ProjectorBlendMode | undefined): {
+  primaryBias: number;
+  secondaryBias: number;
+} {
+  return {
+    primaryBias: mode === 'primary_dominant' ? DOMINANCE_BIAS : 1,
+    secondaryBias: mode === 'secondary_dominant' ? DOMINANCE_BIAS : 1,
+  };
+}
+
+export interface QualityConflictOwnershipInput {
+  primaryCoverage: number;
+  secondaryCoverage: number;
+  primaryQuality: number;
+  secondaryQuality: number;
+  primaryBias?: number;
+  secondaryBias?: number;
+}
+
+export interface QualityConflictOwnershipResult {
+  primaryWeight: number;
+  secondaryWeight: number;
+  primaryScore: number;
+  secondaryScore: number;
+}
+
+/**
+ * Winner-takes-most ownership from biased quality scores.
+ * Coverage stays separate: callers use max(coverage) for mix-vs-fallback opacity.
+ */
+export function resolveQualityConflictOwnership(
+  params: QualityConflictOwnershipInput,
+): QualityConflictOwnershipResult {
+  const primaryBias = params.primaryBias ?? 1;
+  const secondaryBias = params.secondaryBias ?? 1;
+  const primaryVisible = params.primaryCoverage >= VISIBILITY_EPSILON;
+  const secondaryVisible = params.secondaryCoverage >= VISIBILITY_EPSILON;
+
+  if (primaryVisible && !secondaryVisible) {
+    return { primaryWeight: 1, secondaryWeight: 0, primaryScore: 0, secondaryScore: 0 };
+  }
+  if (!primaryVisible && secondaryVisible) {
+    return { primaryWeight: 0, secondaryWeight: 1, primaryScore: 0, secondaryScore: 0 };
+  }
+  if (!primaryVisible && !secondaryVisible) {
+    return { primaryWeight: 0, secondaryWeight: 0, primaryScore: 0, secondaryScore: 0 };
+  }
+
+  const primaryScore = params.primaryCoverage
+    * (clamp(params.primaryQuality * primaryBias, 0, 1) ** QUALITY_SCORE_EXPONENT);
+  const secondaryScore = params.secondaryCoverage
+    * (clamp(params.secondaryQuality * secondaryBias, 0, 1) ** QUALITY_SCORE_EXPONENT);
+
+  // Both usable in coverage but effectively zero quality: pick higher raw quality,
+  // then break an exact tie with the dominant preference.
+  if (primaryScore <= SCORE_EPSILON && secondaryScore <= SCORE_EPSILON) {
+    if (params.primaryQuality > params.secondaryQuality) {
+      return { primaryWeight: 1, secondaryWeight: 0, primaryScore, secondaryScore };
+    }
+    if (params.secondaryQuality > params.primaryQuality) {
+      return { primaryWeight: 0, secondaryWeight: 1, primaryScore, secondaryScore };
+    }
+    if (primaryBias > secondaryBias) {
+      return { primaryWeight: 1, secondaryWeight: 0, primaryScore, secondaryScore };
+    }
+    if (secondaryBias > primaryBias) {
+      return { primaryWeight: 0, secondaryWeight: 1, primaryScore, secondaryScore };
+    }
+    return { primaryWeight: 0.5, secondaryWeight: 0.5, primaryScore, secondaryScore };
+  }
+
+  const qualityRatio = Math.log2(
+    (primaryScore + SCORE_EPSILON) / (secondaryScore + SCORE_EPSILON),
+  );
+  const primaryOwnership = smoothstep(-SEAM_FEATHER_LOG2, SEAM_FEATHER_LOG2, qualityRatio);
+  return {
+    primaryWeight: primaryOwnership,
+    secondaryWeight: 1 - primaryOwnership,
+    primaryScore,
+    secondaryScore,
+  };
+}
+
 // --- Visibility-gated multi-origin blend weights ----------------------------
 
 export interface ProjectorBlendInput {
@@ -345,9 +449,16 @@ export interface ProjectorBlendInput {
   /** Omitted => 1 (legacy / non-occlusion paths stay valid). */
   primaryVisibility?: number;
   secondaryVisibility?: number;
-  /** Optional explicit confidence when both visible; defaults to distance confidence. */
+  /**
+   * Optional quality/confidence when both visible.
+   * Defaults to a distance proxy so call sites without explicit quality stay usable;
+   * the live shader uses projectedQualityAt instead — prefer computeProjectedStyleCoverageBlend
+   * for shader-parity checks.
+   */
   primaryConfidence?: number;
   secondaryConfidence?: number;
+  primaryQuality?: number;
+  secondaryQuality?: number;
 }
 
 export interface ProjectorBlendWeights {
@@ -358,33 +469,40 @@ export interface ProjectorBlendWeights {
 }
 
 /**
- * Distance confidence: closer projector wins. Returns a normalized 0..1 weight
- * for the primary when both visible (secondary gets the complement).
+ * Distance confidence: closer projector wins. Soft falloff proxy for tests /
+ * callers that do not supply explicit projection quality.
  */
 export function projectedConfidence(worldPosition: Vec3, origin: Vec3): number {
   const d = length(subtract(worldPosition, origin));
-  // Closer = stronger. Soft falloff so far distances still contribute.
   return 1 / (1 + d * 0.05);
 }
 
+/**
+ * Visibility-gated blend weights using the same quality conflict resolver as the
+ * projected-style shader (via resolveQualityConflictOwnership).
+ */
 export function computeProjectorBlendWeights(params: ProjectorBlendInput): ProjectorBlendWeights {
   const primaryVisibility = params.primaryVisibility ?? 1;
   const secondaryVisibility = params.secondaryOrigin ? (params.secondaryVisibility ?? 1) : 0;
 
   const mode = params.mode ?? 'primary_only';
   const hasSecondary = Boolean(params.secondaryOrigin);
+  const { primaryBias, secondaryBias } = dominanceBiasForBlendMode(mode);
 
   // Single-projector cases.
   if (!hasSecondary) {
     if (mode === 'secondary_only') {
-      return { primary: 0, secondary: 0, bothOccluded: secondaryVisibility < 0.5 };
+      return { primary: 0, secondary: 0, bothOccluded: secondaryVisibility < VISIBILITY_EPSILON };
     }
-    // primary or both with no secondary => primary only.
-    return { primary: primaryVisibility >= 0.5 ? 1 : 0, secondary: 0, bothOccluded: primaryVisibility < 0.5 };
+    return {
+      primary: primaryVisibility >= VISIBILITY_EPSILON ? 1 : 0,
+      secondary: 0,
+      bothOccluded: primaryVisibility < VISIBILITY_EPSILON,
+    };
   }
 
-  const primaryVisible = primaryVisibility >= 0.5;
-  const secondaryVisible = secondaryVisibility >= 0.5;
+  const primaryVisible = primaryVisibility >= VISIBILITY_EPSILON;
+  const secondaryVisible = secondaryVisibility >= VISIBILITY_EPSILON;
 
   if (mode === 'primary_only') {
     return {
@@ -401,41 +519,36 @@ export function computeProjectorBlendWeights(params: ProjectorBlendInput): Proje
     };
   }
 
-  // Dominant modes fill from the other projector when their preferred source
-  // is occluded, then bias quality/confidence ties toward the selected source.
-  if (primaryVisible && !secondaryVisible) {
-    return { primary: 1, secondary: 0, bothOccluded: false };
-  }
-  if (!primaryVisible && secondaryVisible) {
-    return { primary: 0, secondary: 1, bothOccluded: false };
-  }
   if (!primaryVisible && !secondaryVisible) {
     return { primary: 0, secondary: 0, bothOccluded: true };
   }
 
-  const primaryConf = params.primaryConfidence ?? projectedConfidence(params.worldPosition, params.primaryOrigin);
-  const secondaryConf = params.secondaryConfidence ?? projectedConfidence(params.worldPosition, params.secondaryOrigin as Vec3);
-  const total = primaryConf + secondaryConf || 1;
-  let primaryWeight = primaryConf / total;
-  if (mode === 'primary_dominant') {
-    primaryWeight = primaryConf >= secondaryConf
-      ? Math.min(1, 0.55 + primaryConf * 0.55)
-      : primaryConf / total;
-  } else {
-    primaryWeight = secondaryConf >= primaryConf
-      ? Math.max(0, 0.45 - secondaryConf * 0.45)
-      : primaryConf / total;
-  }
+  const primaryQuality = params.primaryQuality
+    ?? params.primaryConfidence
+    ?? projectedConfidence(params.worldPosition, params.primaryOrigin);
+  const secondaryQuality = params.secondaryQuality
+    ?? params.secondaryConfidence
+    ?? projectedConfidence(params.worldPosition, params.secondaryOrigin as Vec3);
+
+  const ownership = resolveQualityConflictOwnership({
+    primaryCoverage: clamp(primaryVisibility, 0, 1),
+    secondaryCoverage: clamp(secondaryVisibility, 0, 1),
+    primaryQuality,
+    secondaryQuality,
+    primaryBias,
+    secondaryBias,
+  });
+
   return {
-    primary: primaryWeight,
-    secondary: 1 - primaryWeight,
+    primary: ownership.primaryWeight,
+    secondary: ownership.secondaryWeight,
     bothOccluded: false,
   };
 }
 
 /**
  * Mirrors the projected-style fragment coverage/quality contract:
- * visibility owns mix-vs-fallback coverage; quality only ranks projectors.
+ * visibility owns mix-vs-fallback coverage; quality decides color ownership.
  */
 export interface ProjectedStyleCoverageBlendInput {
   primaryEnabled: boolean;
@@ -444,8 +557,10 @@ export interface ProjectedStyleCoverageBlendInput {
   secondaryVisibility: number;
   primaryQuality: number;
   secondaryQuality: number;
+  /** Explicit bias multipliers; defaults from blendMode when omitted. */
   primaryDominance?: number;
   secondaryDominance?: number;
+  blendMode?: ProjectorBlendMode;
   projectedOpacity?: number;
   primarySampleRgb: Vec3;
   secondarySampleRgb: Vec3;
@@ -458,6 +573,8 @@ export interface ProjectedStyleCoverageBlendResult {
   coverage: number;
   primaryWeight: number;
   secondaryWeight: number;
+  primaryScore: number;
+  secondaryScore: number;
   mixFactor: number;
   rgb: Vec3;
 }
@@ -465,22 +582,29 @@ export interface ProjectedStyleCoverageBlendResult {
 export function computeProjectedStyleCoverageBlend(
   params: ProjectedStyleCoverageBlendInput,
 ): ProjectedStyleCoverageBlendResult {
-  const primaryDominance = params.primaryDominance ?? 1;
-  const secondaryDominance = params.secondaryDominance ?? 1;
+  const modeBiases = dominanceBiasForBlendMode(params.blendMode);
+  const primaryBias = params.primaryDominance ?? modeBiases.primaryBias;
+  const secondaryBias = params.secondaryDominance ?? modeBiases.secondaryBias;
   const projectedOpacity = clamp(params.projectedOpacity ?? 1, 0, 1);
 
   const primaryCoverage = (params.primaryEnabled ? 1 : 0) * clamp(params.primaryVisibility, 0, 1);
   const secondaryCoverage = (params.secondaryEnabled ? 1 : 0) * clamp(params.secondaryVisibility, 0, 1);
-
-  const primaryWeight = primaryCoverage
-    * (0.001 + (params.primaryQuality * primaryDominance) ** 4);
-  const secondaryWeight = secondaryCoverage
-    * (0.001 + (params.secondaryQuality * secondaryDominance) ** 4);
-  const weightTotal = primaryWeight + secondaryWeight;
   const coverage = Math.max(primaryCoverage, secondaryCoverage);
 
+  const ownership = resolveQualityConflictOwnership({
+    primaryCoverage,
+    secondaryCoverage,
+    primaryQuality: params.primaryQuality,
+    secondaryQuality: params.secondaryQuality,
+    primaryBias,
+    secondaryBias,
+  });
+
+  const { primaryWeight, secondaryWeight, primaryScore, secondaryScore } = ownership;
+  const weightTotal = primaryWeight + secondaryWeight;
+
   let projectedColor: Vec3 = [...params.fallbackRgb];
-  if (weightTotal > 1e-8) {
+  if (weightTotal > SCORE_EPSILON) {
     projectedColor = [
       (params.primarySampleRgb[0] * primaryWeight + params.secondarySampleRgb[0] * secondaryWeight) / weightTotal,
       (params.primarySampleRgb[1] * primaryWeight + params.secondarySampleRgb[1] * secondaryWeight) / weightTotal,
@@ -505,6 +629,8 @@ export function computeProjectedStyleCoverageBlend(
     coverage,
     primaryWeight,
     secondaryWeight,
+    primaryScore,
+    secondaryScore,
     mixFactor,
     rgb,
   };
