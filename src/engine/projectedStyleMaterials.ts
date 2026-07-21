@@ -345,7 +345,7 @@ ${PROJECTED_STYLE_GLSL.occlusionDepthHelpers}
 
 ${PROJECTED_STYLE_GLSL.occlusionVisibility}
 
-float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
+float projectedLogQualityAt(vec3 worldPos, vec3 origin, float texelConstant, float coverage) {
   vec3 offset = worldPos - origin;
   float distanceSquared = max(dot(offset, offset), 1e-6);
   vec3 direction = normalize(offset);
@@ -354,10 +354,12 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
   // surfaces; visible fragments use the same absolute face-angle quality as
   // intentionally double-sided coverage geometry.
   float facing = abs(dot(geometricNormal, -direction));
-  float angleQuality = smoothstep(0.15, 0.55, facing);
-  float texelDensity = texelConstant * facing / distanceSquared;
-  float resolutionQuality = smoothstep(128.0, 1024.0, texelDensity);
-  return angleQuality * resolutionQuality;
+  // Unsaturated density — do NOT smoothstep into 0..1 before comparing projectors.
+  float texelDensity = texelConstant * max(facing, 0.001) / distanceSquared;
+  float angleQuality = max(smoothstep(0.15, 0.55, facing), 0.001);
+  float anglePenalty = log2(angleQuality);
+  float visibilityPenalty = log2(max(coverage, 0.001));
+  return log2(max(texelDensity, 0.001)) + anglePenalty + visibilityPenalty;
 }
 `,
       )
@@ -439,50 +441,105 @@ float projectedQualityAt(vec3 worldPos, vec3 origin, float texelConstant) {
   float primaryEnabled = projectedBlendMode == 1 ? 0.0 : 1.0;
   float secondaryEnabled = projectedBlendMode == 0 ? 0.0 : hasSecondary;
 
-  float primaryQuality = projectedQualityAt(
-    vProjectedWorldPos,
-    projectedPanoOrigin,
-    projectedPrimaryTexelConstant
-  );
-  float secondaryQuality = hasSecondary > 0.5
-    ? projectedQualityAt(vProjectedWorldPos, projectedSecondaryOrigin, projectedSecondaryTexelConstant)
-    : 0.0;
+  // Keep named and mirrored with projectedStyleMath.ts.
+  const float DOMINANCE_BIAS = 1.04;
+  const float SEAM_FEATHER_LOG2 = 0.30;
+  const float SCORE_EPSILON = 1e-6;
+  const float VISIBILITY_EPSILON = 0.001;
+  const float DENSITY_EPSILON = 0.001;
 
-  float primaryDominance = projectedBlendMode == 2 ? 1.15 : 1.0;
-  float secondaryDominance = projectedBlendMode == 3 ? 1.15 : 1.0;
+  float primaryBias = projectedBlendMode == 2 ? DOMINANCE_BIAS : 1.0;
+  float secondaryBias = projectedBlendMode == 3 ? DOMINANCE_BIAS : 1.0;
 
-  // Occlusion visibility owns projection coverage (opacity vs fallback).
-  // Projection quality only ranks/weights available projectors.
+  // Occlusion visibility owns mix-vs-fallback coverage.
+  // Relative log density decides which panorama supplies color (winner-takes-most).
   float primaryCoverage = primaryEnabled * primaryVisibility;
   float secondaryCoverage = secondaryEnabled * secondaryVisibility;
-
-  float primaryWeight = primaryCoverage
-    * (0.001 + pow(primaryQuality * primaryDominance, 4.0));
-  float secondaryWeight = secondaryCoverage
-    * (0.001 + pow(secondaryQuality * secondaryDominance, 4.0));
-
-  float weightTotal = primaryWeight + secondaryWeight;
   float coverage = max(primaryCoverage, secondaryCoverage);
 
-  // --- Coverage diagnostic (four-state: red/cyan/magenta/white) ---
-  // Visualize projector visibility; orange marks visible-but-poor quality.
+  float primaryVisible = step(VISIBILITY_EPSILON, primaryCoverage);
+  float secondaryVisible = step(VISIBILITY_EPSILON, secondaryCoverage);
+
+  float primaryLogQuality = projectedLogQualityAt(
+    vProjectedWorldPos,
+    projectedPanoOrigin,
+    projectedPrimaryTexelConstant,
+    max(primaryCoverage, DENSITY_EPSILON)
+  );
+  float secondaryLogQuality = hasSecondary > 0.5
+    ? projectedLogQualityAt(
+        vProjectedWorldPos,
+        projectedSecondaryOrigin,
+        projectedSecondaryTexelConstant,
+        max(secondaryCoverage, DENSITY_EPSILON)
+      )
+    : 0.0;
+
+  // Coverage-aware low ranks for the near-useless safety branch.
+  // Never compare unsaturated "raw quality" alone — coverage must participate.
+  float primaryLowRank = primaryCoverage;
+  float secondaryLowRank = secondaryCoverage;
+
+  float primaryWeight = 0.0;
+  float secondaryWeight = 0.0;
+
+  if (primaryVisible > 0.5 && secondaryVisible < 0.5) {
+    primaryWeight = 1.0;
+  } else if (primaryVisible < 0.5 && secondaryVisible > 0.5) {
+    secondaryWeight = 1.0;
+  } else if (primaryVisible > 0.5 && secondaryVisible > 0.5) {
+    // Safety net: both barely visible — prefer coverage, never raw quality alone.
+    if (primaryCoverage <= VISIBILITY_EPSILON * 2.0
+        && secondaryCoverage <= VISIBILITY_EPSILON * 2.0) {
+      if (primaryCoverage > secondaryCoverage * 1.5) {
+        primaryWeight = 1.0;
+      } else if (secondaryCoverage > primaryCoverage * 1.5) {
+        secondaryWeight = 1.0;
+      } else if (primaryLowRank > secondaryLowRank) {
+        primaryWeight = 1.0;
+      } else if (secondaryLowRank > primaryLowRank) {
+        secondaryWeight = 1.0;
+      } else if (primaryBias > secondaryBias) {
+        primaryWeight = 1.0;
+      } else if (secondaryBias > primaryBias) {
+        secondaryWeight = 1.0;
+      } else {
+        primaryWeight = 0.5;
+        secondaryWeight = 0.5;
+      }
+    } else {
+      float qualityDelta =
+          (primaryLogQuality + log2(max(primaryBias, DENSITY_EPSILON)))
+        - (secondaryLogQuality + log2(max(secondaryBias, DENSITY_EPSILON)));
+      float primaryOwnership = smoothstep(
+        -SEAM_FEATHER_LOG2,
+        SEAM_FEATHER_LOG2,
+        qualityDelta
+      );
+      primaryWeight = primaryOwnership;
+      secondaryWeight = 1.0 - primaryOwnership;
+    }
+  }
+
+  float weightTotal = primaryWeight + secondaryWeight;
+
+  // Ownership diagnostic: cyan primary / magenta secondary / white feather / red none.
   if (projectedDebugCoverage == 1) {
-    float p = primaryCoverage;
-    float s = secondaryCoverage;
-    float qualityMax = max(
-      primaryCoverage * primaryQuality,
-      secondaryCoverage * secondaryQuality
-    );
-    float visibleButPoor = max(p, s) * (1.0 - step(0.001, qualityMax));
-    vec3 cov =
-        vec3(1.0, 0.0, 0.0) * (1.0 - p) * (1.0 - s) // red: neither
-      + vec3(0.0, 1.0, 1.0) * p * (1.0 - s)         // cyan: primary only
-      + vec3(1.0, 0.0, 1.0) * (1.0 - p) * s          // magenta: secondary only
-      + vec3(1.0) * p * s;                           // white: both
-    diffuseColor.rgb = mix(cov, vec3(1.0, 0.55, 0.0), visibleButPoor); // orange: poor quality
+    if (coverage <= VISIBILITY_EPSILON) {
+      diffuseColor.rgb = vec3(1.0, 0.0, 0.0);
+    } else if (weightTotal <= SCORE_EPSILON) {
+      diffuseColor.rgb = vec3(1.0, 0.0, 0.0);
+    } else {
+      float ownership = primaryWeight / max(weightTotal, SCORE_EPSILON);
+      float feather = 1.0 - smoothstep(0.05, 0.45, abs(ownership - 0.5));
+      vec3 owned = mix(vec3(1.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), ownership);
+      diffuseColor.rgb = mix(owned, vec3(1.0), feather);
+    }
   } else {
-    vec3 projectedColor = (primarySample * primaryWeight + secondarySample * secondaryWeight)
-      / max(weightTotal, 0.0001);
+    vec3 projectedColor = weightTotal > SCORE_EPSILON
+      ? (primarySample * primaryWeight + secondarySample * secondaryWeight)
+        / max(weightTotal, SCORE_EPSILON)
+      : fallbackAlbedo;
     // Soft occlusion silhouettes still blend; fully occluded → fallback.
     // False self-occlusion strips are prevented in sampleProjectorVisibility.
     vec3 resultColor = coverage > 0.0001
@@ -513,7 +570,7 @@ if (projectedLighting <= 0.001) {
   };
 
   material.customProgramCacheKey = () => (
-    `projected-style-v8:${params.settings.fallbackMode}:`
+    `projected-style-v10:${params.settings.fallbackMode}:`
     + `${params.disposable ? 'd' : 's'}:`
     + `${useOcclusion ? 'o' : 'n'}:`
     + `${useSecondary ? 's' : 'p'}:`

@@ -10,8 +10,10 @@ import { isEligibleProjectedStylePano, listEligibleProjectedStylePanos } from '.
 import { length, subtract } from './sync';
 
 /**
- * Multi-origin projector blend modes (depth-free approximation).
- * "Dominant + fill" uses inverse-distance weights biased toward the dominant origin.
+ * Multi-origin projector blend modes.
+ * Live projection uses quality-based winner-takes-most ownership
+ * (see resolveQualityConflictOwnership in projectedStyleMath). Preference modes
+ * only nudge near-equal seams; they are not broad distance dominance.
  */
 export type ProjectorBlendMode =
   | 'primary_only'
@@ -22,8 +24,8 @@ export type ProjectorBlendMode =
 export const PROJECTOR_BLEND_MODE_LABELS: Record<ProjectorBlendMode, string> = {
   primary_only: 'Only primary panorama',
   secondary_only: 'Only secondary panorama',
-  primary_dominant: 'Primary dominant · secondary fill far from primary',
-  secondary_dominant: 'Secondary dominant · primary fill far from secondary',
+  primary_dominant: 'Primary preferred in close overlaps',
+  secondary_dominant: 'Secondary preferred in close overlaps',
 };
 
 export const DEFAULT_PROJECTOR_BLEND_MODE: ProjectorBlendMode = 'primary_only';
@@ -186,8 +188,9 @@ export function projectorConfidence(
 }
 
 /**
- * Blend weights for primary/secondary projectors.
- * Returns wPrimary in [0,1]; secondary weight is 1 - wPrimary when both active.
+ * Coarse inverse-distance blend weights for planning / interaction tests.
+ * Not the live projected-style shader contract — that uses quality conflict
+ * resolution in projectedStyleMath.computeProjectedStyleCoverageBlend.
  */
 export function computeProjectorBlendWeights(params: {
   worldPosition: Vec3;
