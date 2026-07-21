@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   LocationProject,
+  SceneObject,
   SceneObjectType,
   Vec3,
 } from '../domain/types';
@@ -39,22 +40,33 @@ export interface ProjectorOcclusionSet {
   dispose(): void;
 }
 
+/**
+ * People are staging references, not set geometry. They remain visible in the
+ * projected viewport with their clay material, but must not cast projection
+ * occlusion shadows or trigger cubemap regeneration when repositioned.
+ */
+export function shouldContributeProjectionOcclusion(
+  object: Pick<SceneObject, 'type' | 'visible'>,
+): boolean {
+  if (!object.visible) return false;
+  return object.type !== 'sun_marker' && object.type !== 'human_dummy';
+}
+
 function cloneAsCubeTexture(target: THREE.WebGLCubeRenderTarget): THREE.CubeTexture {
   // The cube render target's texture IS a CubeTexture subclass in three.js.
   return target.texture as unknown as THREE.CubeTexture;
 }
 
 /**
- * Build an occluder scene that contains only solid, opaque geometry from the
- * current project: architecture, environment, imported models, and the human
- * dummy. Editor helpers (grid, pano origin, landmarks, shot frustums, sun
- * marker) are excluded so they never cast occlusion shadows.
+ * Build an occluder scene that contains only solid, opaque set geometry from
+ * the current project: architecture, environment, and imported models. Editor
+ * helpers and people are excluded so they never cast projection shadows.
  */
 function buildOccluderScene(
   project: LocationProject,
-  hiddenObjectTypes: SceneObjectType[] = ['sun_marker'],
+  hiddenObjectTypes: SceneObjectType[] = [],
 ): THREE.Scene {
-  const hiddenTypes = new Set<string>([...hiddenObjectTypes, 'sun_marker']);
+  const hiddenTypes = new Set<string>(hiddenObjectTypes);
   // Geometry-only scene: no background, no environment, no grid, no lights,
   // no helpers, no frustums, no pano origin. The depth cubemap must contain
   // only solid occluder meshes; any other object would pollute the packed
@@ -64,7 +76,7 @@ function buildOccluderScene(
   scene.environment = null;
 
   for (const object of project.scene.objects) {
-    if (!object.visible) continue;
+    if (!shouldContributeProjectionOcclusion(object)) continue;
     if (hiddenTypes.has(object.type)) continue;
     const mesh = createObject3D(object, false, 'light', project.assets);
     mesh.userData.sceneObjectId = object.id;
@@ -234,9 +246,9 @@ function fnv1aHash(input: string): string {
 }
 
 /**
- * Deterministic key covering only geometry + projector origin. Color/exposure/
- * camera/selections do NOT affect occlusion, so maps do not regenerate on those
- * changes.
+ * Deterministic key covering only projection-occluding geometry + projector
+ * origin. Color/exposure/camera/selections and people do NOT affect occlusion,
+ * so maps do not regenerate on those changes.
  */
 export function computeProjectorOcclusionKey(
   project: LocationProject,
@@ -244,7 +256,7 @@ export function computeProjectorOcclusionKey(
   secondaryOrigin?: Vec3,
 ): string {
   const objects = [...project.scene.objects]
-    .filter((object) => object.visible)
+    .filter(shouldContributeProjectionOcclusion)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   const parts: string[] = [];
