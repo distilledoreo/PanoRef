@@ -1,0 +1,82 @@
+name: Verify one-shot object focus
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  verify-focus-behavior:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/focused-translate-and-human-projection
+          fetch-depth: 0
+
+      - name: Normalize focus effect formatting
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/components/workspaces/BuildWorkspace.tsx')
+          source = path.read_text()
+          old = """
+// Framing is a one-shot camera command, not an ongoing attachment to the
+// selected objects. Clear the request after the viewport has consumed the
+// committed render so later object edits cannot recenter the orbit target.
+useEffect(() => {
+  if (!frameRequest) return;
+  const animationFrame = window.requestAnimationFrame(() => {
+    setFrameRequest((current) => (current === frameRequest ? 0 : current));
+  });
+  return () => window.cancelAnimationFrame(animationFrame);
+}, [frameRequest]);
+"""
+          new = """
+  // Framing is a one-shot camera command, not an ongoing attachment to the
+  // selected objects. Clear the request after the viewport has consumed the
+  // committed render so later object edits cannot recenter the orbit target.
+  useEffect(() => {
+    if (!frameRequest) return;
+    const animationFrame = window.requestAnimationFrame(() => {
+      setFrameRequest((current) => (current === frameRequest ? 0 : current));
+    });
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [frameRequest]);
+"""
+          if old not in source:
+              raise SystemExit('Could not find the one-shot focus effect')
+          path.write_text(source.replace(old, new, 1))
+          Path('.github/workflows/verify-one-shot-focus.yml').unlink()
+          PY
+
+      - name: Commit formatting cleanup
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/workspaces/BuildWorkspace.tsx .github/workflows/verify-one-shot-focus.yml
+          git commit -m "Finalize one-shot object focus behavior"
+          git push origin HEAD:fix/focused-translate-and-human-projection
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Run focused regression tests
+        run: npx vitest run tests/focusedTranslateAndHumanProjection.test.ts
+
+      - name: Build
+        run: npm run build
