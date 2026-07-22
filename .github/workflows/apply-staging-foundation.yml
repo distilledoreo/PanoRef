@@ -1,12 +1,13 @@
 name: Apply staging foundation
 
 on:
-  push:
-    branches:
-      - feature/per-shot-staging-foundation
   pull_request:
     branches:
       - main
+
+concurrency:
+  group: staging-foundation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -40,7 +41,10 @@ jobs:
       - name: Publish test failure
         if: failure()
         run: |
-          cp /tmp/vitest.log staging-test-failure.log
+          cp /tmp/vitest.log /tmp/staging-test-failure.log
+          git fetch origin feature/per-shot-staging-foundation
+          git reset --hard origin/feature/per-shot-staging-foundation
+          cp /tmp/staging-test-failure.log staging-test-failure.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add staging-test-failure.log
