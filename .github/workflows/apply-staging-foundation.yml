@@ -37,6 +37,15 @@ jobs:
             exit 1
           }
           tail -n 30 /tmp/vitest.log
+      - name: Publish test failure
+        if: failure()
+        run: |
+          cp /tmp/vitest.log staging-test-failure.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add staging-test-failure.log
+          git commit -m "Record staging test failure"
+          git push origin HEAD:feature/per-shot-staging-foundation
       - name: Commit verified implementation
         run: |
           rm scripts/apply-per-shot-staging-foundation.py
