@@ -27,6 +27,7 @@ jobs:
           cache: npm
       - name: Apply implementation
         run: |
+          python3 scripts/fix-staging-ui-patch.py
           python3 scripts/apply-staging-ui-clean-plates.py > /tmp/apply.log 2>&1 || {
             cat /tmp/apply.log
             exit 1
@@ -56,6 +57,7 @@ jobs:
       - name: Commit verified implementation
         run: |
           rm scripts/apply-staging-ui-clean-plates.py
+          rm scripts/fix-staging-ui-patch.py
           rm .github/workflows/apply-staging-ui-clean-plates.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
