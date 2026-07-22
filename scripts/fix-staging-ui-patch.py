@@ -31,4 +31,18 @@ if old not in text:
     raise SystemExit('export workspace type import patch block not found')
 text = text.replace(old, new, 1)
 
+old = '''replace_once(
+    'src/components/workspaces/ShotsWorkspace.tsx',
+    "  const [cameraReseedGeneration, setCameraReseedGeneration] = useState(0);",
+    "  const [cameraReseedGeneration, setCameraReseedGeneration] = useState(0);\\n  const [stagingMode, setStagingMode] = useState(false);\\n  const [stagingGizmoMode, setStagingGizmoMode] = useState<GizmoMode>('translate');\\n  const [stagedObjectId, setStagedObjectId] = useState<string>();\\n  const [showPeopleInViewport, setShowPeopleInViewport] = useState(true);",
+)'''
+new = '''replace_once(
+    'src/components/workspaces/ShotsWorkspace.tsx',
+    "  const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];\\n",
+    "  const [stagingMode, setStagingMode] = useState(false);\\n  const [stagingGizmoMode, setStagingGizmoMode] = useState<GizmoMode>('translate');\\n  const [stagedObjectId, setStagedObjectId] = useState<string>();\\n  const [showPeopleInViewport, setShowPeopleInViewport] = useState(true);\\n  const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];\\n",
+)'''
+if old not in text:
+    raise SystemExit('staging hook patch block not found')
+text = text.replace(old, new, 1)
+
 path.write_text(text, encoding='utf-8')
