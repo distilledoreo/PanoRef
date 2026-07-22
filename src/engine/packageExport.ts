@@ -23,6 +23,7 @@ import {
   renderViewportClay,
   renderViewportProjected,
 } from './renderers';
+import { resolveProjectForShot } from './shotSceneState';
 
 export { downloadBlob };
 
@@ -385,6 +386,7 @@ async function appendShotPackageToZip(
   },
 ): Promise<string[]> {
   const { shotIndex, tracker, signal, rootFolder } = args;
+  const shotProject = resolveProjectForShot(project, shot);
   const emit = (
     phase: PackageExportPhase,
     message: string,
@@ -408,7 +410,7 @@ async function appendShotPackageToZip(
   throwIfAborted(signal);
   emit('preparing', `Preparing ${getShotExportProgressLabel(shot)}…`, { indeterminate: true });
 
-  const manifestPreview = createShotPackageManifest(project, shot, rootFolder);
+  const manifestPreview = createShotPackageManifest(shotProject, shot, rootFolder);
   const resolvedRootFolder = manifestPreview.rootFolder;
   const linkedPano = project.panoRefs.find((pano) => pano.id === shot.linkedPanoId);
   const canonicalPano = project.panoRefs.find((pano) => pano.isCanonical);
@@ -424,18 +426,18 @@ async function appendShotPackageToZip(
   if (shot.exportSettings.includeViewport) {
     throwIfAborted(signal);
     emit('rendering', 'Rendering clay viewport…', { indeterminate: true });
-    const viewport = await renderShotFrame(project, shot);
+    const viewport = await renderShotFrame(shotProject, shot);
     addDataUrl(zip, `${resolvedRootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
     finishUnit('rendering', 'Clay viewport ready');
   }
 
   // Dual clay + projected when requested and a styled projector exists.
   // Soft-skip projected when no eligible pano so clay-only packages still succeed.
-  if (shot.exportSettings.includeProjectedViewport && canUseProjectedAppearance(project)) {
+  if (shot.exportSettings.includeProjectedViewport && canUseProjectedAppearance(shotProject)) {
     throwIfAborted(signal);
     emit('rendering', 'Rendering projected viewport…', { indeterminate: true });
     try {
-      const projected = await renderShotProjectedFrame(project, shot);
+      const projected = await renderShotProjectedFrame(shotProject, shot);
       addDataUrl(zip, `${resolvedRootFolder}/inputs/viewport_projected.png`, projected.dataUrl);
       finishUnit('rendering', 'Projected viewport ready');
     } catch (error) {
@@ -465,7 +467,7 @@ async function appendShotPackageToZip(
       throwIfAborted(signal);
       emit('encoding', 'Encoding clay camera move…', { indeterminate: true });
       try {
-        const video = await renderShotCameraMoveMp4(project, shot, {
+        const video = await renderShotCameraMoveMp4(shotProject, shot, {
           mode: 'render',
           resolutionPreset: '1080p',
           frameRate: 30,
@@ -503,13 +505,13 @@ async function appendShotPackageToZip(
 
   if (
     shot.exportSettings.includeProjectedCameraMoveVideo
-    && canUseProjectedAppearance(project)
+    && canUseProjectedAppearance(shotProject)
     && hasRenderableCameraMove(shot.cameraKeyframes)
   ) {
     throwIfAborted(signal);
     emit('encoding', 'Encoding projected camera move…', { indeterminate: true });
     try {
-      const video = await renderShotCameraMoveMp4(project, shot, {
+      const video = await renderShotCameraMoveMp4(shotProject, shot, {
         mode: 'render',
         resolutionPreset: '1080p',
         frameRate: 30,
@@ -555,7 +557,7 @@ async function appendShotPackageToZip(
         { unitFraction: 0, indeterminate: true },
       );
       const clay = await renderViewportClay(
-        project,
+        shotProject,
         frame.camera,
         shot.exportSettings.width,
         shot.exportSettings.height,
@@ -570,7 +572,7 @@ async function appendShotPackageToZip(
 
   const projectedMoveFrames = (
     shot.exportSettings.includeProjectedCameraMoveReferenceFrames
-    && canUseProjectedAppearance(project)
+    && canUseProjectedAppearance(shotProject)
   )
     ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
     : [];
@@ -585,7 +587,7 @@ async function appendShotPackageToZip(
       );
       try {
         const projected = await renderViewportProjected(
-          project,
+          shotProject,
           frame.camera,
           shot.exportSettings.width,
           shot.exportSettings.height,
@@ -680,7 +682,7 @@ async function appendShotPackageToZip(
   if (shot.exportSettings.includeMetadata) {
     throwIfAborted(signal);
     emit('packaging', 'Writing metadata…');
-    const metadata = buildShotMetadata(project, shot, linkedPano);
+    const metadata = buildShotMetadata(shotProject, shot, linkedPano);
     zip.file(`${resolvedRootFolder}/metadata/shot.json`, JSON.stringify(shot, null, 2));
     zip.file(`${resolvedRootFolder}/metadata/camera.json`, JSON.stringify(shot.camera, null, 2));
     if (shot.cameraKeyframes.length > 0) {
@@ -697,7 +699,7 @@ async function appendShotPackageToZip(
   if (shot.exportSettings.includePrompt) {
     throwIfAborted(signal);
     emit('packaging', 'Writing prompts…');
-    zip.file(`${resolvedRootFolder}/prompts/image_gen_prompt.txt`, generateImagePrompt(project, shot));
+    zip.file(`${resolvedRootFolder}/prompts/image_gen_prompt.txt`, generateImagePrompt(shotProject, shot));
     zip.file(`${resolvedRootFolder}/prompts/video_gen_prompt.txt`, generateVideoPrompt(shot));
     zip.file(`${resolvedRootFolder}/prompts/negative_prompt.txt`, shot.promptOverrides.negativePrompt || '');
     finishUnit('packaging', 'Prompts written');
@@ -705,7 +707,7 @@ async function appendShotPackageToZip(
 
   throwIfAborted(signal);
   emit('packaging', 'Writing manifest…');
-  const manifest = createShotPackageManifest(project, shot, resolvedRootFolder);
+  const manifest = createShotPackageManifest(shotProject, shot, resolvedRootFolder);
   zip.file(`${resolvedRootFolder}/manifest.json`, JSON.stringify(manifest, null, 2));
   finishUnit('packaging', `${getShotExportProgressLabel(shot)} packaged`);
   return manifest.files.map((file) => file.path);
