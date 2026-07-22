@@ -31,7 +31,12 @@ jobs:
       - name: Type-check
         run: npm run lint
       - name: Test
-        run: npm test
+        run: |
+          npm test > /tmp/vitest.log 2>&1 || {
+            tail -n 120 /tmp/vitest.log
+            exit 1
+          }
+          tail -n 30 /tmp/vitest.log
       - name: Commit verified implementation
         run: |
           rm scripts/apply-per-shot-staging-foundation.py
