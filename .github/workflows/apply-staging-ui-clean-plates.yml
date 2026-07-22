@@ -1,0 +1,58 @@
+name: Apply staging UI and clean plates
+
+on:
+  pull_request:
+    branches:
+      - feature/per-shot-staging-foundation
+
+concurrency:
+  group: staging-ui-clean-plates-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/per-shot-staging-ui-clean-plates
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply implementation
+        run: python3 scripts/apply-staging-ui-clean-plates.py
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Type-check
+        run: npm run lint
+      - name: Test
+        run: |
+          npm test -- --reporter=verbose > /tmp/vitest.log 2>&1 || {
+            tail -n 180 /tmp/vitest.log
+            exit 1
+          }
+          tail -n 30 /tmp/vitest.log
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-ui-clean-plate-diagnostics
+          path: /tmp/vitest.log
+          if-no-files-found: ignore
+      - name: Commit verified implementation
+        run: |
+          rm scripts/apply-staging-ui-clean-plates.py
+          rm .github/workflows/apply-staging-ui-clean-plates.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add shot staging controls and clean plate exports"
+          git push origin HEAD:feature/per-shot-staging-ui-clean-plates
