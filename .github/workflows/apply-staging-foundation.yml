@@ -33,23 +33,18 @@ jobs:
         run: npm run lint
       - name: Test
         run: |
-          npm test > /tmp/vitest.log 2>&1 || {
-            tail -n 120 /tmp/vitest.log
+          npm test -- --reporter=verbose > /tmp/vitest.log 2>&1 || {
+            tail -n 160 /tmp/vitest.log
             exit 1
           }
           tail -n 30 /tmp/vitest.log
-      - name: Publish test failure
+      - name: Upload test diagnostics
         if: failure()
-        run: |
-          cp /tmp/vitest.log /tmp/staging-test-failure.log
-          git fetch origin feature/per-shot-staging-foundation
-          git reset --hard origin/feature/per-shot-staging-foundation
-          cp /tmp/staging-test-failure.log staging-test-failure.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add staging-test-failure.log
-          git commit -m "Record staging test failure"
-          git push origin HEAD:feature/per-shot-staging-foundation
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-test-diagnostics
+          path: /tmp/vitest.log
+          if-no-files-found: error
       - name: Commit verified implementation
         run: |
           rm scripts/apply-per-shot-staging-foundation.py
