@@ -153,6 +153,7 @@ export function normalizeProjectSettings(settings?: Partial<ProjectSettings>): P
 export const defaultShotExportSettings: ShotExportSettings = {
   width: DEFAULT_SHOT_WIDTH,
   height: DEFAULT_SHOT_HEIGHT,
+  peopleExportMode: 'with_people',
   includeViewport: true,
   /** Include projected stills alongside clay when a styled pano is available. */
   includeProjectedViewport: true,

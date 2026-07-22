@@ -145,6 +145,7 @@ export function SceneViewport({
   freeCameraActive = false,
   renderDistance = DEFAULT_BUILD_RENDER_DISTANCE,
   appearance = 'clay',
+  objectEditingActive = false,
   onFreeCameraActiveChange,
   shotFraming,
   onSelectObject,
@@ -180,6 +181,8 @@ export function SceneViewport({
   renderDistance?: number;
   /** Clay keeps existing materials; Projected applies world-space equirect styling when available. */
   appearance?: ViewportAppearanceMode;
+  /** Allow object picking/gizmos while a landed shot camera remains active. */
+  objectEditingActive?: boolean;
   onFreeCameraActiveChange?: (active: boolean) => void;
   shotFraming?: {
     shotId: string;
@@ -812,7 +815,7 @@ export function SceneViewport({
         return;
       }
 
-      if (framing) return;
+      if (framing && !objectEditingActive) return;
 
       if (freeCameraActiveRef.current && event.button === 0) {
         event.preventDefault();

@@ -4,6 +4,7 @@ import { getCameraMoveReferenceFrames, hasRenderableCameraMove } from './cameraK
 import { CAMERA_MOVE_CUBEMAP_FACES } from './cameraMoveCubemap';
 import { canUseProjectedAppearance } from './projectedStyle';
 import { generateImagePrompt, generateVideoPrompt } from './prompts';
+import { getPeopleRenderVariants, getPeopleVariantPath } from './peopleExport';
 
 export interface ShotPackageManifest {
   rootFolder: string;
@@ -49,13 +50,27 @@ export function createShotPackageManifest(
     shot.exportSettings.includeFullPano && (canonical || linkedPano),
   );
   const files: ShotPackageManifest['files'] = [];
+  const peopleMode = shot.exportSettings.peopleExportMode;
+  const peopleVariants = getPeopleRenderVariants(peopleMode);
 
   if (shot.exportSettings.includeViewport) {
-    files.push({ path: `${rootFolder}/inputs/viewport_clay.png`, kind: 'image', required: true });
+    for (const variant of peopleVariants) {
+      files.push({
+        path: getPeopleVariantPath(`${rootFolder}/inputs/viewport_clay.png`, variant, peopleMode),
+        kind: 'image',
+        required: true,
+      });
+    }
   }
   // Only list projected files when packaging will actually write them.
   if (shot.exportSettings.includeProjectedViewport && canUseProjectedAppearance(project)) {
-    files.push({ path: `${rootFolder}/inputs/viewport_projected.png`, kind: 'image', required: false });
+    for (const variant of peopleVariants) {
+      files.push({
+        path: getPeopleVariantPath(`${rootFolder}/inputs/viewport_projected.png`, variant, peopleMode),
+        kind: 'image',
+        required: false,
+      });
+    }
   }
   if (shot.exportSettings.includePanoCrop && linkedPano && shot.panoCrop) {
     files.push({ path: `${rootFolder}/inputs/pano_crop.png`, kind: 'image', required: true });
@@ -80,17 +95,36 @@ export function createShotPackageManifest(
     shot.exportSettings.includeCameraMoveVideo
     && (shot.assets.cameraMoveVideoAssetId || hasRenderableCameraMove(shot.cameraKeyframes))
   ) {
-    files.push({ path: `${rootFolder}/inputs/viewport_clay_motion.mp4`, kind: 'video', required: false });
+    for (const variant of peopleVariants) {
+      if (variant === 'clean_plate' && !hasRenderableCameraMove(shot.cameraKeyframes)) continue;
+      files.push({
+        path: getPeopleVariantPath(`${rootFolder}/inputs/viewport_clay_motion.mp4`, variant, peopleMode),
+        kind: 'video',
+        required: false,
+      });
+    }
   }
   if (
     shot.exportSettings.includeProjectedCameraMoveVideo
     && canUseProjectedAppearance(project)
     && hasRenderableCameraMove(shot.cameraKeyframes)
   ) {
-    files.push({ path: `${rootFolder}/inputs/viewport_projected_motion.mp4`, kind: 'video', required: false });
+    for (const variant of peopleVariants) {
+      files.push({
+        path: getPeopleVariantPath(`${rootFolder}/inputs/viewport_projected_motion.mp4`, variant, peopleMode),
+        kind: 'video',
+        required: false,
+      });
+    }
   }
   for (const frame of cameraMoveReferenceFrames) {
-    files.push({ path: `${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, kind: 'image', required: false });
+    for (const variant of peopleVariants) {
+      files.push({
+        path: getPeopleVariantPath(`${rootFolder}/inputs/camera_move/clay_${frame.id}.png`, variant, peopleMode),
+        kind: 'image',
+        required: false,
+      });
+    }
   }
   const projectedMoveFrames = (
     shot.exportSettings.includeProjectedCameraMoveReferenceFrames
@@ -99,7 +133,13 @@ export function createShotPackageManifest(
     ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
     : [];
   for (const frame of projectedMoveFrames) {
-    files.push({ path: `${rootFolder}/inputs/camera_move/projected_${frame.id}.png`, kind: 'image', required: false });
+    for (const variant of peopleVariants) {
+      files.push({
+        path: getPeopleVariantPath(`${rootFolder}/inputs/camera_move/projected_${frame.id}.png`, variant, peopleMode),
+        kind: 'image',
+        required: false,
+      });
+    }
   }
   if (shot.exportSettings.includeMetadata) {
     files.push({ path: `${rootFolder}/metadata/shot.json`, kind: 'json', required: true });

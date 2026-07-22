@@ -165,9 +165,13 @@ export interface PanoCropSettings {
   height: number;
 }
 
+export type PeopleExportMode = 'with_people' | 'clean_plate' | 'both';
+
 export interface ShotExportSettings {
   width: number;
   height: number;
+  /** Whether shot renders include staged people, a clean plate, or both. */
+  peopleExportMode?: PeopleExportMode;
   includeViewport: boolean;
   /** Optional projected-style still matching the clay viewport camera. */
   includeProjectedViewport?: boolean;

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { PeopleExportMode } from '../../domain/types';
 import { Archive, Check, Download, FileJson, FolderArchive, Settings, X } from 'lucide-react';
 import { getShotDisplayName, getShotPrimaryLabel } from '../../domain/shotIdentity';
 import { getShotExportProgressLabel } from '../../engine/exportNaming';
@@ -13,7 +14,7 @@ import {
 } from '../../engine/packageExport';
 import { getExportSelectionWarnings, getShotWarnings, shouldShowMissingLandmarkPromptNote } from '../../engine/warnings';
 import { useContinuityStore } from '../../state/useContinuityStore';
-import { Field, IconButton, TextInput } from '../common/Field';
+import { Field, IconButton, Select, TextInput } from '../common/Field';
 import { PrecisionDrawer } from '../common/PrecisionDrawer';
 import { PrimaryCTA } from '../common/PrimaryCTA';
 import { ShotThumbnail } from '../common/ShotThumbnail';
@@ -495,6 +496,22 @@ export function ExportWorkspace() {
                 />
               </Field>
             </div>
+            <Field label="People output" hint="Both adds matched with-people and clean-plate images/videos.">
+              <Select
+                value={selectedShot.exportSettings.peopleExportMode ?? 'with_people'}
+                onChange={(event) => updateShot(selectedShot.id, {
+                  exportSettings: {
+                    ...selectedShot.exportSettings,
+                    peopleExportMode: event.target.value as PeopleExportMode,
+                  },
+                })}
+                data-export-people-mode
+              >
+                <option value="with_people">With people</option>
+                <option value="clean_plate">Clean plate</option>
+                <option value="both">Both</option>
+              </Select>
+            </Field>
             {([
               ['includeViewport', 'Viewport clay render'],
               ['includeProjectedViewport', 'Viewport projected render (with clay when available)'],
