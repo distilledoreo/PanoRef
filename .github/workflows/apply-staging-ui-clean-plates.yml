@@ -37,7 +37,11 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
       - name: Type-check
-        run: npm run lint
+        run: |
+          npm run lint > /tmp/tsc.log 2>&1 || {
+            cat /tmp/tsc.log
+            exit 1
+          }
       - name: Test
         run: |
           npm test -- --reporter=verbose > /tmp/vitest.log 2>&1 || {
@@ -52,6 +56,7 @@ jobs:
           name: staging-ui-clean-plate-diagnostics
           path: |
             /tmp/apply.log
+            /tmp/tsc.log
             /tmp/vitest.log
           if-no-files-found: error
       - name: Commit verified implementation
