@@ -33,6 +33,64 @@ describe('ShotMediaModal', () => {
     expect(html).toContain('VIEWPORT');
     expect(html).toContain('<img');
     expect(html).not.toContain('<video');
+    expect(html).not.toContain('data-shot-still-view-toggles');
+  });
+
+  it('exposes projection and people toggles when still view variants exist', () => {
+    const project = createDefaultProject();
+    const shot = project.shots[0];
+    const clay = createPanoAsset({
+      name: 'clay.png',
+      uri: 'data:image/png;base64,CLAYPEOPLE',
+      width: 1920,
+      height: 1080,
+    });
+    const clayClean = createPanoAsset({
+      name: 'clay_clean.png',
+      uri: 'data:image/png;base64,CLAYCLEAN',
+      width: 1920,
+      height: 1080,
+    });
+    const projected = createPanoAsset({
+      name: 'projected.png',
+      uri: 'data:image/png;base64,PROJPEOPLE',
+      width: 1920,
+      height: 1080,
+    });
+    const projectedClean = createPanoAsset({
+      name: 'projected_clean.png',
+      uri: 'data:image/png;base64,PROJCLEAN',
+      width: 1920,
+      height: 1080,
+    });
+    project.assets.assets[clay.id] = clay;
+    project.assets.assets[clayClean.id] = clayClean;
+    project.assets.assets[projected.id] = projected;
+    project.assets.assets[projectedClean.id] = projectedClean;
+    shot.assets.viewportRenderAssetId = clay.id;
+    shot.assets.viewportCleanPlateAssetId = clayClean.id;
+    shot.assets.viewportProjectedAssetId = projected.id;
+    shot.assets.viewportProjectedCleanPlateAssetId = projectedClean.id;
+
+    const html = renderToStaticMarkup(
+      <ShotMediaModal
+        open
+        project={project}
+        shots={project.shots}
+        shotId={shot.id}
+        onClose={() => undefined}
+        onOpenShot={() => undefined}
+        onUpdateShot={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('data-shot-still-view-toggles');
+    expect(html).toContain('data-shot-still-view="clay_with_people"');
+    expect(html).toContain('CLAYPEOPLE');
+    expect(html).toContain('Projection');
+    expect(html).toContain('People');
+    expect(html).toContain('Clean plate');
+    expect(html).toContain('Projected');
   });
 
   it('renders stored video captures with a video element', () => {

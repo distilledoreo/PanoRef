@@ -13,6 +13,7 @@ import {
   Vec3,
   Workspace,
 } from '../domain/types';
+import { shotStillViewAssetKey, type ShotStillViewSelection } from '../domain/shotStillViews';
 import {
   createDefaultProject,
   createLandmark,
@@ -214,7 +215,14 @@ interface ContinuityStore {
     resolutionPreset?: string;
     validated?: boolean;
   }) => ProjectAsset;
-  attachViewportRenderToShot: (shotId: string, params: { name: string; dataUrl: string; width: number; height: number }) => ProjectAsset;
+  attachViewportRenderToShot: (shotId: string, params: {
+    name: string;
+    dataUrl: string;
+    width: number;
+    height: number;
+    /** Which still view slot to fill; defaults to clay with people. */
+    stillView?: ShotStillViewSelection;
+  }) => ProjectAsset;
   attachAiResultFrameToShot: (shotId: string, params: { name: string; dataUrl: string; width?: number; height?: number }) => ProjectAsset;
   addLandmark: () => Landmark;
   updateLandmark: (id: string, updates: Partial<Landmark>) => void;
@@ -1314,6 +1322,8 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
     const state = get();
     const shot = state.project.shots.find((item) => item.id === shotId);
     if (!shot) throw new Error('Select a shot before attaching a viewport render.');
+    const stillView = params.stillView ?? { appearance: 'clay' as const, people: 'with_people' as const };
+    const assetKey = shotStillViewAssetKey(stillView);
     const asset = createPanoAsset({
       name: params.name || `shot_${shot.shotNumber}_viewport.png`,
       uri: params.dataUrl,
@@ -1322,17 +1332,19 @@ export const useContinuityStore = create<ContinuityStore>((set, get) => ({
       metadata: {
         source: 'viewport_render',
         shotId: shot.id,
+        stillAppearance: stillView.appearance,
+        stillPeople: stillView.people,
       },
     });
     set((current) => {
       const currentShot = current.project.shots.find((item) => item.id === shot.id);
-      const previousAssetId = currentShot?.assets.viewportRenderAssetId;
+      const previousAssetId = currentShot?.assets[assetKey];
       const shots = current.project.shots.map((item) => item.id === shot.id
         ? {
             ...item,
             assets: {
               ...item.assets,
-              viewportRenderAssetId: asset.id,
+              [assetKey]: asset.id,
             },
             updatedAt: new Date().toISOString(),
           }

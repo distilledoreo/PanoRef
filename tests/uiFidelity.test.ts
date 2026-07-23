@@ -335,9 +335,10 @@ describe('ui revamp fidelity surfaces', () => {
     expect(shots).toContain('cameraReseedGeneration');
     expect(shots).toContain('objectEditingActive={stagingMode}');
     expect(shots).toContain('onSelectObject={stagingMode ? selectStagedObject : undefined}');
-    expect(viewport).toContain('if (!scene || shotFramingRef.current');
+    expect(viewport).toContain('(shotFramingRef.current && !objectEditingActiveRef.current)');
     expect(viewport).toContain('showSceneGuides: shotFraming ? false : showSceneGuides');
-    expect(viewport).toContain('if (framing && !objectEditingActive) return;');
+    expect(viewport).toContain('if (framing && !objectEditingActiveRef.current) return;');
+    expect(viewport).toContain('objectEditingActiveRef.current = objectEditingActive');
   });
 
   it('disables fog for shot-framing viewfinder scenes while keeping Build fog', () => {

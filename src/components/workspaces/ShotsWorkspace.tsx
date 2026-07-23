@@ -80,6 +80,9 @@ import {
   updateShotObjectOverrides,
 } from '../../engine/shotSceneState';
 import { getPeopleRenderVariants, getPeopleVariantPath } from '../../engine/peopleExport';
+import {
+  type ShotStillViewSelection,
+} from '../../domain/shotStillViews';
 import type { GizmoMode } from '../../engine/transformGizmo';
 import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { FullBleedLayout } from './WorkspaceShell';
@@ -349,15 +352,15 @@ export function ShotsWorkspace() {
       for (const variant of variants) {
         const frame = await renderShotFrame(project, previewShot, { peopleVariant: variant });
         const clayName = getPeopleVariantPath(exportFrameFileName, variant, peopleMode);
-        if (variant === 'with_people' || variants.length === 1) {
-          setShotFramePreview(previewShot.id, frame.dataUrl);
-          attachViewportRenderToShot(previewShot.id, {
-            name: clayName,
-            dataUrl: frame.dataUrl,
-            width: frame.width,
-            height: frame.height,
-          });
-        }
+        const stillPeople = variant === 'clean_plate' ? 'clean_plate' as const : 'with_people' as const;
+        setShotFramePreview(previewShot.id, frame.dataUrl);
+        attachViewportRenderToShot(previewShot.id, {
+          name: clayName,
+          dataUrl: frame.dataUrl,
+          width: frame.width,
+          height: frame.height,
+          stillView: { appearance: 'clay', people: stillPeople },
+        });
         downloadDataUrl(frame.dataUrl, clayName);
         if (canUseProjectedAppearance(project)) {
           try {
@@ -365,10 +368,15 @@ export function ShotsWorkspace() {
             const baseProjectedName = selectedShot
               ? getProjectedStillDownloadName(selectedShot)
               : exportFrameFileName.replace(/\.png$/i, '_projected.png');
-            downloadDataUrl(
-              projected.dataUrl,
-              getPeopleVariantPath(baseProjectedName, variant, peopleMode),
-            );
+            const projectedName = getPeopleVariantPath(baseProjectedName, variant, peopleMode);
+            attachViewportRenderToShot(previewShot.id, {
+              name: projectedName,
+              dataUrl: projected.dataUrl,
+              width: projected.width,
+              height: projected.height,
+              stillView: { appearance: 'projected', people: stillPeople },
+            });
+            downloadDataUrl(projected.dataUrl, projectedName);
           } catch {
             // Soft-fail projected companion; clay already succeeded.
           }
@@ -742,27 +750,74 @@ export function ShotsWorkspace() {
     setSnapshotError(undefined);
     const shotForNaming = previewShot as typeof latestProject.shots[number];
     const viewportFileName = getViewportStillDownloadName(shotForNaming);
-    void renderShotFrame(latestProject, shotForNaming)
+    const attach = useContinuityStore.getState().attachViewportRenderToShot;
+
+    const attachStillView = async (
+      selection: ShotStillViewSelection,
+      dataUrl: string,
+      width: number,
+      height: number,
+      fileName: string,
+    ) => {
+      attach(shot.id, {
+        name: fileName,
+        dataUrl,
+        width,
+        height,
+        stillView: selection,
+      });
+    };
+
+    void renderShotFrame(latestProject, shotForNaming, { peopleVariant: 'with_people' })
       .then(async (frame) => {
         setShotFramePreview(shot.id, frame.dataUrl);
-        useContinuityStore.getState().attachViewportRenderToShot(shot.id, {
-          name: viewportFileName,
-          dataUrl: frame.dataUrl,
-          width: frame.width,
-          height: frame.height,
-        });
-        // Dual download: clay control frame is attached; projected companion downloads when available.
+        await attachStillView(
+          { appearance: 'clay', people: 'with_people' },
+          frame.dataUrl,
+          frame.width,
+          frame.height,
+          viewportFileName,
+        );
+
+        // Capture companion stills for camera-roll view toggles (projection × people).
+        const companionJobs: Array<Promise<void>> = [
+          renderShotFrame(latestProject, shotForNaming, { peopleVariant: 'clean_plate' })
+            .then((clean) => attachStillView(
+              { appearance: 'clay', people: 'clean_plate' },
+              clean.dataUrl,
+              clean.width,
+              clean.height,
+              getPeopleVariantPath(viewportFileName, 'clean_plate', 'both'),
+            )),
+        ];
+
         if (canUseProjectedAppearance(latestProject)) {
-          try {
-            const projected = await renderShotProjectedFrame(latestProject, shotForNaming);
-            downloadDataUrl(
-              projected.dataUrl,
-              getProjectedStillDownloadName(shotForNaming),
-            );
-          } catch {
-            // Soft-fail projected companion.
-          }
+          const projectedBaseName = getProjectedStillDownloadName(shotForNaming);
+          companionJobs.push(
+            renderShotProjectedFrame(latestProject, shotForNaming, { peopleVariant: 'with_people' })
+              .then(async (projected) => {
+                await attachStillView(
+                  { appearance: 'projected', people: 'with_people' },
+                  projected.dataUrl,
+                  projected.width,
+                  projected.height,
+                  projectedBaseName,
+                );
+                // Keep dual-download behavior for the primary projected companion.
+                downloadDataUrl(projected.dataUrl, projectedBaseName);
+              }),
+            renderShotProjectedFrame(latestProject, shotForNaming, { peopleVariant: 'clean_plate' })
+              .then((projectedClean) => attachStillView(
+                { appearance: 'projected', people: 'clean_plate' },
+                projectedClean.dataUrl,
+                projectedClean.width,
+                projectedClean.height,
+                getPeopleVariantPath(projectedBaseName, 'clean_plate', 'both'),
+              )),
+          );
         }
+
+        await Promise.allSettled(companionJobs);
       })
       .catch(() => {
         setSnapshotError('Could not save the shot preview. Try Capture again.');
