@@ -353,7 +353,9 @@ export function ShotsWorkspace() {
         const frame = await renderShotFrame(project, previewShot, { peopleVariant: variant });
         const clayName = getPeopleVariantPath(exportFrameFileName, variant, peopleMode);
         const stillPeople = variant === 'clean_plate' ? 'clean_plate' as const : 'with_people' as const;
-        setShotFramePreview(previewShot.id, frame.dataUrl);
+        if (variant === 'with_people' || variants.length === 1) {
+          setShotFramePreview(previewShot.id, frame.dataUrl);
+        }
         attachViewportRenderToShot(previewShot.id, {
           name: clayName,
           dataUrl: frame.dataUrl,
