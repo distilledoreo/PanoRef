@@ -66,6 +66,15 @@ export interface Transform {
   scale: Vec3;
 }
 
+export type StagingRole = 'set' | 'prop' | 'person';
+
+export interface ShotObjectOverride {
+  transform?: Transform;
+  visible?: boolean;
+}
+
+export type ShotObjectOverrides = Record<string, ShotObjectOverride>;
+
 /** Visual surface for graybox objects. Checkerboard tiles are 1m × 1m in world space. */
 export type ObjectSurfaceStyle = 'default' | 'solid' | 'checkerboard';
 
@@ -78,6 +87,8 @@ export interface SceneObject {
   category: 'architecture' | 'environment' | 'helper' | 'landmark';
   locked: boolean;
   visible: boolean;
+  /** Set geometry is global; props and people may be staged per shot. */
+  stagingRole?: StagingRole;
   /** @deprecated Prefer surfaceStyle + color. Kept for older project files. */
   materialId?: string;
   /** default = category clay; solid / checkerboard for identity and scale. */
@@ -238,6 +249,8 @@ export interface Shot {
   description: string;
   camera: CameraData;
   cameraKeyframes: CameraKeyframe[];
+  /** Sparse transform/visibility differences from the global Build scene. */
+  objectOverrides?: ShotObjectOverrides;
   linkedPanoId?: string;
   panoCrop?: PanoCropSettings;
   landmarkIds: string[];

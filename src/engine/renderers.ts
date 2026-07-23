@@ -37,6 +37,7 @@ import {
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 import { computeGrayboxPanoFarPlane } from './sceneBounds';
 import { createFinalRenderSceneOptions } from './finalRenderProfile';
+import { resolveProjectForShot } from './shotSceneState';
 import {
   clampShotNearClip,
   DEFAULT_SHOT_NEAR_CLIP_METERS,
@@ -288,7 +289,7 @@ export async function renderGrayboxEquirectangularPano(
 
 export async function renderShotFrame(project: LocationProject, shot: Shot): Promise<ImageRenderResult> {
   return renderViewportClay(
-    project,
+    resolveProjectForShot(project, shot),
     shot.camera,
     shot.exportSettings.width,
     shot.exportSettings.height,
@@ -300,13 +301,14 @@ export async function renderShotCameraMoveMp4(
   shot: Shot,
   options: CameraMoveVideoOptions = {},
 ): Promise<VideoRenderResult> {
+  const shotProject = resolveProjectForShot(project, shot);
   const keyframes = getSortedCameraKeyframes(shot.cameraKeyframes);
   if (!hasRenderableCameraMove(keyframes)) {
     throw new Error('Capture start and end camera keyframes before exporting MP4.');
   }
 
   const appearance = options.appearance ?? 'clay';
-  if (appearance === 'projected' && !canUseProjectedAppearance(project)) {
+  if (appearance === 'projected' && !canUseProjectedAppearance(shotProject)) {
     throw new Error(
       'Projected camera-move MP4 requires an importable styled panorama with a valid image asset.',
     );
@@ -329,7 +331,7 @@ export async function renderShotCameraMoveMp4(
         + 'This browser or preset is unsupported. Choose Quick Preview explicitly, or try Chrome/Edge with a supported resolution.',
       );
     }
-    return renderShotCameraMoveMp4Deterministic(project, shot, {
+    return renderShotCameraMoveMp4Deterministic(shotProject, shot, {
       ...options,
       frameRate,
       width,
@@ -347,7 +349,7 @@ export async function renderShotCameraMoveMp4(
   if (!mimeType) {
     throw new Error('Quick Preview MP4 export is not supported in this browser.');
   }
-  return renderShotCameraMoveMp4QuickPreview(project, shot, {
+  return renderShotCameraMoveMp4QuickPreview(shotProject, shot, {
     ...options,
     mimeType,
     frameRate,
@@ -1015,7 +1017,7 @@ export async function renderShotProjectedFrame(
   shot: Shot,
 ): Promise<ImageRenderResult> {
   return renderViewportProjected(
-    project,
+    resolveProjectForShot(project, shot),
     shot.camera,
     shot.exportSettings.width,
     shot.exportSettings.height,

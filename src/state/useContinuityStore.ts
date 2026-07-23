@@ -1715,6 +1715,7 @@ function addShotWithCamera(
   options?: { navigateToShots?: boolean },
 ): Shot {
   const state = useContinuityStore.getState();
+  const sourceShot = state.project.shots.find((item) => item.id === state.selectedShotId);
   const linkedPano = linkedPanoId
     ? state.project.panoRefs.find((pano) => pano.id === linkedPanoId)
     : getCanonicalPano(state.project);
@@ -1728,6 +1729,7 @@ function addShotWithCamera(
     linkedPano,
   );
   if (name) shot.name = name;
+  shot.objectOverrides = structuredClone(sourceShot?.objectOverrides ?? {});
 
   const navigateToShots = options?.navigateToShots ?? true;
   useContinuityStore.setState((current) => ({

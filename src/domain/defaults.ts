@@ -187,6 +187,7 @@ export function createSceneObject(type: SceneObjectType, index = 1, position?: V
     category: defaults.category,
     locked: false,
     visible: true,
+    stagingRole: type === 'human_dummy' ? 'person' : 'set',
   };
 
   if (type === 'wall') object.transform.position = [0, 1.5, 5];
@@ -265,6 +266,7 @@ export function createShot(params: {
     description: '',
     camera: params.camera,
     cameraKeyframes: [],
+    objectOverrides: {},
     linkedPanoId: params.linkedPanoId,
     panoCrop: params.panoCrop,
     landmarkIds: [],

@@ -1,4 +1,4 @@
-import { Euler, LocationProject, PanoReference, SceneObject, Shot, Vec3 } from '../domain/types';
+import { Euler, LocationProject, PanoReference, SceneObject, Shot, Transform, Vec3 } from '../domain/types';
 import { normalizeProductionShotId } from '../domain/shotIdentity';
 import {
   DEFAULT_CAMERA_HEIGHT_METERS,
@@ -92,10 +92,19 @@ function normalizeSceneObject(object: SceneObject & { projectionStamp?: unknown 
       : undefined;
   return {
     ...normalized,
+    stagingRole: normalizeStagingRole(normalized.stagingRole, normalized.type),
     surfaceStyle,
     color: normalizeHexColor(normalized.color),
     secondaryColor: normalizeHexColor(normalized.secondaryColor),
   };
+}
+
+function normalizeStagingRole(
+  value: unknown,
+  type: SceneObject['type'],
+): SceneObject['stagingRole'] {
+  if (value === 'set' || value === 'prop' || value === 'person') return value;
+  return type === 'human_dummy' ? 'person' : 'set';
 }
 
 function normalizeHexColor(value?: string): string | undefined {
@@ -111,6 +120,33 @@ function normalizePanoReference(pano: PanoReference): PanoReference {
     ...pano,
     rotation: pano.rotation ?? [0, 0, 0],
   };
+}
+
+function normalizeTransform(value: unknown): Transform | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Partial<Transform>;
+  return {
+    position: normalizeVec3(candidate.position, [0, 0, 0]),
+    rotation: normalizeEuler(candidate.rotation, [0, 0, 0]),
+    scale: normalizeVec3(candidate.scale, [1, 1, 1]),
+  };
+}
+
+function normalizeShotObjectOverrides(value: unknown): NonNullable<Shot['objectOverrides']> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const result: NonNullable<Shot['objectOverrides']> = {};
+  for (const [objectId, rawOverride] of Object.entries(value as Record<string, unknown>)) {
+    if (!rawOverride || typeof rawOverride !== 'object' || Array.isArray(rawOverride)) continue;
+    const candidate = rawOverride as { transform?: unknown; visible?: unknown };
+    const transform = normalizeTransform(candidate.transform);
+    const visible = typeof candidate.visible === 'boolean' ? candidate.visible : undefined;
+    if (!transform && visible === undefined) continue;
+    result[objectId] = {
+      ...(transform ? { transform } : {}),
+      ...(visible !== undefined ? { visible } : {}),
+    };
+  }
+  return result;
 }
 
 function normalizeShot(shot: Shot): Shot {
@@ -129,6 +165,7 @@ function normalizeShot(shot: Shot): Shot {
     ...shot,
     productionShotId: normalizeProductionShotId(shot.productionShotId),
     cameraKeyframes: shot.cameraKeyframes ?? [],
+    objectOverrides: normalizeShotObjectOverrides(shot.objectOverrides),
     exportSettings: {
       ...exportSettings,
       includeAiResultFrame: legacyExportSettings.includeAiResultFrame ?? legacyExportSettings.includeSkinnedFrame ?? true,
