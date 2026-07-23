@@ -333,11 +333,11 @@ describe('ui revamp fidelity surfaces', () => {
     const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
     expect(shots).toContain('shotFraming={shotFraming}');
     expect(shots).toContain('cameraReseedGeneration');
-    expect(shots).not.toContain('selectedObjectId');
-    expect(shots).not.toContain('onSelectObject');
+    expect(shots).toContain('objectEditingActive={stagingMode}');
+    expect(shots).toContain('onSelectObject={stagingMode ? selectStagedObject : undefined}');
     expect(viewport).toContain('if (!scene || shotFramingRef.current');
     expect(viewport).toContain('showSceneGuides: shotFraming ? false : showSceneGuides');
-    expect(viewport).toContain('if (framing) return;');
+    expect(viewport).toContain('if (framing && !objectEditingActive) return;');
   });
 
   it('disables fog for shot-framing viewfinder scenes while keeping Build fog', () => {

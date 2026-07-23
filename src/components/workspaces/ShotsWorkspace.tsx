@@ -11,10 +11,14 @@ import {
   KeyRound,
   Plus,
   Settings2,
+  Eye,
+  EyeOff,
+  Move3D,
+  RotateCw,
   Trash2,
   X,
 } from 'lucide-react';
-import { CameraData, Shot, ShotStatus } from '../../domain/types';
+import { CameraData, PeopleExportMode, SceneObject, Shot, ShotStatus, Transform, Vec3 } from '../../domain/types';
 import {
   DEFAULT_CAMERA_LENS_MM,
   DEFAULT_CAMERA_HEIGHT_METERS,
@@ -69,6 +73,14 @@ import { Vec3Input } from '../common/Vec3Input';
 import { SceneViewport } from '../viewers/SceneViewport';
 import { ShotPanoCropPreview } from '../viewers/ShotPanoCropPreview';
 import { canUseProjectedAppearance } from '../../engine/projectedStyle';
+import {
+  canStageObjectPerShot,
+  clearShotObjectOverride,
+  resolveProjectForShot,
+  updateShotObjectOverrides,
+} from '../../engine/shotSceneState';
+import { getPeopleRenderVariants, getPeopleVariantPath } from '../../engine/peopleExport';
+import type { GizmoMode } from '../../engine/transformGizmo';
 import { AppearanceModeToggle } from '../common/AppearanceModeToggle';
 import { FullBleedLayout } from './WorkspaceShell';
 import {
@@ -149,7 +161,20 @@ export function ShotsWorkspace() {
   const shotCameraHistoryRestoreGeneration = useContinuityStore(
     (state) => state.shotCameraHistoryRestoreGeneration,
   );
+  const [stagingMode, setStagingMode] = useState(false);
+  const [stagingGizmoMode, setStagingGizmoMode] = useState<GizmoMode>('translate');
+  const [stagedObjectId, setStagedObjectId] = useState<string>();
+  const [showPeopleInViewport, setShowPeopleInViewport] = useState(true);
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
+  const shotSceneProject = useMemo(
+    () => selectedShot
+      ? resolveProjectForShot(project, selectedShot, { hidePeople: !showPeopleInViewport })
+      : project,
+    [project, selectedShot, showPeopleInViewport],
+  );
+  const stagedObject = stagedObjectId
+    ? shotSceneProject.scene.objects.find((object) => object.id === stagedObjectId)
+    : undefined;
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
   const linkedAsset = linkedPano ? project.assets.assets[linkedPano.imageAssetId] : undefined;
   const draftCameraRef = useRef<CameraData | undefined>();
@@ -317,37 +342,52 @@ export function ShotsWorkspace() {
   const exportCameraFrame = useCallback(async () => {
     const previewShot = getPreviewShot();
     if (!previewShot) return;
+    const peopleMode = previewShot.exportSettings.peopleExportMode;
+    const variants = getPeopleRenderVariants(peopleMode);
     setIsExportingFrame(true);
     try {
-      // Clay remains the shot-attached geometric control frame.
-      const frame = await renderShotFrame(project, previewShot);
-      setShotFramePreview(previewShot.id, frame.dataUrl);
-      attachViewportRenderToShot(previewShot.id, {
-        name: exportFrameFileName,
-        dataUrl: frame.dataUrl,
-        width: frame.width,
-        height: frame.height,
-      });
-      downloadDataUrl(frame.dataUrl, exportFrameFileName);
-      // Also download a projected still when a styled pano is available (dual output).
-      if (canUseProjectedAppearance(project)) {
-        try {
-          const projected = await renderShotProjectedFrame(project, previewShot);
-          const projectedName = selectedShot
-            ? getProjectedStillDownloadName(selectedShot)
-            : exportFrameFileName.replace(/\.png$/i, '_projected.png');
-          downloadDataUrl(projected.dataUrl, projectedName);
-        } catch {
-          // Soft-fail projected companion; clay already succeeded.
+      for (const variant of variants) {
+        const frame = await renderShotFrame(project, previewShot, { peopleVariant: variant });
+        const clayName = getPeopleVariantPath(exportFrameFileName, variant, peopleMode);
+        if (variant === 'with_people' || variants.length === 1) {
+          setShotFramePreview(previewShot.id, frame.dataUrl);
+          attachViewportRenderToShot(previewShot.id, {
+            name: clayName,
+            dataUrl: frame.dataUrl,
+            width: frame.width,
+            height: frame.height,
+          });
+        }
+        downloadDataUrl(frame.dataUrl, clayName);
+        if (canUseProjectedAppearance(project)) {
+          try {
+            const projected = await renderShotProjectedFrame(project, previewShot, { peopleVariant: variant });
+            const baseProjectedName = selectedShot
+              ? getProjectedStillDownloadName(selectedShot)
+              : exportFrameFileName.replace(/\.png$/i, '_projected.png');
+            downloadDataUrl(
+              projected.dataUrl,
+              getPeopleVariantPath(baseProjectedName, variant, peopleMode),
+            );
+          } catch {
+            // Soft-fail projected companion; clay already succeeded.
+          }
         }
       }
-      if (!shotCameraFlying) {
-        updateShot(previewShot.id, { status: 'exported' });
-      }
+      if (!shotCameraFlying) updateShot(previewShot.id, { status: 'exported' });
     } finally {
       setIsExportingFrame(false);
     }
-  }, [attachViewportRenderToShot, exportFrameFileName, getPreviewShot, project, setShotFramePreview, shotCameraFlying, updateShot]);
+  }, [
+    attachViewportRenderToShot,
+    exportFrameFileName,
+    getPreviewShot,
+    project,
+    selectedShot,
+    setShotFramePreview,
+    shotCameraFlying,
+    updateShot,
+  ]);
 
   const updateCameraMoveKeyframes = useCallback((keyframes: typeof cameraMoveKeyframes) => {
     if (!selectedShot) return;
@@ -398,11 +438,9 @@ export function ShotsWorkspace() {
       setCameraMoveError('Capture start and end camera keyframes before exporting MP4.');
       return;
     }
-
     if (videoExportMode === 'render' && canRenderMp4 !== true) {
       setCameraMoveError(
-        `Render MP4 is unavailable for ${videoResolutionPreset === '4k' ? '4K' : '1080p'} in this browser. `
-        + 'Choose Quick Preview, or try Chrome/Edge with a supported resolution.',
+        `Render MP4 is unavailable for ${videoResolutionPreset === '4k' ? '4K' : '1080p'} in this browser. Choose Quick Preview, or try Chrome/Edge.`,
       );
       return;
     }
@@ -411,8 +449,9 @@ export function ShotsWorkspace() {
       return;
     }
 
-    const preferredMode = videoExportMode;
-
+    const variants = getPeopleRenderVariants(selectedShot.exportSettings.peopleExportMode);
+    const dualProjectedVideo = canUseProjectedAppearance(project);
+    const totalPasses = variants.length * (dualProjectedVideo ? 2 : 1);
     const abortController = new AbortController();
     cameraMoveAbortRef.current = { cancelled: false, abort: () => abortController.abort() };
     setIsExportingCameraMove(true);
@@ -421,87 +460,88 @@ export function ShotsWorkspace() {
     setCameraMoveError(undefined);
 
     try {
-      // Progress splits: clay motion 0–55%, projected motion 55–100% when dual.
-      const dualProjectedVideo = canUseProjectedAppearance(project);
-      const video = await renderShotCameraMoveMp4(project, selectedShot, {
-        mode: preferredMode,
-        resolutionPreset: videoResolutionPreset,
-        frameRate: 30,
-        appearance: 'clay',
-        // Persist clay in the shot library as a data URL; downloads use the blob.
-        includeDataUrl: true,
-        signal: abortController.signal,
-        onProgress: (progress) => {
-          applyExportProgress(progress, (value) => (dualProjectedVideo ? value * 0.55 : value));
-        },
-      });
-      if (cameraMoveAbortRef.current.cancelled) return;
-      if (!video.dataUrl) {
-        throw new Error('Camera move export did not produce a persistable video URI.');
-      }
-      const asset = attachCameraMoveVideoToShot(selectedShot.id, {
-        name: cameraMoveFileName,
-        dataUrl: video.dataUrl,
-        mimeType: video.mimeType,
-        width: video.width,
-        height: video.height,
-        durationSeconds: video.durationSeconds,
-        frameRate: video.frameRate,
-        encodeMode: video.encodeMode ?? preferredMode,
-        codecString: video.codecString,
-        frameCount: video.frameCount,
-        resolutionPreset: videoResolutionPreset,
-      });
-      setCameraMovePreviewUrl(asset.uri);
-      // Download from the encoded blob — multi‑MB data: URLs fail as anchor hrefs.
-      downloadBlob(video.blob, asset.name || cameraMoveFileName);
+      let pass = 0;
+      for (const variant of variants) {
+        const video = await renderShotCameraMoveMp4(project, selectedShot, {
+          mode: videoExportMode,
+          resolutionPreset: videoResolutionPreset,
+          frameRate: 30,
+          appearance: 'clay',
+          peopleVariant: variant,
+          includeDataUrl: true,
+          signal: abortController.signal,
+          onProgress: (progress) => {
+            const value = typeof progress === 'number' ? progress : progress.progress;
+            const message = typeof progress === 'number' ? 'Rendering clay motion' : progress.message;
+            setCameraMoveProgress((pass + value) / totalPasses);
+            setCameraMoveProgressMessage(message);
+          },
+        });
+        if (cameraMoveAbortRef.current.cancelled) return;
+        if (!video.dataUrl) throw new Error('Camera move export did not produce a persistable video URI.');
+        const clayName = getPeopleVariantPath(
+          cameraMoveFileName,
+          variant,
+          selectedShot.exportSettings.peopleExportMode,
+        );
+        if (variant === 'with_people' || variants.length === 1) {
+          const asset = attachCameraMoveVideoToShot(selectedShot.id, {
+            name: clayName,
+            dataUrl: video.dataUrl,
+            mimeType: video.mimeType,
+            width: video.width,
+            height: video.height,
+            durationSeconds: video.durationSeconds,
+            frameRate: video.frameRate,
+            encodeMode: video.encodeMode ?? videoExportMode,
+            codecString: video.codecString,
+            frameCount: video.frameCount,
+            resolutionPreset: videoResolutionPreset,
+          });
+          setCameraMovePreviewUrl(asset.uri);
+        }
+        downloadBlob(video.blob, clayName);
+        pass += 1;
 
-      if (dualProjectedVideo && !cameraMoveAbortRef.current.cancelled) {
-        try {
+        if (dualProjectedVideo) {
           const projectedVideo = await renderShotCameraMoveMp4(project, selectedShot, {
-            mode: preferredMode,
+            mode: videoExportMode,
             resolutionPreset: videoResolutionPreset,
             frameRate: 30,
             appearance: 'projected',
-            occlusionFilter: preferredMode === 'render' ? 'fast' : 'soft',
+            peopleVariant: variant,
+            occlusionFilter: videoExportMode === 'render' ? 'fast' : 'soft',
             includeDataUrl: false,
             signal: abortController.signal,
             onProgress: (progress) => {
-              applyExportProgress(progress, (value) => 0.55 + value * 0.45);
+              const value = typeof progress === 'number' ? progress : progress.progress;
+              const message = typeof progress === 'number' ? 'Rendering projected motion' : progress.message;
+              setCameraMoveProgress((pass + value) / totalPasses);
+              setCameraMoveProgressMessage(message);
             },
           });
           if (cameraMoveAbortRef.current.cancelled) return;
-          const projectedName = getProjectedCameraMoveDownloadName(selectedShot);
-          downloadBlob(projectedVideo.blob, projectedName);
-          // Optional still contact sheet companions (still export resolution).
-          const frames = getCameraMoveReferenceFrames(selectedShot.cameraKeyframes);
-          const base = (asset.name || cameraMoveFileName).replace(/\.mp4$/i, '');
-          for (const frame of frames) {
-            const projected = await renderViewportProjected(
-              project,
-              frame.camera,
-              selectedShot.exportSettings.width,
-              selectedShot.exportSettings.height,
-            );
-            downloadDataUrl(projected.dataUrl, `${base}_projected_${frame.id}.png`);
-          }
-          setCameraMoveProgress(1);
-          setCameraMoveProgressMessage('Complete');
-        } catch {
-          // Soft-fail projected companions; clay MP4 already succeeded.
+          downloadBlob(
+            projectedVideo.blob,
+            getPeopleVariantPath(
+              getProjectedCameraMoveDownloadName(selectedShot),
+              variant,
+              selectedShot.exportSettings.peopleExportMode,
+            ),
+          );
+          pass += 1;
         }
       }
+      setCameraMoveProgress(1);
+      setCameraMoveProgressMessage('Complete');
     } catch (error) {
       if (!cameraMoveAbortRef.current.cancelled) {
         setCameraMoveError(error instanceof Error ? error.message : 'MP4 export failed.');
       }
     } finally {
-      if (!cameraMoveAbortRef.current.cancelled) {
-        setIsExportingCameraMove(false);
-      }
+      if (!cameraMoveAbortRef.current.cancelled) setIsExportingCameraMove(false);
     }
   }, [
-    applyExportProgress,
     attachCameraMoveVideoToShot,
     cameraMoveFileName,
     canExportVideo,
@@ -904,6 +944,66 @@ export function ShotsWorkspace() {
     videoPhase,
   ]);
 
+  const enterStagingMode = useCallback(() => {
+    if (!selectedShot) return;
+    const camera = getEffectiveCamera();
+    landShotFraming(selectedShot.id, camera);
+    setStagingMode(true);
+    setStagedObjectId(undefined);
+  }, [getEffectiveCamera, landShotFraming, selectedShot]);
+
+  const exitStagingMode = useCallback(() => {
+    setStagingMode(false);
+    setStagedObjectId(undefined);
+    startFlyCamera({ clearFramingAcceptance: false });
+  }, [startFlyCamera]);
+
+  const selectStagedObject = useCallback((id?: string) => {
+    if (!id) {
+      setStagedObjectId(undefined);
+      return;
+    }
+    const object = shotSceneProject.scene.objects.find((item) => item.id === id);
+    setStagedObjectId(object && canStageObjectPerShot(object) ? id : undefined);
+  }, [shotSceneProject.scene.objects]);
+
+  const updateStagedTransform = useCallback((objectId: string, transform: Transform) => {
+    if (!selectedShot) return;
+    const baseObject = project.scene.objects.find((object) => object.id === objectId);
+    if (!baseObject || !canStageObjectPerShot(baseObject)) return;
+    updateShot(selectedShot.id, {
+      objectOverrides: updateShotObjectOverrides(selectedShot, baseObject, { transform }),
+    });
+  }, [project.scene.objects, selectedShot, updateShot]);
+
+  const moveStagedObject = useCallback((objectId: string, position: Vec3) => {
+    const object = shotSceneProject.scene.objects.find((item) => item.id === objectId);
+    if (!object) return;
+    updateStagedTransform(objectId, { ...object.transform, position });
+  }, [shotSceneProject.scene.objects, updateStagedTransform]);
+
+  const rotateStagedObject = useCallback((objectId: string, rotation: Vec3) => {
+    const object = shotSceneProject.scene.objects.find((item) => item.id === objectId);
+    if (!object) return;
+    updateStagedTransform(objectId, { ...object.transform, rotation });
+  }, [shotSceneProject.scene.objects, updateStagedTransform]);
+
+  const toggleStagedObjectVisibility = useCallback(() => {
+    if (!selectedShot || !stagedObject) return;
+    const baseObject = project.scene.objects.find((object) => object.id === stagedObject.id);
+    if (!baseObject) return;
+    updateShot(selectedShot.id, {
+      objectOverrides: updateShotObjectOverrides(selectedShot, baseObject, { visible: !stagedObject.visible }),
+    });
+  }, [project.scene.objects, selectedShot, stagedObject, updateShot]);
+
+  const resetStagedObject = useCallback(() => {
+    if (!selectedShot || !stagedObjectId) return;
+    updateShot(selectedShot.id, {
+      objectOverrides: clearShotObjectOverride(selectedShot, stagedObjectId),
+    });
+  }, [selectedShot, stagedObjectId, updateShot]);
+
   const panoMatch = selectedShot && linkedPano
     ? getPanoMatchQuality(selectedShot.camera, linkedPano, project.settings)
     : undefined;
@@ -915,7 +1015,7 @@ export function ShotsWorkspace() {
         camera: framingCamera ?? selectedShot.camera,
         frameAspectRatio: selectedShot.exportSettings.width / selectedShot.exportSettings.height,
         frameResolutionLabel: `${selectedShot.exportSettings.width}×${selectedShot.exportSettings.height}`,
-        flyActive: shotCameraFlying,
+        flyActive: stagingMode ? false : shotCameraFlying,
         cameraReseedGeneration,
         focalLengthHudPulse,
         onCameraChange: handleFramingCameraChange,
@@ -944,6 +1044,7 @@ export function ShotsWorkspace() {
     setCameraMoveEnd,
     setCameraMoveStart,
     shotCameraFlying,
+    stagingMode,
     videoPhase,
   ]);
 
@@ -958,6 +1059,7 @@ export function ShotsWorkspace() {
     setCaptureMode('still');
     setLibraryOpen(false);
     setVideoPhase('record');
+    setStagedObjectId(undefined);
     if (selectedShot) {
       setVideoDurationSeconds(
         getCameraMoveDurationSeconds(selectedShot.cameraKeyframes, DEFAULT_CAMERA_MOVE_DURATION_SECONDS),
@@ -1041,10 +1143,18 @@ export function ShotsWorkspace() {
       <div className="relative h-full min-h-0 overflow-hidden bg-black" data-shots-camera-shell>
         <div className="absolute inset-0">
           <SceneViewport
-            project={project}
+            project={shotSceneProject}
+            selectedObjectIds={stagedObjectId ? [stagedObjectId] : []}
             selectedShotId={selectedShot?.id}
             shotFraming={shotFraming}
             appearance={appearance}
+            objectEditingActive={stagingMode}
+            showTransformGizmo={stagingMode && Boolean(stagedObjectId)}
+            gizmoMode={stagingGizmoMode}
+            snapToGrid={false}
+            onSelectObject={stagingMode ? selectStagedObject : undefined}
+            onMoveObjectInSpace={stagingMode ? moveStagedObject : undefined}
+            onRotateObject={stagingMode ? rotateStagedObject : undefined}
             minHeightClassName="min-h-0"
             parentFinalizeShotFovWheelBatchRef={finalizeShotFovWheelBatchRef}
             onOcclusionStatusChange={(status) => useContinuityStore.getState().setProjectedOcclusionStatus(status)}
@@ -1060,6 +1170,27 @@ export function ShotsWorkspace() {
           </div>
           <div className="pointer-events-auto flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowPeopleInViewport((value) => !value)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white shadow-card backdrop-blur-sm transition hover:bg-black/60"
+                aria-label={showPeopleInViewport ? 'Hide people in viewport' : 'Show people in viewport'}
+                title={showPeopleInViewport ? 'Hide people' : 'Show people'}
+                data-shots-people-visibility
+              >
+                {showPeopleInViewport ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={stagingMode ? exitStagingMode : enterStagingMode}
+                className={`inline-flex h-10 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold text-white shadow-card backdrop-blur-sm transition ${
+                  stagingMode ? 'border-white bg-white/20' : 'border-white/15 bg-black/45 hover:bg-black/60'
+                }`}
+                data-shots-staging-toggle
+              >
+                <Move3D className="h-4 w-4" />
+                {stagingMode ? 'Done' : 'Stage'}
+              </button>
               <AppearanceModeToggle
                 value={appearance}
                 projectedAvailable={canUseProjectedAppearance(project)}
@@ -1085,6 +1216,32 @@ export function ShotsWorkspace() {
             </p>
           </div>
         </div>
+
+        {stagingMode && (
+          <div className="pointer-events-auto absolute left-4 top-[calc(var(--stage-header-safe)+3.25rem)] z-20 w-72 rounded-2xl border border-white/15 bg-black/70 p-3 text-white shadow-soft backdrop-blur-md" data-shots-staging-panel>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold">Per-shot staging</div>
+                <div className="text-[11px] text-white/60">Select a prop or person, then move or rotate it.</div>
+              </div>
+              <div className="flex gap-1">
+                <button type="button" onClick={() => setStagingGizmoMode('translate')} className={`rounded-lg p-2 ${stagingGizmoMode === 'translate' ? 'bg-white text-black' : 'bg-white/10 text-white'}`} title="Move"><Move3D className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setStagingGizmoMode('rotate')} className={`rounded-lg p-2 ${stagingGizmoMode === 'rotate' ? 'bg-white text-black' : 'bg-white/10 text-white'}`} title="Rotate"><RotateCw className="h-4 w-4" /></button>
+              </div>
+            </div>
+            {stagedObject ? (
+              <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
+                <div className="truncate text-xs font-semibold">{stagedObject.name}</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={toggleStagedObjectVisibility} className="rounded-lg bg-white/10 px-2 py-2 text-xs hover:bg-white/15">{stagedObject.visible ? 'Hide in shot' : 'Show in shot'}</button>
+                  <button type="button" onClick={resetStagedObject} className="rounded-lg bg-white/10 px-2 py-2 text-xs hover:bg-white/15">Reset to set</button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 border-t border-white/10 pt-3 text-xs text-white/60">No stageable object selected.</p>
+            )}
+          </div>
+        )}
 
         {/* Quiet landed flash */}
         {landFlash && (
@@ -1515,6 +1672,22 @@ export function ShotsWorkspace() {
                   });
                 }}
               />
+            </Field>
+            <Field label="People export" hint="Clean plate keeps the same camera and staging but hides every object classified as a person.">
+              <Select
+                value={selectedShot.exportSettings.peopleExportMode ?? 'with_people'}
+                onChange={(event) => updateShot(selectedShot.id, {
+                  exportSettings: {
+                    ...selectedShot.exportSettings,
+                    peopleExportMode: event.target.value as PeopleExportMode,
+                  },
+                })}
+                data-shots-people-export-mode
+              >
+                <option value="with_people">With people</option>
+                <option value="clean_plate">Clean plate</option>
+                <option value="both">Both</option>
+              </Select>
             </Field>
             <Field label="Resolution">
               <div className="grid grid-cols-2 gap-2">

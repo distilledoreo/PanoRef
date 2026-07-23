@@ -38,6 +38,7 @@ import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sy
 import { computeGrayboxPanoFarPlane } from './sceneBounds';
 import { createFinalRenderSceneOptions } from './finalRenderProfile';
 import { resolveProjectForShot } from './shotSceneState';
+import type { PeopleRenderVariant } from './peopleExport';
 import {
   clampShotNearClip,
   DEFAULT_SHOT_NEAR_CLIP_METERS,
@@ -131,6 +132,8 @@ export interface CameraMoveVideoOptions {
    * Default false — downloads and ZIP packaging should use `blob` only.
    */
   includeDataUrl?: boolean;
+  /** Hide all objects classified as people for clean-plate output. */
+  peopleVariant?: PeopleRenderVariant;
 }
 
 const MP4_MIME_CANDIDATES = [
@@ -287,9 +290,13 @@ export async function renderGrayboxEquirectangularPano(
   return { dataUrl, width, height };
 }
 
-export async function renderShotFrame(project: LocationProject, shot: Shot): Promise<ImageRenderResult> {
+export async function renderShotFrame(
+  project: LocationProject,
+  shot: Shot,
+  options: { peopleVariant?: PeopleRenderVariant } = {},
+): Promise<ImageRenderResult> {
   return renderViewportClay(
-    resolveProjectForShot(project, shot),
+    resolveProjectForShot(project, shot, { hidePeople: options.peopleVariant === 'clean_plate' }),
     shot.camera,
     shot.exportSettings.width,
     shot.exportSettings.height,
@@ -301,7 +308,9 @@ export async function renderShotCameraMoveMp4(
   shot: Shot,
   options: CameraMoveVideoOptions = {},
 ): Promise<VideoRenderResult> {
-  const shotProject = resolveProjectForShot(project, shot);
+  const shotProject = resolveProjectForShot(project, shot, {
+    hidePeople: options.peopleVariant === 'clean_plate',
+  });
   const keyframes = getSortedCameraKeyframes(shot.cameraKeyframes);
   if (!hasRenderableCameraMove(keyframes)) {
     throw new Error('Capture start and end camera keyframes before exporting MP4.');
@@ -1015,9 +1024,10 @@ export async function renderViewportProjected(
 export async function renderShotProjectedFrame(
   project: LocationProject,
   shot: Shot,
+  options: { peopleVariant?: PeopleRenderVariant } = {},
 ): Promise<ImageRenderResult> {
   return renderViewportProjected(
-    resolveProjectForShot(project, shot),
+    resolveProjectForShot(project, shot, { hidePeople: options.peopleVariant === 'clean_plate' }),
     shot.camera,
     shot.exportSettings.width,
     shot.exportSettings.height,
