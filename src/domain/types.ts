@@ -152,6 +152,11 @@ export interface CameraKeyframe {
   label: string;
   timeSeconds: number;
   camera: CameraData;
+  /**
+   * Optional staged-object snapshot captured with this keyframe.
+   * Used to animate props/people between start and end during camera-move video export.
+   */
+  objectOverrides?: ShotObjectOverrides;
 }
 
 export interface PanoCropSettings {

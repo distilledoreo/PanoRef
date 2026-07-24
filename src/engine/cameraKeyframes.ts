@@ -1,4 +1,4 @@
-import { CameraData, CameraKeyframe } from '../domain/types';
+import { CameraData, CameraKeyframe, ShotObjectOverrides } from '../domain/types';
 import { createCameraKeyframe } from '../domain/defaults';
 
 export const DEFAULT_CAMERA_MOVE_DURATION_SECONDS = 3;
@@ -39,6 +39,8 @@ export function setTwoPointCameraKeyframe(params: {
   slot: CameraMoveKeyframeSlot;
   camera: CameraData;
   durationSeconds?: number;
+  /** Staged-object snapshot frozen with this keyframe for video animation. */
+  objectOverrides?: ShotObjectOverrides;
 }): CameraKeyframe[] {
   const durationSeconds = clampDuration(params.durationSeconds ?? getCameraMoveDurationSeconds(params.keyframes));
   const label = params.slot === 'start' ? 'Start' : 'End';
@@ -47,6 +49,7 @@ export function setTwoPointCameraKeyframe(params: {
     label,
     timeSeconds,
     camera: params.camera,
+    objectOverrides: params.objectOverrides,
   });
   const filtered = params.keyframes.filter((keyframe) => keyframe.label.toLowerCase() !== label.toLowerCase());
   return getSortedCameraKeyframes([...filtered, replacement]);

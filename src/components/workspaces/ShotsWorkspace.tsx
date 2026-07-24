@@ -426,6 +426,7 @@ export function ShotsWorkspace() {
       slot,
       camera,
       durationSeconds: cameraMoveDurationSeconds,
+      objectOverrides: selectedShot.objectOverrides,
     });
     updateCameraMoveKeyframes(nextKeyframes);
     // Keep main shutter phase in sync with advanced drawer Set Start / Set End.
@@ -881,6 +882,7 @@ export function ShotsWorkspace() {
         slot: 'start',
         camera: pose,
         durationSeconds: cameraMoveDurationSeconds,
+        objectOverrides: selectedShot.objectOverrides,
       }),
       assets: {
         ...selectedShot.assets,
@@ -914,12 +916,14 @@ export function ShotsWorkspace() {
         slot: 'start',
         camera: selectedShot.camera,
         durationSeconds: cameraMoveDurationSeconds,
+        objectOverrides: selectedShot.objectOverrides,
       });
     updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
       keyframes: baseKeyframes,
       slot: 'end',
       camera,
       durationSeconds: cameraMoveDurationSeconds,
+      objectOverrides: selectedShot.objectOverrides,
     }));
     // Keep viewfinder live; shutter phase advances via videoPhase (not flying flag).
     landShotFraming(selectedShot.id, camera, { keepFlying: true });
@@ -1284,7 +1288,10 @@ export function ShotsWorkspace() {
             <div className="flex items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-semibold">Per-shot staging</div>
-                <div className="text-[11px] text-white/60">Click an object in the viewfinder, or pick one below.</div>
+                <div className="text-[11px] text-white/60">
+                  Click an object in the viewfinder, or pick one below.
+                  {captureMode === 'video' ? ' Start/end keyframes freeze poses for video.' : ''}
+                </div>
               </div>
               <div className="flex gap-1">
                 <button type="button" onClick={() => setStagingGizmoMode('translate')} className={`rounded-lg p-2 ${stagingGizmoMode === 'translate' ? 'bg-white text-black' : 'bg-white/10 text-white'}`} title="Move"><Move3D className="h-4 w-4" /></button>
