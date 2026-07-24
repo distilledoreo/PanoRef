@@ -76,6 +76,7 @@ import { canUseProjectedAppearance } from '../../engine/projectedStyle';
 import {
   canStageObjectPerShot,
   clearShotObjectOverride,
+  getSceneObjectStagingRole,
   resolveProjectForShot,
   updateShotObjectOverrides,
 } from '../../engine/shotSceneState';
@@ -178,6 +179,10 @@ export function ShotsWorkspace() {
   const stagedObject = stagedObjectId
     ? shotSceneProject.scene.objects.find((object) => object.id === stagedObjectId)
     : undefined;
+  const stageableObjects = useMemo(
+    () => shotSceneProject.scene.objects.filter((object) => object.visible && canStageObjectPerShot(object)),
+    [shotSceneProject.scene.objects],
+  );
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
   const linkedAsset = linkedPano ? project.assets.assets[linkedPano.imageAssetId] : undefined;
   const draftCameraRef = useRef<CameraData | undefined>();
@@ -1279,7 +1284,7 @@ export function ShotsWorkspace() {
             <div className="flex items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-semibold">Per-shot staging</div>
-                <div className="text-[11px] text-white/60">Select a prop or person, then move or rotate it.</div>
+                <div className="text-[11px] text-white/60">Click an object in the viewfinder, or pick one below.</div>
               </div>
               <div className="flex gap-1">
                 <button type="button" onClick={() => setStagingGizmoMode('translate')} className={`rounded-lg p-2 ${stagingGizmoMode === 'translate' ? 'bg-white text-black' : 'bg-white/10 text-white'}`} title="Move"><Move3D className="h-4 w-4" /></button>
@@ -1295,7 +1300,26 @@ export function ShotsWorkspace() {
                 </div>
               </div>
             ) : (
-              <p className="mt-3 border-t border-white/10 pt-3 text-xs text-white/60">No stageable object selected.</p>
+              <p className="mt-3 border-t border-white/10 pt-3 text-xs text-white/60">No object selected.</p>
+            )}
+            {stageableObjects.length > 0 && (
+              <div className="mt-3 max-h-40 space-y-1 overflow-y-auto border-t border-white/10 pt-3" data-shots-staging-object-list>
+                {stageableObjects.map((object) => (
+                  <button
+                    key={object.id}
+                    type="button"
+                    onClick={() => selectStagedObject(object.id)}
+                    className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                      stagedObjectId === object.id ? 'bg-white text-black' : 'bg-white/5 text-white/85 hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="truncate">{object.name}</span>
+                    <span className="ml-2 shrink-0 text-[10px] uppercase tracking-wide opacity-60">
+                      {getSceneObjectStagingRole(object)}
+                    </span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         )}

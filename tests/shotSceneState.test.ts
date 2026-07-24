@@ -46,6 +46,8 @@ describe('per-shot scene state', () => {
     expect(byId.get(prop.id)?.visible).toBe(true);
     expect(getSceneObjectStagingRole(mannequin)).toBe('person');
     expect(canStageObjectPerShot(prop)).toBe(true);
+    expect(canStageObjectPerShot(createSceneObject('box', 2))).toBe(true);
+    expect(canStageObjectPerShot(createSceneObject('sun_marker', 1))).toBe(false);
   });
 
   it('drops redundant overrides and supports reset to base', () => {

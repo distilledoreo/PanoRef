@@ -845,6 +845,7 @@ export function SceneViewport({
 
       if (event.button !== 0) return;
 
+      const preserveCamera = Boolean(framing);
       const pointer = getPointerState(
         event,
         canvas,
@@ -852,6 +853,8 @@ export function SceneViewport({
         orbitRef.current,
         sceneRef.current,
         snapToGridRef.current,
+        true,
+        { preserveCamera },
       );
       if (!pointer) return;
       const floorPoint = pointer.floorPoint;
@@ -949,6 +952,7 @@ export function SceneViewport({
             sceneRef.current,
             snapToGridRef.current,
             needsFloorPoint,
+            { preserveCamera: Boolean(shotFramingRef.current) },
           )
         : undefined;
       if (placementTypeRef.current && pointer?.floorPoint) {
@@ -1177,6 +1181,8 @@ export function SceneViewport({
         orbitRef.current,
         sceneRef.current,
         snapToGridRef.current,
+        true,
+        { preserveCamera: Boolean(shotFramingRef.current) },
       );
       const { onPlaceObject, onSelectObject } = callbacksRef.current;
       if (drag.kind === 'place') {
@@ -2009,9 +2015,14 @@ function getPointerState(
   scene: THREE.Scene | null,
   snapToGrid: boolean,
   resolveFloorPoint = true,
+  options: { preserveCamera?: boolean } = {},
 ) {
   if (!camera) return undefined;
-  updateCamera(camera, orbit);
+  // Shot framing / staging already poses the live camera. Re-applying orbit here
+  // would raycast from a different viewpoint than the one on screen.
+  if (!options.preserveCamera) {
+    updateCamera(camera, orbit);
+  }
   camera.updateMatrixWorld(true);
 
   const bounds = element.getBoundingClientRect();

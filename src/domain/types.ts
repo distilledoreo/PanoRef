@@ -87,7 +87,7 @@ export interface SceneObject {
   category: 'architecture' | 'environment' | 'helper' | 'landmark';
   locked: boolean;
   visible: boolean;
-  /** Set geometry is global; props and people may be staged per shot. */
+  /** Staging classification for clean-plate people export; any unlocked object may still be staged per shot. */
   stagingRole?: StagingRole;
   /** @deprecated Prefer surfaceStyle + color. Kept for older project files. */
   materialId?: string;
