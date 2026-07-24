@@ -81,6 +81,7 @@ import {
   updateShotObjectOverrides,
 } from '../../engine/shotSceneState';
 import { getPeopleRenderVariants, getPeopleVariantPath } from '../../engine/peopleExport';
+import { snapshotStageableObjectOverrides } from '../../engine/objectKeyframes';
 import {
   type ShotStillViewSelection,
 } from '../../domain/shotStillViews';
@@ -421,12 +422,14 @@ export function ShotsWorkspace() {
     if (!selectedShot) return;
     const camera = getEffectiveCamera();
     if (!camera) return;
+    const latest = useContinuityStore.getState().project;
+    const latestShot = latest.shots.find((item) => item.id === selectedShot.id) ?? selectedShot;
     const nextKeyframes = setTwoPointCameraKeyframe({
-      keyframes: selectedShot.cameraKeyframes,
+      keyframes: latestShot.cameraKeyframes,
       slot,
       camera,
       durationSeconds: cameraMoveDurationSeconds,
-      objectOverrides: selectedShot.objectOverrides,
+      objectOverrides: snapshotStageableObjectOverrides(latest, latestShot),
     });
     updateCameraMoveKeyframes(nextKeyframes);
     // Keep main shutter phase in sync with advanced drawer Set Start / Set End.
@@ -873,6 +876,8 @@ export function ShotsWorkspace() {
       position: [...camera.position] as CameraData['position'],
       target: [...camera.target] as CameraData['target'],
     };
+    const latest = useContinuityStore.getState().project;
+    const latestShot = latest.shots.find((item) => item.id === selectedShot.id) ?? selectedShot;
     // Start pose only — keep flying so the user can continue to the end.
     // Persist the live pose onto the shot so chrome re-renders cannot reseat the camera at an old origin.
     updateShot(selectedShot.id, {
@@ -882,10 +887,10 @@ export function ShotsWorkspace() {
         slot: 'start',
         camera: pose,
         durationSeconds: cameraMoveDurationSeconds,
-        objectOverrides: selectedShot.objectOverrides,
+        objectOverrides: snapshotStageableObjectOverrides(latest, latestShot),
       }),
       assets: {
-        ...selectedShot.assets,
+        ...latestShot.assets,
         cameraMoveVideoAssetId: undefined,
       },
     });
@@ -906,24 +911,27 @@ export function ShotsWorkspace() {
     if (!selectedShot) return;
     const camera = getEffectiveCamera();
     if (!camera) return;
+    const latest = useContinuityStore.getState().project;
+    const latestShot = latest.shots.find((item) => item.id === selectedShot.id) ?? selectedShot;
+    const objectSnapshot = snapshotStageableObjectOverrides(latest, latestShot);
     // Preserve an existing start keyframe when stopping; only rewrite end.
-    const baseKeyframes = selectedShot.cameraKeyframes.some(
+    const baseKeyframes = latestShot.cameraKeyframes.some(
       (keyframe) => keyframe.label.toLowerCase() === 'start',
     )
-      ? selectedShot.cameraKeyframes
+      ? latestShot.cameraKeyframes
       : setTwoPointCameraKeyframe({
-        keyframes: selectedShot.cameraKeyframes,
+        keyframes: latestShot.cameraKeyframes,
         slot: 'start',
-        camera: selectedShot.camera,
+        camera: latestShot.camera,
         durationSeconds: cameraMoveDurationSeconds,
-        objectOverrides: selectedShot.objectOverrides,
+        objectOverrides: objectSnapshot,
       });
     updateCameraMoveKeyframes(setTwoPointCameraKeyframe({
       keyframes: baseKeyframes,
       slot: 'end',
       camera,
       durationSeconds: cameraMoveDurationSeconds,
-      objectOverrides: selectedShot.objectOverrides,
+      objectOverrides: objectSnapshot,
     }));
     // Keep viewfinder live; shutter phase advances via videoPhase (not flying flag).
     landShotFraming(selectedShot.id, camera, { keepFlying: true });

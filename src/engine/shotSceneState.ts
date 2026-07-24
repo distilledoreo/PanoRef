@@ -91,8 +91,9 @@ export function resolveProjectForAnimatedCameraMove(
   const startOverrides = sorted[0]?.objectOverrides;
   const endOverrides = sorted[sorted.length - 1]?.objectOverrides;
   const fallback = shot.objectOverrides ?? {};
-  const start = startOverrides && Object.keys(startOverrides).length > 0 ? startOverrides : fallback;
-  const end = endOverrides && Object.keys(endOverrides).length > 0 ? endOverrides : fallback;
+  // Explicit snapshots (including {}) win; only legacy undefined falls back.
+  const start = startOverrides !== undefined ? startOverrides : fallback;
+  const end = endOverrides !== undefined ? endOverrides : fallback;
 
   const objects = project.scene.objects.map((object) => {
     const stagingRole = getSceneObjectStagingRole(object);

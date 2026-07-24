@@ -333,7 +333,8 @@ export function createCameraKeyframe(params: {
     label: params.label,
     timeSeconds: params.timeSeconds,
     camera: cloneCamera(params.camera),
-    ...(params.objectOverrides && Object.keys(params.objectOverrides).length > 0
+    // Preserve explicit snapshots, including empty ones ("use build poses").
+    ...(params.objectOverrides !== undefined
       ? { objectOverrides: structuredClone(params.objectOverrides) }
       : {}),
   };
