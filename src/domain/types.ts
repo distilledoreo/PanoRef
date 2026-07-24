@@ -237,7 +237,14 @@ export interface PromptOverrides {
 }
 
 export interface ShotAssetRefs {
+  /** Clay still with people (primary camera-roll capture). */
   viewportRenderAssetId?: string;
+  /** Clay still with people hidden (clean plate). */
+  viewportCleanPlateAssetId?: string;
+  /** Projected still with people. */
+  viewportProjectedAssetId?: string;
+  /** Projected still with people hidden (clean plate). */
+  viewportProjectedCleanPlateAssetId?: string;
   panoCropAssetId?: string;
   finalBaseFrameAssetId?: string;
   aiResultFrameAssetId?: string;
