@@ -37,8 +37,11 @@ export function getSceneObjectStagingRole(
   return object.type === 'human_dummy' ? 'person' : 'set';
 }
 
-export function canStageObjectPerShot(object: Pick<SceneObject, 'type' | 'stagingRole'>): boolean {
-  return getSceneObjectStagingRole(object) !== 'set';
+export function canStageObjectPerShot(object: Pick<SceneObject, 'type' | 'stagingRole' | 'locked'>): boolean {
+  if (object.locked) return false;
+  // Sun markers are helpers, not shot dressing.
+  if (object.type === 'sun_marker') return false;
+  return true;
 }
 
 export function resolveSceneObjectsForShot(

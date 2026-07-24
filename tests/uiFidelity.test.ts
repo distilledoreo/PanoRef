@@ -339,6 +339,9 @@ describe('ui revamp fidelity surfaces', () => {
     expect(viewport).toContain('showSceneGuides: shotFraming ? false : showSceneGuides');
     expect(viewport).toContain('if (framing && !objectEditingActiveRef.current) return;');
     expect(viewport).toContain('objectEditingActiveRef.current = objectEditingActive');
+    expect(viewport).toContain('const preserveCamera = Boolean(framing);');
+    expect(viewport).toContain('preserveCamera: Boolean(shotFramingRef.current)');
+    expect(viewport).toContain('if (!options.preserveCamera)');
   });
 
   it('disables fog for shot-framing viewfinder scenes while keeping Build fog', () => {

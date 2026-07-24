@@ -1321,7 +1321,7 @@ function PrecisionControls({
           )}
         </div>
       )}
-      <Field label="Staging role" hint="Props and people can move independently in each shot.">
+      <Field label="Staging role" hint="People are hidden on clean-plate exports. Any unlocked object can still be staged per shot.">
         <Select
           value={getSceneObjectStagingRole(object)}
           onChange={(event) => onChange({ stagingRole: event.target.value as StagingRole }, 'step')}
