@@ -169,7 +169,10 @@ function normalizeShot(shot: Shot): Shot {
   return {
     ...shot,
     productionShotId: normalizeProductionShotId(shot.productionShotId),
-    cameraKeyframes: shot.cameraKeyframes ?? [],
+    cameraKeyframes: (shot.cameraKeyframes ?? []).map((keyframe) => ({
+      ...keyframe,
+      objectOverrides: normalizeShotObjectOverrides(keyframe.objectOverrides),
+    })),
     objectOverrides: normalizeShotObjectOverrides(shot.objectOverrides),
     exportSettings: {
       ...exportSettings,

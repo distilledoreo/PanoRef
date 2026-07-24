@@ -13,6 +13,7 @@ import {
   ProjectWorkflow,
   Shot,
   ShotExportSettings,
+  ShotObjectOverrides,
   Transform,
   Vec3,
 } from './types';
@@ -325,12 +326,16 @@ export function createCameraKeyframe(params: {
   label: string;
   timeSeconds: number;
   camera: CameraData;
+  objectOverrides?: ShotObjectOverrides;
 }): CameraKeyframe {
   return {
     id: createId('keyframe'),
     label: params.label,
     timeSeconds: params.timeSeconds,
     camera: cloneCamera(params.camera),
+    ...(params.objectOverrides && Object.keys(params.objectOverrides).length > 0
+      ? { objectOverrides: structuredClone(params.objectOverrides) }
+      : {}),
   };
 }
 

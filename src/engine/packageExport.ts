@@ -24,6 +24,7 @@ import {
   renderViewportProjected,
 } from './renderers';
 import { resolveProjectForShot } from './shotSceneState';
+import { interpolateObjectOverrides } from './objectKeyframes';
 import { getPeopleRenderVariants, getPeopleVariantPath, peopleVariantLabel } from './peopleExport';
 
 export { downloadBlob };
@@ -398,6 +399,22 @@ async function appendShotPackageToZip(
       ? shotProject
       : resolveProjectForShot(project, shot, { hidePeople: true })
   );
+  const projectForVariantAtTime = (
+    variant: (typeof peopleVariants)[number],
+    timeSeconds: number,
+  ) => {
+    const overrides = interpolateObjectOverrides(
+      shot.cameraKeyframes,
+      timeSeconds,
+      shot.objectOverrides,
+      project.scene.objects,
+    );
+    return resolveProjectForShot(
+      project,
+      { ...shot, objectOverrides: overrides },
+      { hidePeople: variant === 'clean_plate' },
+    );
+  };
   const emit = (
     phase: PackageExportPhase,
     message: string,
@@ -593,7 +610,7 @@ async function appendShotPackageToZip(
           { unitFraction: 0, indeterminate: true },
         );
         const clay = await renderViewportClay(
-          projectForVariant(variant),
+          projectForVariantAtTime(variant, frame.timeSeconds),
           frame.camera,
           shot.exportSettings.width,
           shot.exportSettings.height,
@@ -629,7 +646,7 @@ async function appendShotPackageToZip(
         );
         try {
           const projected = await renderViewportProjected(
-            projectForVariant(variant),
+            projectForVariantAtTime(variant, frame.timeSeconds),
             frame.camera,
             shot.exportSettings.width,
             shot.exportSettings.height,

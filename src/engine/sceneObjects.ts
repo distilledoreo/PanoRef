@@ -8,6 +8,7 @@ import {
   ProjectedStyleSettings,
   SceneObject,
   SceneObjectType,
+  Transform,
   Vec3,
 } from '../domain/types';
 import { createHumanMannequinObject } from './humanMannequinModel';
@@ -453,20 +454,39 @@ export function createObject3D(
       node = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
   }
 
-  const preservesProceduralScale = [
-    'arch', 'doorway', 'stairs', 'tree_blob', 'human_dummy', 'sun_marker', 'imported_model',
-  ].includes(object.type);
   node.name = object.name;
-  node.position.fromArray(object.transform.position);
-  node.rotation.set(
-    degreesToRadians(object.transform.rotation[0]),
-    degreesToRadians(object.transform.rotation[1]),
-    degreesToRadians(object.transform.rotation[2]),
-  );
-  if (!preservesProceduralScale) {
-    node.scale.fromArray(object.transform.scale);
-  }
+  applySceneObjectPose(node, object.transform, {
+    applyScale: !sceneObjectUsesProceduralScale(object.type),
+  });
   return node;
+}
+
+/** Apply a staged/interpolated pose onto a built scene object node. */
+export function applySceneObjectPose(
+  node: THREE.Object3D,
+  transform: Transform,
+  options: { applyScale?: boolean; visible?: boolean } = {},
+) {
+  node.position.fromArray(transform.position);
+  node.rotation.set(
+    degreesToRadians(transform.rotation[0]),
+    degreesToRadians(transform.rotation[1]),
+    degreesToRadians(transform.rotation[2]),
+  );
+  if (options.applyScale !== false) {
+    node.scale.fromArray(transform.scale);
+  }
+  if (options.visible !== undefined) {
+    node.visible = options.visible;
+  }
+}
+
+const PROCEDURAL_SCALE_TYPES = new Set<SceneObjectType>([
+  'arch', 'doorway', 'stairs', 'tree_blob', 'human_dummy', 'sun_marker', 'imported_model',
+]);
+
+export function sceneObjectUsesProceduralScale(type: SceneObjectType): boolean {
+  return PROCEDURAL_SCALE_TYPES.has(type);
 }
 
 function createArch(object: SceneObject, material: THREE.Material): THREE.Group {
