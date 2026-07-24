@@ -1,11 +1,17 @@
 import type {
   CameraKeyframe,
+  LocationProject,
   SceneObject,
+  Shot,
   ShotObjectOverride,
   ShotObjectOverrides,
   Transform,
 } from '../domain/types';
-import { cloneTransform } from './shotSceneState';
+import {
+  canStageObjectPerShot,
+  cloneTransform,
+  resolveSceneObjectsForShot,
+} from './shotSceneState';
 import { getSortedCameraKeyframes } from './cameraKeyframes';
 
 export function cloneShotObjectOverrides(
@@ -26,19 +32,42 @@ export function cloneShotObjectOverride(override: ShotObjectOverride): ShotObjec
   };
 }
 
-/** True when at least one camera keyframe carries a staged-object snapshot. */
+/**
+ * Freeze absolute stageable-object poses for a camera keyframe.
+ * Always returns a defined map (possibly empty) so export can tell "base poses"
+ * apart from "legacy keyframe with no snapshot".
+ */
+export function snapshotStageableObjectOverrides(
+  project: Pick<LocationProject, 'scene'>,
+  shot: Pick<Shot, 'objectOverrides'>,
+): ShotObjectOverrides {
+  const resolved = resolveSceneObjectsForShot(project, shot);
+  const snapshot: ShotObjectOverrides = {};
+  for (const object of resolved) {
+    if (!canStageObjectPerShot(object)) continue;
+    snapshot[object.id] = {
+      transform: cloneTransform(object.transform),
+      visible: object.visible,
+    };
+  }
+  return snapshot;
+}
+
+/** True when start/end keyframes carry explicit object snapshots to animate. */
 export function cameraKeyframesHaveObjectAnimation(
   keyframes: readonly CameraKeyframe[] = [],
 ): boolean {
-  return getSortedCameraKeyframes(keyframes).some(
-    (keyframe) => Boolean(keyframe.objectOverrides && Object.keys(keyframe.objectOverrides).length > 0),
-  );
+  const sorted = getSortedCameraKeyframes(keyframes);
+  if (sorted.length < 2) return false;
+  return sorted[0].objectOverrides !== undefined
+    || sorted[sorted.length - 1].objectOverrides !== undefined;
 }
 
 /**
  * Interpolate staged-object overrides between the surrounding camera keyframes.
- * Falls back to `fallbackOverrides` (usually the shot's live objectOverrides) when
- * keyframes do not carry snapshots.
+ *
+ * Explicit keyframe snapshots (including `{}`) always win. Only legacy keyframes
+ * with `objectOverrides: undefined` fall back to the shot's live overrides.
  */
 export function interpolateObjectOverrides(
   keyframes: readonly CameraKeyframe[],
@@ -53,11 +82,11 @@ export function interpolateObjectOverrides(
   const baseById = new Map(baseObjects.map((object) => [object.id, object]));
 
   if (sorted.length === 1 || timeSeconds <= sorted[0].timeSeconds) {
-    return resolveKeyframeOverrides(sorted[0], fallback);
+    return materializeOverrides(resolveKeyframeOverrides(sorted[0], fallback), baseById);
   }
   const last = sorted[sorted.length - 1];
   if (timeSeconds >= last.timeSeconds) {
-    return resolveKeyframeOverrides(last, fallback);
+    return materializeOverrides(resolveKeyframeOverrides(last, fallback), baseById);
   }
 
   const nextIndex = sorted.findIndex((keyframe) => keyframe.timeSeconds >= timeSeconds);
@@ -71,22 +100,16 @@ export function interpolateObjectOverrides(
   const ids = new Set([
     ...Object.keys(startOverrides),
     ...Object.keys(endOverrides),
-    ...Object.keys(fallback),
     ...baseObjects.map((object) => object.id),
-  ]);
-
-  // Only emit overrides for objects that actually participate in keyframe/fallback staging.
-  const stagedIds = new Set([
-    ...Object.keys(startOverrides),
-    ...Object.keys(endOverrides),
-    ...Object.keys(fallback),
   ]);
 
   const result: ShotObjectOverrides = {};
   for (const id of ids) {
-    if (!stagedIds.has(id)) continue;
     const startOverride = startOverrides[id];
     const endOverride = endOverrides[id];
+    // Skip objects that never appear in either snapshot — keep build pose.
+    if (!startOverride && !endOverride) continue;
+
     const base = baseById.get(id);
     const startTransform = startOverride?.transform ?? base?.transform;
     const endTransform = endOverride?.transform ?? base?.transform;
@@ -120,10 +143,30 @@ function resolveKeyframeOverrides(
   keyframe: CameraKeyframe,
   fallback: ShotObjectOverrides,
 ): ShotObjectOverrides {
-  if (keyframe.objectOverrides && Object.keys(keyframe.objectOverrides).length > 0) {
+  // Explicit snapshot — including empty — means "use these poses", not live shot state.
+  if (keyframe.objectOverrides !== undefined) {
     return cloneShotObjectOverrides(keyframe.objectOverrides);
   }
   return cloneShotObjectOverrides(fallback);
+}
+
+function materializeOverrides(
+  overrides: ShotObjectOverrides,
+  baseById: Map<string, Pick<SceneObject, 'id' | 'transform' | 'visible'>>,
+): ShotObjectOverrides {
+  const result: ShotObjectOverrides = {};
+  for (const [id, override] of Object.entries(overrides)) {
+    const base = baseById.get(id);
+    result[id] = {
+      transform: cloneTransform(override.transform ?? base?.transform ?? {
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      }),
+      visible: override.visible ?? base?.visible ?? true,
+    };
+  }
+  return result;
 }
 
 function lerpTransform(start: Transform, end: Transform, t: number): Transform {
