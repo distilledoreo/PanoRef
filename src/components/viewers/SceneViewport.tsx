@@ -89,6 +89,7 @@ import { ShotViewfinderOverlay } from './ShotViewfinderOverlay';
 type DragKind =
   | 'idle'
   | 'orbit'
+  | 'select'
   | 'gizmo_translate'
   | 'gizmo_rotate'
   | 'gizmo_scale'
@@ -145,6 +146,7 @@ export function SceneViewport({
   freeCameraActive = false,
   renderDistance = DEFAULT_BUILD_RENDER_DISTANCE,
   appearance = 'clay',
+  objectEditingActive = false,
   onFreeCameraActiveChange,
   shotFraming,
   onSelectObject,
@@ -180,6 +182,8 @@ export function SceneViewport({
   renderDistance?: number;
   /** Clay keeps existing materials; Projected applies world-space equirect styling when available. */
   appearance?: ViewportAppearanceMode;
+  /** Allow object picking/gizmos while a landed shot camera remains active. */
+  objectEditingActive?: boolean;
   onFreeCameraActiveChange?: (active: boolean) => void;
   shotFraming?: {
     shotId: string;
@@ -325,6 +329,7 @@ export function SceneViewport({
   const showTransformGizmoRef = useRef(showTransformGizmo);
   const gizmoModeRef = useRef(gizmoMode);
   const originPlacementActiveRef = useRef(originPlacementActive);
+  const objectEditingActiveRef = useRef(objectEditingActive);
 
   selectedObjectIdsRef.current = selectedObjectIds;
   projectRef.current = project;
@@ -338,6 +343,7 @@ export function SceneViewport({
   showTransformGizmoRef.current = showTransformGizmo;
   gizmoModeRef.current = gizmoMode;
   originPlacementActiveRef.current = originPlacementActive;
+  objectEditingActiveRef.current = objectEditingActive;
   callbacksRef.current = {
     onSelectObject,
     onPlaceObject,
@@ -366,7 +372,12 @@ export function SceneViewport({
 
   const syncTransformGizmo = useCallback(() => {
     const scene = sceneRef.current;
-    if (!scene || shotFramingRef.current || !showTransformGizmoRef.current) {
+    // Shot framing normally hides Build gizmos; per-shot staging re-enables them.
+    if (
+      !scene
+      || !showTransformGizmoRef.current
+      || (shotFramingRef.current && !objectEditingActiveRef.current)
+    ) {
       clearTransformGizmo();
       return;
     }
@@ -812,7 +823,7 @@ export function SceneViewport({
         return;
       }
 
-      if (framing) return;
+      if (framing && !objectEditingActiveRef.current) return;
 
       if (freeCameraActiveRef.current && event.button === 0) {
         event.preventDefault();
@@ -834,6 +845,7 @@ export function SceneViewport({
 
       if (event.button !== 0) return;
 
+      const preserveCamera = Boolean(framing);
       const pointer = getPointerState(
         event,
         canvas,
@@ -841,6 +853,8 @@ export function SceneViewport({
         orbitRef.current,
         sceneRef.current,
         snapToGridRef.current,
+        true,
+        { preserveCamera },
       );
       if (!pointer) return;
       const floorPoint = pointer.floorPoint;
@@ -899,9 +913,23 @@ export function SceneViewport({
           return;
         }
       }
+      const selectionMode = event.shiftKey || event.ctrlKey || event.metaKey ? 'toggle' : 'replace';
+      // Staging locks the landed camera; use click-to-select instead of orbit.
+      if (framing && objectEditingActiveRef.current) {
+        dragRef.current = {
+          kind: 'select',
+          x: event.clientX,
+          y: event.clientY,
+          moved: false,
+          pendingSelectId: hitObject?.id,
+          pendingSelectionMode: selectionMode,
+        };
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       beginOrbitDrag(event);
       dragRef.current.pendingSelectId = hitObject?.id;
-      dragRef.current.pendingSelectionMode = event.shiftKey || event.ctrlKey || event.metaKey ? 'toggle' : 'replace';
+      dragRef.current.pendingSelectionMode = selectionMode;
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -924,6 +952,7 @@ export function SceneViewport({
             sceneRef.current,
             snapToGridRef.current,
             needsFloorPoint,
+            { preserveCamera: Boolean(shotFramingRef.current) },
           )
         : undefined;
       if (placementTypeRef.current && pointer?.floorPoint) {
@@ -1152,6 +1181,8 @@ export function SceneViewport({
         orbitRef.current,
         sceneRef.current,
         snapToGridRef.current,
+        true,
+        { preserveCamera: Boolean(shotFramingRef.current) },
       );
       const { onPlaceObject, onSelectObject } = callbacksRef.current;
       if (drag.kind === 'place') {
@@ -1166,7 +1197,7 @@ export function SceneViewport({
         } else if (lastFloorPointRef.current) {
           updatePreviewMesh(lastFloorPointRef.current);
         }
-      } else if (drag.kind === 'orbit' && !drag.moved) {
+      } else if ((drag.kind === 'orbit' || drag.kind === 'select') && !drag.moved) {
         onSelectObject?.(drag.pendingSelectId, drag.pendingSelectionMode);
       }
       const wasEditDrag = drag.kind === 'gizmo_translate'
@@ -1984,9 +2015,14 @@ function getPointerState(
   scene: THREE.Scene | null,
   snapToGrid: boolean,
   resolveFloorPoint = true,
+  options: { preserveCamera?: boolean } = {},
 ) {
   if (!camera) return undefined;
-  updateCamera(camera, orbit);
+  // Shot framing / staging already poses the live camera. Re-applying orbit here
+  // would raycast from a different viewpoint than the one on screen.
+  if (!options.preserveCamera) {
+    updateCamera(camera, orbit);
+  }
   camera.updateMatrixWorld(true);
 
   const bounds = element.getBoundingClientRect();

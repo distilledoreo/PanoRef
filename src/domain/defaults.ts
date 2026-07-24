@@ -13,6 +13,7 @@ import {
   ProjectWorkflow,
   Shot,
   ShotExportSettings,
+  ShotObjectOverrides,
   Transform,
   Vec3,
 } from './types';
@@ -153,6 +154,7 @@ export function normalizeProjectSettings(settings?: Partial<ProjectSettings>): P
 export const defaultShotExportSettings: ShotExportSettings = {
   width: DEFAULT_SHOT_WIDTH,
   height: DEFAULT_SHOT_HEIGHT,
+  peopleExportMode: 'with_people',
   includeViewport: true,
   /** Include projected stills alongside clay when a styled pano is available. */
   includeProjectedViewport: true,
@@ -324,12 +326,17 @@ export function createCameraKeyframe(params: {
   label: string;
   timeSeconds: number;
   camera: CameraData;
+  objectOverrides?: ShotObjectOverrides;
 }): CameraKeyframe {
   return {
     id: createId('keyframe'),
     label: params.label,
     timeSeconds: params.timeSeconds,
     camera: cloneCamera(params.camera),
+    // Preserve explicit snapshots, including empty ones ("use build poses").
+    ...(params.objectOverrides !== undefined
+      ? { objectOverrides: structuredClone(params.objectOverrides) }
+      : {}),
   };
 }
 

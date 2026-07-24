@@ -87,7 +87,7 @@ export interface SceneObject {
   category: 'architecture' | 'environment' | 'helper' | 'landmark';
   locked: boolean;
   visible: boolean;
-  /** Set geometry is global; props and people may be staged per shot. */
+  /** Staging classification for clean-plate people export; any unlocked object may still be staged per shot. */
   stagingRole?: StagingRole;
   /** @deprecated Prefer surfaceStyle + color. Kept for older project files. */
   materialId?: string;
@@ -152,6 +152,11 @@ export interface CameraKeyframe {
   label: string;
   timeSeconds: number;
   camera: CameraData;
+  /**
+   * Optional staged-object snapshot captured with this keyframe.
+   * Used to animate props/people between start and end during camera-move video export.
+   */
+  objectOverrides?: ShotObjectOverrides;
 }
 
 export interface PanoCropSettings {
@@ -165,9 +170,13 @@ export interface PanoCropSettings {
   height: number;
 }
 
+export type PeopleExportMode = 'with_people' | 'clean_plate' | 'both';
+
 export interface ShotExportSettings {
   width: number;
   height: number;
+  /** Whether shot renders include staged people, a clean plate, or both. */
+  peopleExportMode?: PeopleExportMode;
   includeViewport: boolean;
   /** Optional projected-style still matching the clay viewport camera. */
   includeProjectedViewport?: boolean;
@@ -233,7 +242,14 @@ export interface PromptOverrides {
 }
 
 export interface ShotAssetRefs {
+  /** Clay still with people (primary camera-roll capture). */
   viewportRenderAssetId?: string;
+  /** Clay still with people hidden (clean plate). */
+  viewportCleanPlateAssetId?: string;
+  /** Projected still with people. */
+  viewportProjectedAssetId?: string;
+  /** Projected still with people hidden (clean plate). */
+  viewportProjectedCleanPlateAssetId?: string;
   panoCropAssetId?: string;
   finalBaseFrameAssetId?: string;
   aiResultFrameAssetId?: string;

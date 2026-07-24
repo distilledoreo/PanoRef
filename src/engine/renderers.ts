@@ -22,8 +22,10 @@ import {
   releaseProjectedStyleTexture,
 } from './projectedStyleMaterials';
 import {
+  applySceneObjectPose,
   buildScene,
   disposeScene,
+  sceneObjectUsesProceduralScale,
   type ProjectedSceneOptions,
   type SceneVisualTheme,
 } from './sceneObjects';
@@ -37,7 +39,16 @@ import {
 import { degreesToRadians, flyCameraFromCamera, type FlyCameraState } from './sync';
 import { computeGrayboxPanoFarPlane } from './sceneBounds';
 import { createFinalRenderSceneOptions } from './finalRenderProfile';
-import { resolveProjectForShot } from './shotSceneState';
+import {
+  resolveProjectForAnimatedCameraMove,
+  resolveProjectForShot,
+} from './shotSceneState';
+import {
+  cameraKeyframesHaveObjectAnimation,
+  interpolateObjectOverrides,
+} from './objectKeyframes';
+import { findSceneObjectMesh } from './transformGizmo';
+import type { PeopleRenderVariant } from './peopleExport';
 import {
   clampShotNearClip,
   DEFAULT_SHOT_NEAR_CLIP_METERS,
@@ -131,6 +142,8 @@ export interface CameraMoveVideoOptions {
    * Default false — downloads and ZIP packaging should use `blob` only.
    */
   includeDataUrl?: boolean;
+  /** Hide all objects classified as people for clean-plate output. */
+  peopleVariant?: PeopleRenderVariant;
 }
 
 const MP4_MIME_CANDIDATES = [
@@ -287,9 +300,13 @@ export async function renderGrayboxEquirectangularPano(
   return { dataUrl, width, height };
 }
 
-export async function renderShotFrame(project: LocationProject, shot: Shot): Promise<ImageRenderResult> {
+export async function renderShotFrame(
+  project: LocationProject,
+  shot: Shot,
+  options: { peopleVariant?: PeopleRenderVariant } = {},
+): Promise<ImageRenderResult> {
   return renderViewportClay(
-    resolveProjectForShot(project, shot),
+    resolveProjectForShot(project, shot, { hidePeople: options.peopleVariant === 'clean_plate' }),
     shot.camera,
     shot.exportSettings.width,
     shot.exportSettings.height,
@@ -301,7 +318,11 @@ export async function renderShotCameraMoveMp4(
   shot: Shot,
   options: CameraMoveVideoOptions = {},
 ): Promise<VideoRenderResult> {
-  const shotProject = resolveProjectForShot(project, shot);
+  const hidePeople = options.peopleVariant === 'clean_plate';
+  const animateObjects = cameraKeyframesHaveObjectAnimation(shot.cameraKeyframes);
+  const shotProject = animateObjects
+    ? resolveProjectForAnimatedCameraMove(project, shot, { hidePeople })
+    : resolveProjectForShot(project, shot, { hidePeople });
   const keyframes = getSortedCameraKeyframes(shot.cameraKeyframes);
   if (!hasRenderableCameraMove(keyframes)) {
     throw new Error('Capture start and end camera keyframes before exporting MP4.');
@@ -342,6 +363,8 @@ export async function renderShotCameraMoveMp4(
       preset: encodePreset,
       occlusionFilter: options.occlusionFilter ?? 'fast',
       includeDataUrl: options.includeDataUrl === true,
+      animateObjects,
+      sourceProject: project,
     });
   }
 
@@ -359,6 +382,8 @@ export async function renderShotCameraMoveMp4(
     durationSeconds,
     keyframes,
     includeDataUrl: options.includeDataUrl === true,
+    animateObjects,
+    sourceProject: project,
   });
 }
 
@@ -377,6 +402,9 @@ interface CameraMoveRenderContext {
   preset?: ReturnType<typeof resolveVideoPreset> & { width: number; height: number; frameRate: number };
   occlusionFilter?: 'soft' | 'fast';
   includeDataUrl?: boolean;
+  animateObjects?: boolean;
+  /** Original project (pre-shot resolve) for base object transforms during animation. */
+  sourceProject?: LocationProject;
 }
 
 async function renderShotCameraMoveMp4Deterministic(
@@ -396,6 +424,8 @@ async function renderShotCameraMoveMp4Deterministic(
     preset,
     occlusionFilter = 'fast',
     includeDataUrl = false,
+    animateObjects = false,
+    sourceProject,
   } = ctx;
 
   if (!preset) {
@@ -478,6 +508,12 @@ async function renderShotCameraMoveMp4Deterministic(
           width,
           height,
           clipping,
+          animateObjects
+            ? {
+              shot,
+              baseObjects: (sourceProject ?? project).scene.objects,
+            }
+            : undefined,
         );
       },
       onFrameEncoded: (completedFrames, frames) => {
@@ -550,6 +586,8 @@ async function renderShotCameraMoveMp4QuickPreview(
     videoBitsPerSecond,
     occlusionFilter = 'soft',
     includeDataUrl = false,
+    animateObjects = false,
+    sourceProject,
   } = ctx;
 
   if (!mimeType) {
@@ -660,7 +698,22 @@ async function renderShotCameraMoveMp4QuickPreview(
         if (settled) return;
         if (!startTime) startTime = now;
         const elapsedSeconds = Math.min((now - startTime) / 1000, durationSeconds);
-        renderCameraMoveFrame(renderer, scene, camera, keyframes, elapsedSeconds, width, height, clipping);
+        renderCameraMoveFrame(
+          renderer,
+          scene,
+          camera,
+          keyframes,
+          elapsedSeconds,
+          width,
+          height,
+          clipping,
+          animateObjects
+            ? {
+              shot,
+              baseObjects: (sourceProject ?? project).scene.objects,
+            }
+            : undefined,
+        );
         emitProgress(onProgress, {
           phase: 'rendering',
           progress: durationSeconds === 0 ? 1 : elapsedSeconds / durationSeconds,
@@ -753,6 +806,10 @@ function renderCameraMoveFrame(
   width: number,
   height: number,
   clipping: { near: number; far: number },
+  objectAnimation?: {
+    shot: Pick<Shot, 'objectOverrides'>;
+    baseObjects: LocationProject['scene']['objects'];
+  },
 ) {
   const cameraData = interpolateCameraKeyframes(keyframes, timeSeconds);
   // Always use the fixed move clipping range — never interpolated cameraData.near/far.
@@ -764,7 +821,40 @@ function renderCameraMoveFrame(
     clipping.near,
     clipping.far,
   );
+
+  if (objectAnimation) {
+    applyAnimatedObjectOverridesToScene(
+      scene,
+      interpolateObjectOverrides(
+        keyframes,
+        timeSeconds,
+        objectAnimation.shot.objectOverrides,
+        objectAnimation.baseObjects,
+      ),
+      objectAnimation.baseObjects,
+    );
+  }
+
   renderer.render(scene, camera);
+}
+
+function applyAnimatedObjectOverridesToScene(
+  scene: THREE.Scene,
+  overrides: ReturnType<typeof interpolateObjectOverrides>,
+  baseObjects: LocationProject['scene']['objects'],
+) {
+  const baseById = new Map(baseObjects.map((object) => [object.id, object]));
+  for (const [objectId, override] of Object.entries(overrides)) {
+    const node = findSceneObjectMesh(scene, objectId);
+    if (!node) continue;
+    const base = baseById.get(objectId);
+    if (!base) continue;
+    const transform = override.transform ?? base.transform;
+    applySceneObjectPose(node, transform, {
+      applyScale: !sceneObjectUsesProceduralScale(base.type),
+      visible: override.visible ?? base.visible,
+    });
+  }
 }
 
 export async function renderViewportClay(
@@ -1015,9 +1105,10 @@ export async function renderViewportProjected(
 export async function renderShotProjectedFrame(
   project: LocationProject,
   shot: Shot,
+  options: { peopleVariant?: PeopleRenderVariant } = {},
 ): Promise<ImageRenderResult> {
   return renderViewportProjected(
-    resolveProjectForShot(project, shot),
+    resolveProjectForShot(project, shot, { hidePeople: options.peopleVariant === 'clean_plate' }),
     shot.camera,
     shot.exportSettings.width,
     shot.exportSettings.height,

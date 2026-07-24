@@ -24,6 +24,8 @@ import {
   renderViewportProjected,
 } from './renderers';
 import { resolveProjectForShot } from './shotSceneState';
+import { interpolateObjectOverrides } from './objectKeyframes';
+import { getPeopleRenderVariants, getPeopleVariantPath, peopleVariantLabel } from './peopleExport';
 
 export { downloadBlob };
 
@@ -157,6 +159,7 @@ export function countShotPackageUnits(project: LocationProject, shot: Shot): num
   const linkedPanoAsset = linkedPano ? project.assets.assets[linkedPano.imageAssetId] : undefined;
   const aiResultAssetId = shot.assets.aiResultFrameAssetId ?? shot.assets.finalBaseFrameAssetId;
   const canProject = canUseProjectedAppearance(project);
+  const peopleVariants = getPeopleRenderVariants(shot.exportSettings.peopleExportMode);
   const clayMoveFrames = shot.exportSettings.includeCameraMoveReferenceFrames
     ? getCameraMoveReferenceFrames(shot.cameraKeyframes)
     : [];
@@ -170,12 +173,14 @@ export function countShotPackageUnits(project: LocationProject, shot: Shot): num
     && ((canonicalPano && canonicalAsset) || (linkedPano && linkedPanoAsset)),
   );
 
-  if (shot.exportSettings.includeViewport) units += 1;
-  if (shot.exportSettings.includeProjectedViewport && canProject) units += 1;
+  if (shot.exportSettings.includeViewport) units += peopleVariants.length;
+  if (shot.exportSettings.includeProjectedViewport && canProject) units += peopleVariants.length;
   if (shot.exportSettings.includeAiResultFrame && aiResultAssetId) units += 1;
   if (shot.exportSettings.includeCameraMoveVideo) {
     if (shot.assets.cameraMoveVideoAssetId || hasRenderableCameraMove(shot.cameraKeyframes)) {
-      units += 1;
+      units += hasRenderableCameraMove(shot.cameraKeyframes)
+        ? peopleVariants.length
+        : peopleVariants.filter((variant) => variant === 'with_people').length;
     }
   }
   if (
@@ -183,10 +188,10 @@ export function countShotPackageUnits(project: LocationProject, shot: Shot): num
     && canProject
     && hasRenderableCameraMove(shot.cameraKeyframes)
   ) {
-    units += 1;
+    units += peopleVariants.length;
   }
-  units += clayMoveFrames.length;
-  units += projectedMoveFrames.length;
+  units += clayMoveFrames.length * peopleVariants.length;
+  units += projectedMoveFrames.length * peopleVariants.length;
   if (hasCubemap) units += CAMERA_MOVE_CUBEMAP_FACES.length + 1; // faces + stitch
   if (shot.exportSettings.includePanoCrop && linkedPano && shot.panoCrop && linkedPanoAsset) units += 1;
   if (shot.exportSettings.includeFullPano && canonicalAsset && canonicalPano) units += 1;
@@ -387,6 +392,29 @@ async function appendShotPackageToZip(
 ): Promise<string[]> {
   const { shotIndex, tracker, signal, rootFolder } = args;
   const shotProject = resolveProjectForShot(project, shot);
+  const peopleMode = shot.exportSettings.peopleExportMode;
+  const peopleVariants = getPeopleRenderVariants(peopleMode);
+  const projectForVariant = (variant: (typeof peopleVariants)[number]) => (
+    variant === 'with_people'
+      ? shotProject
+      : resolveProjectForShot(project, shot, { hidePeople: true })
+  );
+  const projectForVariantAtTime = (
+    variant: (typeof peopleVariants)[number],
+    timeSeconds: number,
+  ) => {
+    const overrides = interpolateObjectOverrides(
+      shot.cameraKeyframes,
+      timeSeconds,
+      shot.objectOverrides,
+      project.scene.objects,
+    );
+    return resolveProjectForShot(
+      project,
+      { ...shot, objectOverrides: overrides },
+      { hidePeople: variant === 'clean_plate' },
+    );
+  };
   const emit = (
     phase: PackageExportPhase,
     message: string,
@@ -424,28 +452,40 @@ async function appendShotPackageToZip(
     : undefined;
 
   if (shot.exportSettings.includeViewport) {
-    throwIfAborted(signal);
-    emit('rendering', 'Rendering clay viewport…', { indeterminate: true });
-    const viewport = await renderShotFrame(shotProject, shot);
-    addDataUrl(zip, `${resolvedRootFolder}/inputs/viewport_clay.png`, viewport.dataUrl);
-    finishUnit('rendering', 'Clay viewport ready');
+    for (const variant of peopleVariants) {
+      throwIfAborted(signal);
+      emit('rendering', `Rendering clay viewport (${peopleVariantLabel(variant)})…`, { indeterminate: true });
+      const viewport = await renderShotFrame(project, shot, { peopleVariant: variant });
+      addDataUrl(
+        zip,
+        getPeopleVariantPath(`${resolvedRootFolder}/inputs/viewport_clay.png`, variant, peopleMode),
+        viewport.dataUrl,
+      );
+      finishUnit('rendering', `Clay viewport (${peopleVariantLabel(variant)}) ready`);
+    }
   }
 
   // Dual clay + projected when requested and a styled projector exists.
   // Soft-skip projected when no eligible pano so clay-only packages still succeed.
   if (shot.exportSettings.includeProjectedViewport && canUseProjectedAppearance(shotProject)) {
-    throwIfAborted(signal);
-    emit('rendering', 'Rendering projected viewport…', { indeterminate: true });
-    try {
-      const projected = await renderShotProjectedFrame(shotProject, shot);
-      addDataUrl(zip, `${resolvedRootFolder}/inputs/viewport_projected.png`, projected.dataUrl);
-      finishUnit('rendering', 'Projected viewport ready');
-    } catch (error) {
-      throw new ShotPackageError(
-        error instanceof Error
-          ? error.message
-          : 'Projected viewport export failed. Import a styled panorama or disable projected export.',
-      );
+    for (const variant of peopleVariants) {
+      throwIfAborted(signal);
+      emit('rendering', `Rendering projected viewport (${peopleVariantLabel(variant)})…`, { indeterminate: true });
+      try {
+        const projected = await renderShotProjectedFrame(project, shot, { peopleVariant: variant });
+        addDataUrl(
+          zip,
+          getPeopleVariantPath(`${resolvedRootFolder}/inputs/viewport_projected.png`, variant, peopleMode),
+          projected.dataUrl,
+        );
+        finishUnit('rendering', `Projected viewport (${peopleVariantLabel(variant)}) ready`);
+      } catch (error) {
+        throw new ShotPackageError(
+          error instanceof Error
+            ? error.message
+            : 'Projected viewport export failed. Import a styled panorama or disable projected export.',
+        );
+      }
     }
   }
 
@@ -462,43 +502,52 @@ async function appendShotPackageToZip(
   if (shot.exportSettings.includeCameraMoveVideo) {
     const clayMotionSource = resolveClayCameraMovePackageSource(shot, cameraMoveVideoAsset);
     if (clayMotionSource === 'encode') {
-      // Always generate deterministic Resolve-safe clay MP4 when keyframes exist.
-      // Do not reuse a stored Quick Preview / legacy MediaRecorder asset beside a fresh projected encode.
-      throwIfAborted(signal);
-      emit('encoding', 'Encoding clay camera move…', { indeterminate: true });
-      try {
-        const video = await renderShotCameraMoveMp4(shotProject, shot, {
-          mode: 'render',
-          resolutionPreset: '1080p',
-          frameRate: 30,
-          appearance: 'clay',
-          includeDataUrl: false,
-          signal,
-          onProgress: (progress) => {
-            const info = normalizeCameraMoveProgress(progress);
-            emit('encoding', info.message || 'Encoding clay camera move…', {
-              unitFraction: info.progress,
-            });
-          },
-        });
-        zip.file(
-          `${resolvedRootFolder}/inputs/viewport_clay_motion.mp4`,
-          await video.blob.arrayBuffer(),
-        );
-        finishUnit('encoding', 'Clay camera-move video ready');
-      } catch (error) {
-        if (isPackageExportCancelled(error)) throw error;
-        throw new ShotPackageError(
-          error instanceof Error
-            ? error.message
-            : 'Camera move MP4 export failed. Try Chrome or Edge, or disable “Camera move MP4” in export settings.',
-        );
+      for (const variant of peopleVariants) {
+        throwIfAborted(signal);
+        emit('encoding', `Encoding clay camera move (${peopleVariantLabel(variant)})…`, { indeterminate: true });
+        try {
+          const video = await renderShotCameraMoveMp4(project, shot, {
+            mode: 'render',
+            resolutionPreset: '1080p',
+            frameRate: 30,
+            appearance: 'clay',
+            peopleVariant: variant,
+            includeDataUrl: false,
+            signal,
+            onProgress: (progress) => {
+              const info = normalizeCameraMoveProgress(progress);
+              emit('encoding', info.message || `Encoding clay camera move (${peopleVariantLabel(variant)})…`, {
+                unitFraction: info.progress,
+              });
+            },
+          });
+          zip.file(
+            getPeopleVariantPath(`${resolvedRootFolder}/inputs/viewport_clay_motion.mp4`, variant, peopleMode),
+            await video.blob.arrayBuffer(),
+          );
+          finishUnit('encoding', `Clay camera move (${peopleVariantLabel(variant)}) ready`);
+        } catch (error) {
+          if (isPackageExportCancelled(error)) throw error;
+          throw new ShotPackageError(
+            error instanceof Error
+              ? error.message
+              : 'Camera move MP4 export failed. Try Chrome or Edge, or disable Camera move MP4.',
+          );
+        }
       }
-    } else if (clayMotionSource === 'copy' && cameraMoveVideoAsset?.uri) {
-      // Legacy fallback only when rerendering is impossible (no renderable keyframes).
+    // Legacy fallback only when rerendering is impossible; a stored people render cannot create a clean plate.
+    } else if (
+      clayMotionSource === 'copy'
+      && cameraMoveVideoAsset?.uri
+      && peopleVariants.includes('with_people')
+    ) {
       throwIfAborted(signal);
       emit('packaging', 'Adding clay camera-move video…');
-      addBinaryToZip(zip, `${resolvedRootFolder}/inputs/viewport_clay_motion.mp4`, cameraMoveVideoAsset.uri);
+      addBinaryToZip(
+        zip,
+        getPeopleVariantPath(`${resolvedRootFolder}/inputs/viewport_clay_motion.mp4`, 'with_people', peopleMode),
+        cameraMoveVideoAsset.uri,
+      );
       finishUnit('packaging', 'Clay camera-move video added');
     }
   }
@@ -508,36 +557,39 @@ async function appendShotPackageToZip(
     && canUseProjectedAppearance(shotProject)
     && hasRenderableCameraMove(shot.cameraKeyframes)
   ) {
-    throwIfAborted(signal);
-    emit('encoding', 'Encoding projected camera move…', { indeterminate: true });
-    try {
-      const video = await renderShotCameraMoveMp4(shotProject, shot, {
-        mode: 'render',
-        resolutionPreset: '1080p',
-        frameRate: 30,
-        appearance: 'projected',
-        occlusionFilter: 'fast',
-        includeDataUrl: false,
-        signal,
-        onProgress: (progress) => {
-          const info = normalizeCameraMoveProgress(progress);
-          emit('encoding', info.message || 'Encoding projected camera move…', {
-            unitFraction: info.progress,
-          });
-        },
-      });
-      zip.file(
-        `${resolvedRootFolder}/inputs/viewport_projected_motion.mp4`,
-        await video.blob.arrayBuffer(),
-      );
-      finishUnit('encoding', 'Projected camera-move video ready');
-    } catch (error) {
-      if (isPackageExportCancelled(error)) throw error;
-      throw new ShotPackageError(
-        error instanceof Error
-          ? error.message
-          : 'Projected camera-move MP4 failed. Import a styled panorama or disable projected motion.',
-      );
+    for (const variant of peopleVariants) {
+      throwIfAborted(signal);
+      emit('encoding', `Encoding projected camera move (${peopleVariantLabel(variant)})…`, { indeterminate: true });
+      try {
+        const video = await renderShotCameraMoveMp4(project, shot, {
+          mode: 'render',
+          resolutionPreset: '1080p',
+          frameRate: 30,
+          appearance: 'projected',
+          peopleVariant: variant,
+          occlusionFilter: 'fast',
+          includeDataUrl: false,
+          signal,
+          onProgress: (progress) => {
+            const info = normalizeCameraMoveProgress(progress);
+            emit('encoding', info.message || `Encoding projected camera move (${peopleVariantLabel(variant)})…`, {
+              unitFraction: info.progress,
+            });
+          },
+        });
+        zip.file(
+          getPeopleVariantPath(`${resolvedRootFolder}/inputs/viewport_projected_motion.mp4`, variant, peopleMode),
+          await video.blob.arrayBuffer(),
+        );
+        finishUnit('encoding', `Projected camera move (${peopleVariantLabel(variant)}) ready`);
+      } catch (error) {
+        if (isPackageExportCancelled(error)) throw error;
+        throw new ShotPackageError(
+          error instanceof Error
+            ? error.message
+            : 'Projected camera-move MP4 failed. Import a styled panorama or disable projected motion.',
+        );
+      }
     }
   }
 
@@ -549,24 +601,30 @@ async function appendShotPackageToZip(
     emit('preparing', 'Loading figure model…', { indeterminate: true });
     await ensureHumanMannequinModel();
     for (let index = 0; index < cameraMoveReferenceFrames.length; index += 1) {
-      throwIfAborted(signal);
       const frame = cameraMoveReferenceFrames[index];
-      emit(
-        'rendering',
-        `Rendering clay reference frame ${index + 1} of ${cameraMoveReferenceFrames.length}…`,
-        { unitFraction: 0, indeterminate: true },
-      );
-      const clay = await renderViewportClay(
-        shotProject,
-        frame.camera,
-        shot.exportSettings.width,
-        shot.exportSettings.height,
-      );
-      addDataUrl(zip, `${resolvedRootFolder}/inputs/camera_move/clay_${frame.id}.png`, clay.dataUrl);
-      finishUnit(
-        'rendering',
-        `Clay reference frame ${index + 1} of ${cameraMoveReferenceFrames.length} ready`,
-      );
+      for (const variant of peopleVariants) {
+        throwIfAborted(signal);
+        emit(
+          'rendering',
+          `Rendering clay reference frame ${index + 1} of ${cameraMoveReferenceFrames.length} (${peopleVariantLabel(variant)})…`,
+          { unitFraction: 0, indeterminate: true },
+        );
+        const clay = await renderViewportClay(
+          projectForVariantAtTime(variant, frame.timeSeconds),
+          frame.camera,
+          shot.exportSettings.width,
+          shot.exportSettings.height,
+        );
+        addDataUrl(
+          zip,
+          getPeopleVariantPath(`${resolvedRootFolder}/inputs/camera_move/clay_${frame.id}.png`, variant, peopleMode),
+          clay.dataUrl,
+        );
+        finishUnit(
+          'rendering',
+          `Clay reference frame ${index + 1} of ${cameraMoveReferenceFrames.length} (${peopleVariantLabel(variant)}) ready`,
+        );
+      }
     }
   }
 
@@ -578,31 +636,37 @@ async function appendShotPackageToZip(
     : [];
   if (projectedMoveFrames.length > 0) {
     for (let index = 0; index < projectedMoveFrames.length; index += 1) {
-      throwIfAborted(signal);
       const frame = projectedMoveFrames[index];
-      emit(
-        'rendering',
-        `Rendering projected reference frame ${index + 1} of ${projectedMoveFrames.length}…`,
-        { indeterminate: true },
-      );
-      try {
-        const projected = await renderViewportProjected(
-          shotProject,
-          frame.camera,
-          shot.exportSettings.width,
-          shot.exportSettings.height,
-        );
-        addDataUrl(zip, `${resolvedRootFolder}/inputs/camera_move/projected_${frame.id}.png`, projected.dataUrl);
-        finishUnit(
+      for (const variant of peopleVariants) {
+        throwIfAborted(signal);
+        emit(
           'rendering',
-          `Projected reference frame ${index + 1} of ${projectedMoveFrames.length} ready`,
+          `Rendering projected reference frame ${index + 1} of ${projectedMoveFrames.length} (${peopleVariantLabel(variant)})…`,
+          { indeterminate: true },
         );
-      } catch (error) {
-        throw new ShotPackageError(
-          error instanceof Error
-            ? error.message
-            : 'Projected camera-move frames failed. Disable projected move frames or import a styled panorama.',
-        );
+        try {
+          const projected = await renderViewportProjected(
+            projectForVariantAtTime(variant, frame.timeSeconds),
+            frame.camera,
+            shot.exportSettings.width,
+            shot.exportSettings.height,
+          );
+          addDataUrl(
+            zip,
+            getPeopleVariantPath(`${resolvedRootFolder}/inputs/camera_move/projected_${frame.id}.png`, variant, peopleMode),
+            projected.dataUrl,
+          );
+          finishUnit(
+            'rendering',
+            `Projected reference frame ${index + 1} of ${projectedMoveFrames.length} (${peopleVariantLabel(variant)}) ready`,
+          );
+        } catch (error) {
+          throw new ShotPackageError(
+            error instanceof Error
+              ? error.message
+              : 'Projected camera-move frames failed. Disable projected move frames or import a styled panorama.',
+          );
+        }
       }
     }
   }

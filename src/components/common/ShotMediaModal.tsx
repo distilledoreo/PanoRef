@@ -8,6 +8,16 @@ import {
   normalizeShotTitle,
 } from '../../domain/shotIdentity';
 import { resolveShotMedia, ShotMediaItem } from '../../domain/shotMedia';
+import {
+  hasShotStillViewVariants,
+  listAvailableShotStillViews,
+  resolvePreferredShotStillView,
+  resolveShotStillView,
+  shotStillViewKey,
+  type ShotStillAppearance,
+  type ShotStillPeople,
+  type ShotStillViewSelection,
+} from '../../domain/shotStillViews';
 import { LocationProject, Shot } from '../../domain/types';
 import { downloadDataUrl } from '../../engine/projectIO';
 
@@ -41,6 +51,8 @@ export function ShotMediaModal({
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftProductionId, setDraftProductionId] = useState('');
   const [draftTitle, setDraftTitle] = useState('');
+  const [stillAppearance, setStillAppearance] = useState<ShotStillAppearance>('clay');
+  const [stillPeople, setStillPeople] = useState<ShotStillPeople>('with_people');
 
   const shotIndex = shots.findIndex((item) => item.id === shotId);
   const shot = shotIndex >= 0 ? shots[shotIndex] : undefined;
@@ -49,12 +61,46 @@ export function ShotMediaModal({
     [project, shot],
   );
   const activeMedia = mediaItems.find((item) => item.id === activeMediaId) ?? mediaItems[0];
+  const stillSelection = useMemo<ShotStillViewSelection>(
+    () => ({ appearance: stillAppearance, people: stillPeople }),
+    [stillAppearance, stillPeople],
+  );
+  const availableStillViews = useMemo(
+    () => (shot ? listAvailableShotStillViews(project, shot) : []),
+    [project, shot],
+  );
+  const showStillViewToggles = Boolean(
+    shot
+    && activeMedia?.source === 'captured_still'
+    && hasShotStillViewVariants(project, shot),
+  );
+  const activeStillView = shot && activeMedia?.source === 'captured_still'
+    ? resolvePreferredShotStillView(project, shot, stillSelection)
+    : undefined;
+  const displayImageSrc = activeStillView?.asset.uri
+    ?? (activeMedia?.kind === 'image' ? activeMedia.asset.uri : undefined);
+  const displayDownloadAsset = activeStillView?.asset
+    ?? (activeMedia?.kind === 'image' || activeMedia?.kind === 'video' ? activeMedia.asset : undefined);
 
   const pauseVideo = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     video.pause();
   }, []);
+
+  const syncStillViewForShot = useCallback((nextShot: Shot) => {
+    const preferred = resolvePreferredShotStillView(project, nextShot, {
+      appearance: stillAppearance,
+      people: stillPeople,
+    });
+    if (preferred) {
+      setStillAppearance(preferred.selection.appearance);
+      setStillPeople(preferred.selection.people);
+      return;
+    }
+    setStillAppearance('clay');
+    setStillPeople('with_people');
+  }, [project, stillAppearance, stillPeople]);
 
   const goToShot = useCallback((delta: number) => {
     if (shotIndex < 0) return;
@@ -64,8 +110,9 @@ export function ShotMediaModal({
     const nextShot = shots[nextIndex];
     const nextMedia = resolveShotMedia(project, nextShot);
     setActiveMediaId(nextMedia[0]?.id);
+    syncStillViewForShot(nextShot);
     onNavigateShot?.(nextShot.id);
-  }, [onNavigateShot, pauseVideo, project, shotIndex, shots]);
+  }, [onNavigateShot, pauseVideo, project, shotIndex, shots, syncStillViewForShot]);
 
   useEffect(() => {
     if (!open || !shot) return;
@@ -76,7 +123,22 @@ export function ShotMediaModal({
     const items = resolveShotMedia(project, shot);
     const preferred = items.find((item) => item.id === initialMediaId) ?? items[0];
     setActiveMediaId(preferred?.id);
+    const still = resolvePreferredShotStillView(project, shot, {
+      appearance: 'clay',
+      people: 'with_people',
+    });
+    setStillAppearance(still?.selection.appearance ?? 'clay');
+    setStillPeople(still?.selection.people ?? 'with_people');
   }, [open, shot?.id, initialMediaId, project]);
+
+  useEffect(() => {
+    if (!open || !shot || !showStillViewToggles) return;
+    if (resolveShotStillView(project, shot, stillSelection)) return;
+    const fallback = resolvePreferredShotStillView(project, shot, stillSelection);
+    if (!fallback) return;
+    setStillAppearance(fallback.selection.appearance);
+    setStillPeople(fallback.selection.people);
+  }, [open, project, shot, showStillViewToggles, stillSelection]);
 
   useEffect(() => {
     if (!open) return;
@@ -143,6 +205,10 @@ export function ShotMediaModal({
     pauseVideo();
     setActiveMediaId(item.id);
   };
+
+  const canSelectStillView = (selection: ShotStillViewSelection) => (
+    availableStillViews.some((view) => shotStillViewKey(view) === shotStillViewKey(selection))
+  );
 
   const handleTouchStart = (event: React.TouchEvent) => {
     touchStartX.current = event.changedTouches[0]?.clientX ?? null;
@@ -248,11 +314,12 @@ export function ShotMediaModal({
               preload="metadata"
               className="max-h-full max-w-full object-contain"
             />
-          ) : activeMedia?.kind === 'image' ? (
+          ) : displayImageSrc ? (
             <img
-              src={activeMedia.asset.uri}
+              src={displayImageSrc}
               alt={shot.name}
               className="max-h-full max-w-full object-contain"
+              data-shot-still-view={activeStillView ? shotStillViewKey(activeStillView.selection) : undefined}
             />
           ) : (
             <p className="text-sm text-white/55">No capture stored for this shot yet.</p>
@@ -278,6 +345,72 @@ export function ShotMediaModal({
           </button>
         </div>
 
+        {showStillViewToggles && (
+          <div
+            className="mx-auto mt-3 flex max-w-5xl flex-wrap items-center justify-center gap-3"
+            data-shot-still-view-toggles
+          >
+            <ToggleGroup
+              label="Projection"
+              value={stillAppearance}
+              options={[
+                {
+                  value: 'clay' as const,
+                  label: 'Clay',
+                  disabled: !canSelectStillView({ appearance: 'clay', people: stillPeople })
+                    && !availableStillViews.some((view) => view.appearance === 'clay'),
+                },
+                {
+                  value: 'projected' as const,
+                  label: 'Projected',
+                  disabled: !canSelectStillView({ appearance: 'projected', people: stillPeople })
+                    && !availableStillViews.some((view) => view.appearance === 'projected'),
+                },
+              ]}
+              onChange={(value) => {
+                const next = value as ShotStillAppearance;
+                if (canSelectStillView({ appearance: next, people: stillPeople })) {
+                  setStillAppearance(next);
+                  return;
+                }
+                const fallback = availableStillViews.find((view) => view.appearance === next);
+                if (!fallback) return;
+                setStillAppearance(fallback.appearance);
+                setStillPeople(fallback.people);
+              }}
+            />
+            <ToggleGroup
+              label="People"
+              value={stillPeople}
+              options={[
+                {
+                  value: 'with_people' as const,
+                  label: 'People',
+                  disabled: !canSelectStillView({ appearance: stillAppearance, people: 'with_people' })
+                    && !availableStillViews.some((view) => view.people === 'with_people'),
+                },
+                {
+                  value: 'clean_plate' as const,
+                  label: 'Clean plate',
+                  disabled: !canSelectStillView({ appearance: stillAppearance, people: 'clean_plate' })
+                    && !availableStillViews.some((view) => view.people === 'clean_plate'),
+                },
+              ]}
+              onChange={(value) => {
+                const next = value as ShotStillPeople;
+                if (canSelectStillView({ appearance: stillAppearance, people: next })) {
+                  setStillPeople(next);
+                  return;
+                }
+                const fallback = availableStillViews.find((view) => view.people === next);
+                if (!fallback) return;
+                setStillAppearance(fallback.appearance);
+                setStillPeople(fallback.people);
+              }}
+            />
+          </div>
+        )}
+
         {mediaItems.length > 1 && (
           <div className="mx-auto mt-3 flex max-w-5xl flex-wrap justify-center gap-2">
             {mediaItems.map((item) => (
@@ -301,10 +434,10 @@ export function ShotMediaModal({
       <div className="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3">
         <button
           type="button"
-          disabled={!activeMedia}
+          disabled={!displayDownloadAsset}
           onClick={() => {
-            if (!activeMedia) return;
-            downloadDataUrl(activeMedia.asset.uri, activeMedia.asset.name);
+            if (!displayDownloadAsset) return;
+            downloadDataUrl(displayDownloadAsset.uri, displayDownloadAsset.name);
           }}
           className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-white transition hover:bg-white/10 disabled:opacity-40"
         >
@@ -327,6 +460,42 @@ export function ShotMediaModal({
 
   if (typeof document === 'undefined') return modal;
   return createPortal(modal, document.body);
+}
+
+function ToggleGroup<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Array<{ value: T; label: string; disabled?: boolean }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="inline-flex items-center gap-2" role="group" aria-label={label}>
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-white/45">{label}</span>
+      <div className="inline-flex rounded-full border border-white/15 bg-black/40 p-0.5">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={option.disabled}
+            aria-pressed={value === option.value}
+            onClick={() => onChange(option.value)}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-35 ${
+              value === option.value
+                ? 'bg-white text-zinc-900'
+                : 'text-white/75 hover:bg-white/10'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

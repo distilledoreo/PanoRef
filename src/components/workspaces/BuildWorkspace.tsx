@@ -34,7 +34,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { Euler, ObjectSurfaceStyle, SceneObject, SceneObjectType, Vec3 } from '../../domain/types';
+import { Euler, ObjectSurfaceStyle, SceneObject, SceneObjectType, StagingRole, Vec3 } from '../../domain/types';
 import type { GizmoMode } from '../../engine/transformGizmo';
 import { objectDisplayName } from '../../domain/defaults';
 import { getLatestGrayboxPano, getPanoAsset, listGrayboxPanos } from '../../domain/selectors';
@@ -72,6 +72,7 @@ import {
   defaultSolidColorForObject,
   resolveSurfaceStyle,
 } from '../../engine/sceneObjects';
+import { getSceneObjectStagingRole } from '../../engine/shotSceneState';
 import { resolveWorkspacePrimaryAction } from '../../engine/workflow';
 import { BuildMode, useContinuityStore } from '../../state/useContinuityStore';
 import { useThemeStore } from '../../state/useThemeStore';
@@ -1320,6 +1321,17 @@ function PrecisionControls({
           )}
         </div>
       )}
+      <Field label="Staging role" hint="People are hidden on clean-plate exports. Any unlocked object can still be staged per shot.">
+        <Select
+          value={getSceneObjectStagingRole(object)}
+          onChange={(event) => onChange({ stagingRole: event.target.value as StagingRole }, 'step')}
+          data-object-staging-role
+        >
+          <option value="set">Set geometry</option>
+          <option value="prop">Movable prop</option>
+          <option value="person">Person / character</option>
+        </Select>
+      </Field>
       <Field label="Surface">
         <Select
           value={surfaceStyle}

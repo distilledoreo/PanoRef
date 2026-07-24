@@ -37,8 +37,11 @@ export function getSceneObjectStagingRole(
   return object.type === 'human_dummy' ? 'person' : 'set';
 }
 
-export function canStageObjectPerShot(object: Pick<SceneObject, 'type' | 'stagingRole'>): boolean {
-  return getSceneObjectStagingRole(object) !== 'set';
+export function canStageObjectPerShot(object: Pick<SceneObject, 'type' | 'stagingRole' | 'locked'>): boolean {
+  if (object.locked) return false;
+  // Sun markers are helpers, not shot dressing.
+  if (object.type === 'sun_marker') return false;
+  return true;
 }
 
 export function resolveSceneObjectsForShot(
@@ -71,6 +74,47 @@ export function resolveProjectForShot(
     scene: {
       ...project.scene,
       objects: resolveSceneObjectsForShot(project, shot, options),
+    },
+  };
+}
+
+/**
+ * Resolve a shot scene for camera-move export with object animation.
+ * Includes any object visible at start or end so visibility can snap mid-move.
+ */
+export function resolveProjectForAnimatedCameraMove(
+  project: LocationProject,
+  shot: Pick<Shot, 'objectOverrides' | 'cameraKeyframes'>,
+  options: ResolveShotSceneOptions = {},
+): LocationProject {
+  const sorted = [...(shot.cameraKeyframes ?? [])].sort((a, b) => a.timeSeconds - b.timeSeconds);
+  const startOverrides = sorted[0]?.objectOverrides;
+  const endOverrides = sorted[sorted.length - 1]?.objectOverrides;
+  const fallback = shot.objectOverrides ?? {};
+  // Explicit snapshots (including {}) win; only legacy undefined falls back.
+  const start = startOverrides !== undefined ? startOverrides : fallback;
+  const end = endOverrides !== undefined ? endOverrides : fallback;
+
+  const objects = project.scene.objects.map((object) => {
+    const stagingRole = getSceneObjectStagingRole(object);
+    const startOverride = start[object.id];
+    const endOverride = end[object.id];
+    const startVisible = startOverride?.visible ?? object.visible;
+    const endVisible = endOverride?.visible ?? object.visible;
+    const hiddenByPeople = Boolean(options.hidePeople && stagingRole === 'person');
+    return {
+      ...object,
+      stagingRole,
+      transform: cloneTransform(startOverride?.transform ?? endOverride?.transform ?? object.transform),
+      visible: hiddenByPeople ? false : (startVisible || endVisible),
+    };
+  });
+
+  return {
+    ...project,
+    scene: {
+      ...project.scene,
+      objects,
     },
   };
 }

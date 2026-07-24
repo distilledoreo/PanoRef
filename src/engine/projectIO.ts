@@ -149,6 +149,11 @@ function normalizeShotObjectOverrides(value: unknown): NonNullable<Shot['objectO
   return result;
 }
 
+function normalizePeopleExportMode(value: unknown): Shot['exportSettings']['peopleExportMode'] {
+  if (value === 'clean_plate' || value === 'both') return value;
+  return 'with_people';
+}
+
 function normalizeShot(shot: Shot): Shot {
   const legacyExportSettings = shot.exportSettings as Shot['exportSettings'] & {
     includeContinuityControlView?: boolean;
@@ -164,10 +169,14 @@ function normalizeShot(shot: Shot): Shot {
   return {
     ...shot,
     productionShotId: normalizeProductionShotId(shot.productionShotId),
-    cameraKeyframes: shot.cameraKeyframes ?? [],
+    cameraKeyframes: (shot.cameraKeyframes ?? []).map((keyframe) => ({
+      ...keyframe,
+      objectOverrides: normalizeShotObjectOverrides(keyframe.objectOverrides),
+    })),
     objectOverrides: normalizeShotObjectOverrides(shot.objectOverrides),
     exportSettings: {
       ...exportSettings,
+      peopleExportMode: normalizePeopleExportMode(legacyExportSettings.peopleExportMode),
       includeAiResultFrame: legacyExportSettings.includeAiResultFrame ?? legacyExportSettings.includeSkinnedFrame ?? true,
       includeCameraMoveVideo: legacyExportSettings.includeCameraMoveVideo ?? true,
       includeCameraMoveReferenceFrames: legacyExportSettings.includeCameraMoveReferenceFrames ?? true,
