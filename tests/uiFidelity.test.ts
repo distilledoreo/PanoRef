@@ -328,15 +328,19 @@ describe('ui revamp fidelity surfaces', () => {
     expect(styles).toContain('--filmstrip-overlay');
   });
 
-  it('renders shots viewport in camera-framing mode without build selection chrome', () => {
+  it('lets Shots move scene objects without exposing the full Build editor', () => {
     const shots = readFileSync(new URL('../src/components/workspaces/ShotsWorkspace.tsx', import.meta.url), 'utf8');
     const viewport = readFileSync(new URL('../src/components/viewers/SceneViewport.tsx', import.meta.url), 'utf8');
     expect(shots).toContain('shotFraming={shotFraming}');
-    expect(shots).not.toContain('selectedObjectId');
-    expect(shots).not.toContain('onSelectObject');
-    expect(viewport).toContain('if (!scene || shotFramingRef.current');
+    expect(shots).toContain('selectedObjectIds={selectedObjectIds}');
+    expect(shots).toContain('onSelectObject={selectObject}');
+    expect(shots).toContain('onMoveObjectInSpace');
+    expect(shots).toContain('data-shots-object-editing');
+    expect(shots).toContain('data-shots-object-edit-toggle');
+    expect(viewport).toContain('allowObjectEditingWhileFraming');
+    expect(viewport).toContain('if (framing && !allowObjectEditingWhileFramingRef.current) return;');
     expect(viewport).toContain('showSceneGuides: shotFraming ? false : showSceneGuides');
-    expect(viewport).toContain('if (framing) return;');
+    expect(viewport).toContain('if (framing?.flyActive && event.button === 0 && !allowObjectEditingWhileFramingRef.current)');
   });
 
   it('isolates build placement to explicit SceneViewport props instead of global build mode', () => {

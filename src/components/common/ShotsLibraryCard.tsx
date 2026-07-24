@@ -19,6 +19,7 @@ export function ShotsLibraryCard({
   onRename,
   onRequestDelete,
 }: {
+  key?: React.Key;
   project: LocationProject;
   shot: Shot;
   selected: boolean;

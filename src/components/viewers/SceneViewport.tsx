@@ -129,6 +129,7 @@ export function SceneViewport({
   originPlacementActive = false,
   showSceneGuides = false,
   showTransformGizmo = false,
+  allowObjectEditingWhileFraming = false,
   gizmoMode = 'translate',
   snapToGrid = true,
   freeCameraActive = false,
@@ -160,6 +161,8 @@ export function SceneViewport({
   originPlacementActive?: boolean;
   showSceneGuides?: boolean;
   showTransformGizmo?: boolean;
+  /** Lets a shot viewfinder use the existing object-selection and move gizmo. */
+  allowObjectEditingWhileFraming?: boolean;
   gizmoMode?: GizmoMode;
   snapToGrid?: boolean;
   /** Opt-in Build navigation mode; the default viewport remains orbit/select. */
@@ -296,6 +299,7 @@ export function SceneViewport({
   const selectionOutlineRefs = useRef<THREE.BoxHelper[]>([]);
   const showSceneGuidesRef = useRef(showSceneGuides);
   const showTransformGizmoRef = useRef(showTransformGizmo);
+  const allowObjectEditingWhileFramingRef = useRef(allowObjectEditingWhileFraming);
   const gizmoModeRef = useRef(gizmoMode);
   const originPlacementActiveRef = useRef(originPlacementActive);
 
@@ -309,6 +313,7 @@ export function SceneViewport({
   shotFramingRef.current = shotFraming;
   showSceneGuidesRef.current = showSceneGuides;
   showTransformGizmoRef.current = showTransformGizmo;
+  allowObjectEditingWhileFramingRef.current = allowObjectEditingWhileFraming;
   gizmoModeRef.current = gizmoMode;
   originPlacementActiveRef.current = originPlacementActive;
   callbacksRef.current = {
@@ -339,7 +344,7 @@ export function SceneViewport({
 
   const syncTransformGizmo = useCallback(() => {
     const scene = sceneRef.current;
-    if (!scene || shotFramingRef.current || !showTransformGizmoRef.current) {
+    if (!scene || (shotFramingRef.current && !allowObjectEditingWhileFramingRef.current) || !showTransformGizmoRef.current) {
       clearTransformGizmo();
       return;
     }
@@ -774,7 +779,7 @@ export function SceneViewport({
 
     const onPointerDown = (event: PointerEvent) => {
       const framing = shotFramingRef.current;
-      if (framing?.flyActive && event.button === 0) {
+      if (framing?.flyActive && event.button === 0 && !allowObjectEditingWhileFramingRef.current) {
         dragRef.current = {
           kind: 'shot_framing',
           x: event.clientX,
@@ -785,7 +790,10 @@ export function SceneViewport({
         return;
       }
 
-      if (framing) return;
+      // The Shots workspace may opt into scene-object editing while retaining
+      // its shot-framing camera. In that case, object selection and gizmo
+      // drags take priority; fly-camera mode still owns primary drags above.
+      if (framing && !allowObjectEditingWhileFramingRef.current) return;
 
       if (freeCameraActiveRef.current && event.button === 0) {
         event.preventDefault();
@@ -814,6 +822,7 @@ export function SceneViewport({
         orbitRef.current,
         sceneRef.current,
         snapToGridRef.current,
+        Boolean(shotFramingRef.current),
       );
       if (!pointer) return;
       const floorPoint = pointer.floorPoint;
@@ -897,6 +906,7 @@ export function SceneViewport({
             sceneRef.current,
             snapToGridRef.current,
             needsFloorPoint,
+            Boolean(shotFramingRef.current),
           )
         : undefined;
       if (placementTypeRef.current && pointer?.floorPoint) {
@@ -1873,9 +1883,10 @@ function getPointerState(
   scene: THREE.Scene | null,
   snapToGrid: boolean,
   resolveFloorPoint = true,
+  preserveCameraPose = false,
 ) {
   if (!camera) return undefined;
-  updateCamera(camera, orbit);
+  if (!preserveCameraPose) updateCamera(camera, orbit);
   camera.updateMatrixWorld(true);
 
   const bounds = element.getBoundingClientRect();

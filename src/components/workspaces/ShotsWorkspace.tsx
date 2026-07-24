@@ -9,12 +9,13 @@ import {
   Globe,
   Image as ImageIcon,
   KeyRound,
+  Move3D,
   Plus,
   Settings2,
   Trash2,
   X,
 } from 'lucide-react';
-import { CameraData, Shot, ShotStatus } from '../../domain/types';
+import { CameraData, Shot, ShotStatus, Vec3 } from '../../domain/types';
 import {
   DEFAULT_CAMERA_LENS_MM,
   DEFAULT_CAMERA_HEIGHT_METERS,
@@ -122,6 +123,7 @@ export function ShotsWorkspace() {
   const {
     project,
     selectedShotId,
+    selectedObjectIds,
     addCamera,
     selectShot,
     updateShot,
@@ -134,8 +136,13 @@ export function ShotsWorkspace() {
     attachViewportRenderToShot,
     setWorkspace,
     setActivePano,
+    selectObject,
+    translateSelectedObjectsBy,
+    beginBuildHistoryBatch,
+    endBuildHistoryBatch,
   } = useContinuityStore();
   const selectedShot = project.shots.find((shot) => shot.id === selectedShotId) ?? project.shots[0];
+  const selectedObject = project.scene.objects.find((object) => object.id === selectedObjectIds.at(-1));
   const linkedPano = selectedShot ? resolveShotLinkedPano(project, selectedShot) : undefined;
   const linkedAsset = linkedPano ? project.assets.assets[linkedPano.imageAssetId] : undefined;
   const draftCameraRef = useRef<CameraData | undefined>();
@@ -161,6 +168,7 @@ export function ShotsWorkspace() {
   const [mediaModalShotId, setMediaModalShotId] = useState<string | null>(null);
   const [captureMode, setCaptureMode] = useState<CaptureMode>('still');
   const [appearance, setAppearance] = useState<'clay' | 'projected'>('clay');
+  const [objectEditing, setObjectEditing] = useState(false);
   const [landFlash, setLandFlash] = useState(false);
   /** Pending move length — applied when end is captured (and updates existing end if present). */
   const [videoDurationSeconds, setVideoDurationSeconds] = useState(DEFAULT_CAMERA_MOVE_DURATION_SECONDS);
@@ -818,6 +826,7 @@ export function ShotsWorkspace() {
 
   useEffect(() => {
     setCaptureMode('still');
+    setObjectEditing(false);
     setLibraryOpen(false);
     setVideoPhase('record');
     if (selectedShot) {
@@ -905,11 +914,42 @@ export function ShotsWorkspace() {
           <SceneViewport
             project={project}
             selectedShotId={selectedShot?.id}
+            selectedObjectIds={selectedObjectIds}
             shotFraming={shotFraming}
             appearance={appearance}
+            allowObjectEditingWhileFraming={objectEditing}
+            showTransformGizmo={Boolean(objectEditing && selectedObject && !selectedObject.locked)}
+            gizmoMode="translate"
+            onSelectObject={selectObject}
+            onMoveObjectInSpace={(_id, position) => {
+              if (!selectedObject) return;
+              translateSelectedObjectsBy([
+                position[0] - selectedObject.transform.position[0],
+                position[1] - selectedObject.transform.position[1],
+                position[2] - selectedObject.transform.position[2],
+              ] as Vec3, { history: 'batch' });
+            }}
+            onEditBatchStart={beginBuildHistoryBatch}
+            onEditBatchEnd={endBuildHistoryBatch}
             minHeightClassName="min-h-0"
             onOcclusionStatusChange={(status) => useContinuityStore.getState().setProjectedOcclusionStatus(status)}
           />
+        </div>
+
+        <div
+          className="pointer-events-none absolute left-4 top-[calc(var(--stage-header-safe)+3.25rem)] z-20"
+          data-shots-object-editing
+        >
+          <div className="rounded-full bg-black/45 px-3 py-1.5 text-xs font-medium text-white/85 backdrop-blur-sm">
+            <Move3D className="mr-1.5 inline h-3.5 w-3.5 text-[var(--accent)]" />
+            {!objectEditing
+              ? 'Move objects to adjust the set'
+              : selectedObject
+              ? selectedObject.locked
+                ? 'Selected object is locked'
+                : 'Drag arrows to move selected object'
+              : 'Tap an object to move it'}
+          </div>
         </div>
 
         {/* Top chrome: shot index + settings */}
@@ -928,6 +968,18 @@ export function ShotsWorkspace() {
                 compact
                 className="border-white/15 bg-black/50 text-white [&_button]:text-white/80 [&_button[aria-pressed=true]]:bg-white [&_button[aria-pressed=true]]:text-zinc-900"
               />
+              <button
+                type="button"
+                onClick={() => setObjectEditing((editing) => !editing)}
+                className={`inline-flex h-10 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold shadow-card backdrop-blur-sm transition ${objectEditing ? 'border-[var(--accent)] bg-[var(--accent)] text-zinc-950' : 'border-white/15 bg-black/45 text-white hover:bg-black/60'}`}
+                aria-pressed={objectEditing}
+                aria-label="Move scene objects"
+                title="Move scene objects"
+                data-shots-object-edit-toggle
+              >
+                <Move3D className="h-4 w-4" />
+                Move objects
+              </button>
               <button
                 type="button"
                 onClick={() => setSettingsOpen(true)}
